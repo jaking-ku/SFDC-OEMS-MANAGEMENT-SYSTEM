@@ -93,6 +93,9 @@
             <a class="nav-item text-text-muted hover:text-primary" onclick="switchTab('history', this)">
                 Work History <span id="historyBadge" class="ml-2 bg-primary text-white text-[9px] font-black px-1.5 py-0.5 hidden">0</span>
             </a>
+	<a class="nav-item text-text-muted hover:text-primary" onclick="switchTab('shipping-board', this)">
+    	<span class="material-symbols-outlined text-sm mr-1">view_kanban</span> TakeOut Board
+	</a>
         </nav>
     </div>
     <div class="flex items-center h-full overflow-x-auto no-scrollbar">
@@ -374,7 +377,44 @@
             <p class="label-base">작업 기록 없음</p>
         </div>
     </section>
+<section id="shipping-board" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+    <div class="border-b border-border pb-4 flex justify-between items-center">
+        <div>
+            <h2 class="text-2xl font-bold text-text-main">반출품 관리 보드</h2>
+            <p class="text-sm text-text-muted mt-1">드래그 앤 드롭으로 반출 상태를 변경하세요.</p>
+        </div>
+        <button class="btn-primary px-4 py-2 text-xs rounded" onclick="promptAddShipping()">
+            <span class="material-symbols-outlined text-sm">add</span> 새 반출품 추가
+        </button>
+    </div>
 
+    <!-- 칸반 보드 영역 -->
+    <div class="flex gap-6 overflow-x-auto pb-4 min-h-[500px]">
+        <!-- 1. 반출 신청 중 -->
+        <div class="flex flex-col w-[300px] shrink-0 bg-surface border border-border rounded-lg p-4 bg-red-50/30 dark:bg-red-900/10" ondrop="dropKanban(event, 'pending')" ondragover="allowDropKanban(event)">
+            <div class="label-base mb-4 px-2 text-primary flex justify-between items-center">
+                <span>반출 신청 중</span> <span id="cnt-pending" class="bg-primary/10 px-2 py-0.5 rounded text-primary">0</span>
+            </div>
+            <div id="col-pending" class="flex-1 space-y-3 overflow-y-auto no-scrollbar min-h-[100px]"></div>
+        </div>
+
+        <!-- 2. 반출 신청 완료 -->
+        <div class="flex flex-col w-[300px] shrink-0 bg-surface border border-border rounded-lg p-4 bg-blue-50/30 dark:bg-blue-900/10" ondrop="dropKanban(event, 'requested')" ondragover="allowDropKanban(event)">
+            <div class="label-base mb-4 px-2 text-blue-600 flex justify-between items-center">
+                <span>반출 신청 완료</span> <span id="cnt-requested" class="bg-blue-100 px-2 py-0.5 rounded text-blue-600">0</span>
+            </div>
+            <div id="col-requested" class="flex-1 space-y-3 overflow-y-auto no-scrollbar min-h-[100px]"></div>
+        </div>
+
+        <!-- 3. 반출 완료 -->
+        <div class="flex flex-col w-[300px] shrink-0 bg-surface border border-border rounded-lg p-4 bg-green-50/30 dark:bg-green-900/10" ondrop="dropKanban(event, 'completed')" ondragover="allowDropKanban(event)">
+            <div class="label-base mb-4 px-2 text-green-600 flex justify-between items-center">
+                <span>반출 완료</span> <span id="cnt-completed" class="bg-green-100 px-2 py-0.5 rounded text-green-600">0</span>
+            </div>
+            <div id="col-completed" class="flex-1 space-y-3 overflow-y-auto no-scrollbar min-h-[100px]"></div>
+        </div>
+    </div>
+</section>
 </main>
 
 <footer class="bg-[#1b1c1c] text-white py-12 px-8 mt-20 transition-none">
@@ -896,7 +936,142 @@ async function autoLocalBackup() {
         }
     }
 }
+// ====== 반출품 칸반 보드 로직 ======
 
+// 1. 초기 데이터 세팅
+if (!localStorage.getItem("shippingData")) localStorage.setItem("shippingData", "[]");
+
+// 2. 카드 추가 프롬프트
+function promptAddShipping() {
+    const machine = prompt("설비 호기를 입력하세요 (예: MDI3504):");
+    if (!machine) return;
+    const item = prompt("반출 품목을 입력하세요 (예: NEW Hand):");
+    if (!item) return;
+    const shipNum = prompt("반출 번호를 입력하세요 (예: 2026-0428-01):");
+    
+    const data = JSON.parse(localStorage.getItem("shippingData") || "[]");
+    const newCard = {
+        id: "SHIP_" + Date.now(),
+        machine: machine.trim(),
+        item: item.trim(),
+        shipNum: shipNum ? shipNum.trim() : "미상",
+        status: "pending", // 기본 상태는 '반출 신청 중'
+        date: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
+    };
+    
+    data.push(newCard);
+    localStorage.setItem("shippingData", JSON.stringify(data));
+    renderKanban();
+    autoMergeAndSave(); // 하이브리드 엔진 동기화 트리거
+}
+
+// 3. 카드 삭제
+function deleteShippingCard(id) {
+    if(!confirm("이 반출 기록을 삭제하시겠습니까?")) return;
+    let data = JSON.parse(localStorage.getItem("shippingData") || "[]");
+    data = data.filter(card => card.id !== id);
+    localStorage.setItem("shippingData", JSON.stringify(data));
+    renderKanban();
+    autoMergeAndSave();
+}
+
+// 4. 화면 렌더링 (카드 그리기 - 드래그 호환성 강화)
+function renderKanban() {
+    const data = JSON.parse(localStorage.getItem("shippingData") || "[]");
+    
+    document.getElementById('col-pending').innerHTML = '';
+    document.getElementById('col-requested').innerHTML = '';
+    document.getElementById('col-completed').innerHTML = '';
+    
+    let cnt = { pending: 0, requested: 0, completed: 0 };
+
+    data.forEach(card => {
+        cnt[card.status]++;
+        const div = document.createElement('div');
+        div.className = "group relative bg-background border border-border p-4 rounded-lg shadow-sm cursor-grab active:cursor-grabbing hover:border-primary transition-colors hover:shadow-md animate-[fadeIn_0.2s_ease-in]";
+        
+        // 💡 드래그 설정 호환성 패치
+        div.draggable = true;
+        div.ondragstart = (e) => { 
+            e.dataTransfer.effectAllowed = "move"; // 이동만 허용
+            e.dataTransfer.setData("text", card.id); // text/plain 대신 text 사용
+            // setTimeout을 주어야 드래그 잔상이 정상적으로 마우스에 따라붙습니다.
+            setTimeout(() => { div.style.opacity = "0.4"; }, 0); 
+        };
+        div.ondragend = () => { 
+            div.style.opacity = "1"; 
+        };
+        
+        div.innerHTML = `
+            <div class="flex items-center gap-2 mb-2 pr-12">
+                <span class="material-symbols-outlined text-text-muted text-[16px]">work</span>
+                <span class="text-sm font-bold text-text-main">${card.machine}</span>
+            </div>
+            <p class="text-sm text-text-main font-medium mb-1 break-words">${card.item}</p>
+            <div class="flex justify-between items-end mt-3">
+                <span class="text-[10px] bg-surface border border-border px-2 py-1 rounded text-text-muted">번호: ${card.shipNum}</span>
+                <span class="text-[10px] text-text-muted">${card.date}</span>
+            </div>
+            <div class="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button class="text-text-muted hover:text-blue-500 bg-surface border border-border rounded p-1 flex items-center justify-center shadow-sm" onclick="editShippingCard('${card.id}')" title="수정">
+                    <span class="material-symbols-outlined text-[14px]">edit</span>
+                </button>
+                <button class="text-text-muted hover:text-red-500 bg-surface border border-border rounded p-1 flex items-center justify-center shadow-sm" onclick="deleteShippingCard('${card.id}')" title="삭제">
+                    <span class="material-symbols-outlined text-[14px]">delete</span>
+                </button>
+            </div>
+        `;
+        document.getElementById(`col-${card.status}`).appendChild(div);
+    });
+
+    document.getElementById('cnt-pending').innerText = cnt.pending;
+    document.getElementById('cnt-requested').innerText = cnt.requested;
+    document.getElementById('cnt-completed').innerText = cnt.completed;
+}
+
+// 4-1. 카드 수정 로직 (동일 유지)
+function editShippingCard(id) {
+    let data = JSON.parse(localStorage.getItem("shippingData") || "[]");
+    const cardIndex = data.findIndex(c => c.id === id);
+    if(cardIndex === -1) return;
+    const card = data[cardIndex];
+    const newMachine = prompt("설비 호기를 수정하세요:", card.machine);
+    if(newMachine === null) return;
+    const newItem = prompt("반출 품목을 수정하세요:", card.item);
+    if(newItem === null) return;
+    const newShipNum = prompt("반출 번호를 수정하세요:", card.shipNum);
+    if(newShipNum === null) return;
+    data[cardIndex].machine = newMachine.trim();
+    data[cardIndex].item = newItem.trim();
+    data[cardIndex].shipNum = newShipNum.trim() || "미상";
+    localStorage.setItem("shippingData", JSON.stringify(data));
+    renderKanban();
+    if(typeof autoMergeAndSave === "function") autoMergeAndSave();
+}
+
+// 5. 드래그 앤 드롭 이벤트 처리 (버그 픽스 완료)
+function allowDropKanban(ev) {
+    ev.preventDefault(); // 기본 이벤트 차단 (필수)
+    ev.dataTransfer.dropEffect = "move"; // 커서 모양 변경
+}
+
+function dropKanban(ev, newStatus) {
+    ev.preventDefault();
+    
+    // 💡 text 데이터만 정확히 잡아내고, 빈 공간이나 엉뚱한 텍스트 드롭 시 방어
+    const id = ev.dataTransfer.getData("text");
+    if (!id || !id.startsWith("SHIP_")) return; 
+
+    let data = JSON.parse(localStorage.getItem("shippingData") || "[]");
+    const cardIndex = data.findIndex(c => c.id === id);
+    
+    if(cardIndex > -1 && data[cardIndex].status !== newStatus) {
+        data[cardIndex].status = newStatus;
+        localStorage.setItem("shippingData", JSON.stringify(data));
+        renderKanban();
+        if(typeof autoMergeAndSave === "function") autoMergeAndSave(); // 하이브리드 엔진 동기화 트리거
+    }
+}
 </script>
 </body>
 </html>
