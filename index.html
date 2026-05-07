@@ -989,17 +989,25 @@ function promptAddShipping() {
     autoMergeAndSave(); // 하이브리드 엔진 동기화 트리거
 }
 
-// 3. 카드 삭제
-function deleteShippingCard(id) {
+// 3. 카드 삭제 (좀비 부활 방지 - Soft Delete 적용)
+function deleteShippingCard(event, id) {
+    event.stopPropagation(); // 클릭 충돌 방지
+    
     if(!confirm("이 반출 기록을 삭제하시겠습니까?")) return;
     let data = JSON.parse(localStorage.getItem("shippingData") || "[]");
-    data = data.filter(card => card.id !== id);
-    localStorage.setItem("shippingData", JSON.stringify(data));
-    renderKanban();
-    autoMergeAndSave();
+    
+    // 💡 카드를 완전히 지우지 않고 상태를 'deleted'로 변경하여 Box 파일에 "이건 지운 거다"라고 기록함
+    const cardIndex = data.findIndex(c => c.id === id);
+    if(cardIndex > -1) {
+        data[cardIndex].status = "deleted";
+        localStorage.setItem("shippingData", JSON.stringify(data));
+        
+        renderKanban();
+        if(typeof autoMergeAndSave === "function") autoMergeAndSave();
+    }
 }
 
-// 4. 화면 렌더링 (카드 그리기 - 드래그 호환성 강화)
+// 4. 화면 렌더링 (삭제된 카드는 숨기기)
 function renderKanban() {
     const data = JSON.parse(localStorage.getItem("shippingData") || "[]");
     
@@ -1010,21 +1018,23 @@ function renderKanban() {
     let cnt = { pending: 0, requested: 0, completed: 0 };
 
     data.forEach(card => {
+        // 💡 상태가 'deleted'인 카드는 화면에 그리지 않고 투명인간 취급!
+        if (card.status === "deleted") return; 
+
+        // 혹시 모를 에러 방지용 안전 장치
+        if (cnt[card.status] === undefined) cnt[card.status] = 0;
         cnt[card.status]++;
+
         const div = document.createElement('div');
         div.className = "group relative bg-background border border-border p-4 rounded-lg shadow-sm cursor-grab active:cursor-grabbing hover:border-primary transition-colors hover:shadow-md animate-[fadeIn_0.2s_ease-in]";
         
-        // 💡 드래그 설정 호환성 패치
         div.draggable = true;
         div.ondragstart = (e) => { 
-            e.dataTransfer.effectAllowed = "move"; // 이동만 허용
-            e.dataTransfer.setData("text", card.id); // text/plain 대신 text 사용
-            // setTimeout을 주어야 드래그 잔상이 정상적으로 마우스에 따라붙습니다.
+            e.dataTransfer.effectAllowed = "move"; 
+            e.dataTransfer.setData("text", card.id); 
             setTimeout(() => { div.style.opacity = "0.4"; }, 0); 
         };
-        div.ondragend = () => { 
-            div.style.opacity = "1"; 
-        };
+        div.ondragend = () => { div.style.opacity = "1"; };
         
         div.innerHTML = `
             <div class="flex items-center gap-2 mb-2 pr-12">
@@ -1037,10 +1047,10 @@ function renderKanban() {
                 <span class="text-[10px] text-text-muted">${card.date}</span>
             </div>
             <div class="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button class="text-text-muted hover:text-blue-500 bg-surface border border-border rounded p-1 flex items-center justify-center shadow-sm" onclick="editShippingCard('${card.id}')" title="수정">
+                <button class="text-text-muted hover:text-blue-500 bg-surface border border-border rounded p-1 flex items-center justify-center shadow-sm" onclick="editShippingCard(event, '${card.id}')" title="수정">
                     <span class="material-symbols-outlined text-[14px]">edit</span>
                 </button>
-                <button class="text-text-muted hover:text-red-500 bg-surface border border-border rounded p-1 flex items-center justify-center shadow-sm" onclick="deleteShippingCard('${card.id}')" title="삭제">
+                <button class="text-text-muted hover:text-red-500 bg-surface border border-border rounded p-1 flex items-center justify-center shadow-sm" onclick="deleteShippingCard(event, '${card.id}')" title="삭제">
                     <span class="material-symbols-outlined text-[14px]">delete</span>
                 </button>
             </div>
