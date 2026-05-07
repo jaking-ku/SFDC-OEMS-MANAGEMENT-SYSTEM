@@ -1063,24 +1063,38 @@ function renderKanban() {
     document.getElementById('cnt-completed').innerText = cnt.completed;
 }
 
-// 4-1. 카드 수정 로직 (동일 유지)
-function editShippingCard(id) {
+// 4-1. 카드 수정 로직 (드래그 충돌 방지 완벽 적용)
+function editShippingCard(event, id) {
+    // 💡 마우스 드래그가 아니라 '클릭'임을 브라우저에 강제 인식시킴
+    event.stopPropagation(); 
+    
     let data = JSON.parse(localStorage.getItem("shippingData") || "[]");
     const cardIndex = data.findIndex(c => c.id === id);
     if(cardIndex === -1) return;
+    
     const card = data[cardIndex];
+    
+    // 기존 데이터를 띄워주어 수정하기 쉽게 처리
     const newMachine = prompt("설비 호기를 수정하세요:", card.machine);
-    if(newMachine === null) return;
+    if(newMachine === null) return; // 취소 누름
+    
     const newItem = prompt("반출 품목을 수정하세요:", card.item);
     if(newItem === null) return;
+    
     const newShipNum = prompt("반출 번호를 수정하세요:", card.shipNum);
     if(newShipNum === null) return;
+    
+    // 수정된 데이터로 덮어쓰기
     data[cardIndex].machine = newMachine.trim();
     data[cardIndex].item = newItem.trim();
     data[cardIndex].shipNum = newShipNum.trim() || "미상";
+    
+    // 저장 및 화면/Box 동기화
     localStorage.setItem("shippingData", JSON.stringify(data));
     renderKanban();
-    if(typeof autoMergeAndSave === "function") autoMergeAndSave();
+    
+    // 하이브리드 엔진이 있다면 즉시 Box 파일에 반영
+    if(typeof autoMergeAndSave === "function") autoMergeAndSave(); 
 }
 
 // 5. 드래그 앤 드롭 이벤트 처리 (버그 픽스 완료)
