@@ -960,12 +960,14 @@ async function autoLocalBackup() {
         }
     }
 }
-// ====== 반출품 칸반 보드 로직 ======
+// ==========================================
+// 🚚 반출품 보드 (Kanban) 통합 패키지 코드
+// ==========================================
 
-// 1. 초기 데이터 세팅
+// 1. 기본 세팅
 if (!localStorage.getItem("shippingData")) localStorage.setItem("shippingData", "[]");
 
-// 2. 카드 추가 프롬프트
+// 2. 새 반출품 추가
 function promptAddShipping() {
     const machine = prompt("설비 호기를 입력하세요 (예: MDI3504):");
     if (!machine) return;
@@ -979,38 +981,60 @@ function promptAddShipping() {
         machine: machine.trim(),
         item: item.trim(),
         shipNum: shipNum ? shipNum.trim() : "미상",
-        status: "pending", // 기본 상태는 '반출 신청 중'
-        date: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
+        status: "pending", 
+        date: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' })
     };
-    
     data.push(newCard);
     localStorage.setItem("shippingData", JSON.stringify(data));
     renderKanban();
-    autoMergeAndSave(); // 하이브리드 엔진 동기화 트리거
+    if(typeof autoMergeAndSave === "function") autoMergeAndSave();
 }
 
-// 3. 카드 삭제 (좀비 부활 방지 - Soft Delete 적용)
-function deleteShippingCard(event, id) {
-    event.stopPropagation(); // 클릭 충돌 방지
+// 3. 카드 삭제 (마우스 다운 즉시 실행 + 소프트 삭제)
+window.deleteShippingCard = function(event, id) {
+    event.preventDefault(); // 드래그 시작 원천 차단!
+    event.stopPropagation(); 
     
     if(!confirm("이 반출 기록을 삭제하시겠습니까?")) return;
     let data = JSON.parse(localStorage.getItem("shippingData") || "[]");
-    
-    // 💡 카드를 완전히 지우지 않고 상태를 'deleted'로 변경하여 Box 파일에 "이건 지운 거다"라고 기록함
     const cardIndex = data.findIndex(c => c.id === id);
     if(cardIndex > -1) {
         data[cardIndex].status = "deleted";
         localStorage.setItem("shippingData", JSON.stringify(data));
-        
         renderKanban();
         if(typeof autoMergeAndSave === "function") autoMergeAndSave();
     }
-}
+};
 
-// 4. 화면 렌더링 (삭제된 카드는 숨기기)
-function renderKanban() {
-    const data = JSON.parse(localStorage.getItem("shippingData") || "[]");
+// 4. 카드 수정 (마우스 다운 즉시 실행)
+window.editShippingCard = function(event, id) {
+    event.preventDefault(); // 드래그 시작 원천 차단!
+    event.stopPropagation(); 
     
+    let data = JSON.parse(localStorage.getItem("shippingData") || "[]");
+    const cardIndex = data.findIndex(c => c.id === id);
+    if(cardIndex === -1) return;
+    
+    const card = data[cardIndex];
+    const newMachine = prompt("설비 호기를 수정하세요:", card.machine);
+    if(newMachine === null) return;
+    const newItem = prompt("반출 품목을 수정하세요:", card.item);
+    if(newItem === null) return;
+    const newShipNum = prompt("반출 번호를 수정하세요:", card.shipNum);
+    if(newShipNum === null) return;
+    
+    data[cardIndex].machine = newMachine.trim();
+    data[cardIndex].item = newItem.trim();
+    data[cardIndex].shipNum = newShipNum.trim() || "미상";
+    
+    localStorage.setItem("shippingData", JSON.stringify(data));
+    renderKanban();
+    if(typeof autoMergeAndSave === "function") autoMergeAndSave(); 
+};
+
+// 5. 화면 렌더링 (마우스 오작동 방지 속성 추가)
+window.renderKanban = function() {
+    const data = JSON.parse(localStorage.getItem("shippingData") || "[]");
     document.getElementById('col-pending').innerHTML = '';
     document.getElementById('col-requested').innerHTML = '';
     document.getElementById('col-completed').innerHTML = '';
@@ -1018,16 +1042,13 @@ function renderKanban() {
     let cnt = { pending: 0, requested: 0, completed: 0 };
 
     data.forEach(card => {
-        // 💡 상태가 'deleted'인 카드는 화면에 그리지 않고 투명인간 취급!
-        if (card.status === "deleted") return; 
+        if (card.status === "deleted") return; // 삭제된 카드는 그리지 않음
 
-        // 혹시 모를 에러 방지용 안전 장치
         if (cnt[card.status] === undefined) cnt[card.status] = 0;
         cnt[card.status]++;
 
         const div = document.createElement('div');
         div.className = "group relative bg-background border border-border p-4 rounded-lg shadow-sm cursor-grab active:cursor-grabbing hover:border-primary transition-colors hover:shadow-md animate-[fadeIn_0.2s_ease-in]";
-        
         div.draggable = true;
         div.ondragstart = (e) => { 
             e.dataTransfer.effectAllowed = "move"; 
@@ -1047,10 +1068,10 @@ function renderKanban() {
                 <span class="text-[10px] text-text-muted">${card.date}</span>
             </div>
             <div class="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button class="text-text-muted hover:text-blue-500 bg-surface border border-border rounded p-1 flex items-center justify-center shadow-sm" onclick="editShippingCard(event, '${card.id}')" title="수정">
+                <button type="button" class="text-text-muted hover:text-blue-500 bg-surface border border-border rounded p-1 flex items-center justify-center shadow-sm z-10" onmousedown="editShippingCard(event, '${card.id}')" title="수정">
                     <span class="material-symbols-outlined text-[14px]">edit</span>
                 </button>
-                <button class="text-text-muted hover:text-red-500 bg-surface border border-border rounded p-1 flex items-center justify-center shadow-sm" onclick="deleteShippingCard(event, '${card.id}')" title="삭제">
+                <button type="button" class="text-text-muted hover:text-red-500 bg-surface border border-border rounded p-1 flex items-center justify-center shadow-sm z-10" onmousedown="deleteShippingCard(event, '${card.id}')" title="삭제">
                     <span class="material-symbols-outlined text-[14px]">delete</span>
                 </button>
             </div>
@@ -1061,52 +1082,16 @@ function renderKanban() {
     document.getElementById('cnt-pending').innerText = cnt.pending;
     document.getElementById('cnt-requested').innerText = cnt.requested;
     document.getElementById('cnt-completed').innerText = cnt.completed;
-}
+};
 
-// 4-1. 카드 수정 로직 (드래그 충돌 방지 완벽 적용)
-function editShippingCard(event, id) {
-    // 💡 마우스 드래그가 아니라 '클릭'임을 브라우저에 강제 인식시킴
-    event.stopPropagation(); 
-    
-    let data = JSON.parse(localStorage.getItem("shippingData") || "[]");
-    const cardIndex = data.findIndex(c => c.id === id);
-    if(cardIndex === -1) return;
-    
-    const card = data[cardIndex];
-    
-    // 기존 데이터를 띄워주어 수정하기 쉽게 처리
-    const newMachine = prompt("설비 호기를 수정하세요:", card.machine);
-    if(newMachine === null) return; // 취소 누름
-    
-    const newItem = prompt("반출 품목을 수정하세요:", card.item);
-    if(newItem === null) return;
-    
-    const newShipNum = prompt("반출 번호를 수정하세요:", card.shipNum);
-    if(newShipNum === null) return;
-    
-    // 수정된 데이터로 덮어쓰기
-    data[cardIndex].machine = newMachine.trim();
-    data[cardIndex].item = newItem.trim();
-    data[cardIndex].shipNum = newShipNum.trim() || "미상";
-    
-    // 저장 및 화면/Box 동기화
-    localStorage.setItem("shippingData", JSON.stringify(data));
-    renderKanban();
-    
-    // 하이브리드 엔진이 있다면 즉시 Box 파일에 반영
-    if(typeof autoMergeAndSave === "function") autoMergeAndSave(); 
-}
-
-// 5. 드래그 앤 드롭 이벤트 처리 (버그 픽스 완료)
-function allowDropKanban(ev) {
-    ev.preventDefault(); // 기본 이벤트 차단 (필수)
-    ev.dataTransfer.dropEffect = "move"; // 커서 모양 변경
-}
-
-function dropKanban(ev, newStatus) {
+// 6. 드래그 앤 드롭 함수
+window.allowDropKanban = function(ev) {
     ev.preventDefault();
-    
-    // 💡 text 데이터만 정확히 잡아내고, 빈 공간이나 엉뚱한 텍스트 드롭 시 방어
+    ev.dataTransfer.dropEffect = "move"; 
+};
+
+window.dropKanban = function(ev, newStatus) {
+    ev.preventDefault();
     const id = ev.dataTransfer.getData("text");
     if (!id || !id.startsWith("SHIP_")) return; 
 
@@ -1117,9 +1102,17 @@ function dropKanban(ev, newStatus) {
         data[cardIndex].status = newStatus;
         localStorage.setItem("shippingData", JSON.stringify(data));
         renderKanban();
-        if(typeof autoMergeAndSave === "function") autoMergeAndSave(); // 하이브리드 엔진 동기화 트리거
+        if(typeof autoMergeAndSave === "function") autoMergeAndSave(); 
     }
-}
+};
+
+// 7. 창 켜질 때 화면 그리기
+const originalOnload = window.onload;
+window.onload = async function() {
+    if(originalOnload) await originalOnload();
+    renderKanban();
+};
+
 </script>
 </body>
 </html>
