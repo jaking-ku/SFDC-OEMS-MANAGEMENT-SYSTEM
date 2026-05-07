@@ -854,7 +854,29 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
             if(boxData.recipient) { localStorage.setItem("recipientData", JSON.stringify(boxData.recipient)); renderRecipientTable(); }
             if(boxData.machineNotes) localStorage.setItem("machineNotes", JSON.stringify(boxData.machineNotes));
         }
+        // =========================================================
+        // 💡 [반출품 데이터 동기화 로직 추가]
+        // =========================================================
+        let localShipping = JSON.parse(localStorage.getItem("shippingData") || "[]");
+        let boxShipping = boxData.shippingData || [];
         
+        // Box 데이터와 로컬 데이터를 고유 ID 기준으로 병합 (로컬 최신 변경분 우선)
+        let mergedShippingMap = new Map();
+        boxShipping.forEach(item => mergedShippingMap.set(item.id, item));
+        localShipping.forEach(item => mergedShippingMap.set(item.id, item));
+        
+        let mergedShipping = Array.from(mergedShippingMap.values());
+        
+        // 1. 브라우저(로컬)에 병합된 결과 업데이트
+        localStorage.setItem("shippingData", JSON.stringify(mergedShipping));
+        // 2. Box 파일(database.txt)에 쓸 준비
+        boxData.shippingData = mergedShipping;
+        
+        // (만약 현재 탭이 반출 보드라면 화면 즉시 새로고침)
+        if(document.getElementById('shipping-board') && !document.getElementById('shipping-board').classList.contains('hidden')) {
+            renderKanban();
+        }
+        // =========================================================
         const writable = await handle.createWritable();
         await writable.write(JSON.stringify(boxData, null, 2));
         await writable.close();
@@ -897,6 +919,7 @@ async function autoLocalBackup() {
             let equipment = JSON.parse(localStorage.getItem("equipmentData") || "[]").map(e => { let obj = {...e}; delete obj.isEditing; return obj; });
             let recipient = JSON.parse(localStorage.getItem("recipientData") || "{}");
             let machineNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
+            let shipping = JSON.parse(localStorage.getItem("shippingData") || "[]");
 
             // 2. 백업용 통합 데이터 생성
             let backupData = {
@@ -904,6 +927,7 @@ async function autoLocalBackup() {
                 equipment: equipment,
                 recipient: recipient,
                 machineNotes: machineNotes,
+                shippingData: shipping, // 💡 [추가] 백업 파일에 반출품 데이터 포함
                 backupDate: new Date().toISOString()
             };
 
