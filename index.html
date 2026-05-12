@@ -87,20 +87,19 @@
             <span class="text-sm font-bold uppercase tracking-widest text-text-main">SFDC/OEMS Manager</span>
         </div>
         <nav class="flex items-center gap-4 md:gap-10 h-20 overflow-x-auto no-scrollbar">
-            <a class="nav-item nav-active text-text-main" onclick="switchTab('extraction', this)">Information Extraction</a>
-            <a class="nav-item text-text-muted hover:text-primary" onclick="switchTab('email-gen', this)">Email Generation</a>
-            <a class="nav-item text-text-muted hover:text-primary" onclick="switchTab('database', this)">Management</a>
-            <a class="nav-item text-text-muted hover:text-primary" onclick="switchTab('history', this)">
-                Work History <span id="historyBadge" class="ml-2 bg-primary text-white text-[9px] font-black px-1.5 py-0.5 hidden">0</span>
-            </a>
-	<a class="nav-item text-text-muted hover:text-primary" onclick="switchTab('shipping-board', this)">
-    <span class="material-symbols-outlined text-sm mr-1">view_kanban</span> TakeOut Board
-</a>
-
-<a class="nav-item text-text-muted hover:text-primary" onclick="window.open('https://jaking-ku.github.io/Team_schedule/', '_blank')" style="cursor:pointer;">
-    <span class="material-symbols-outlined text-sm mr-1">calendar_month</span> Schedule
-</a>
-        </nav>
+    <a class="nav-item nav-active text-text-main text-xs" onclick="switchTab('extraction', this)">Information Extraction</a>
+    <a class="nav-item text-text-muted hover:text-primary text-xs" onclick="switchTab('email-gen', this)">Email Generation</a>
+    <a class="nav-item text-text-muted hover:text-primary text-xs" onclick="switchTab('database', this)">Management</a>
+    <a class="nav-item text-text-muted hover:text-primary text-xs" onclick="switchTab('history', this)">
+        Work History <span id="historyBadge" class="ml-2 bg-primary text-white text-[9px] font-black px-1.5 py-0.5 hidden">0</span>
+    </a>
+    <a class="nav-item text-text-muted hover:text-primary text-xs" onclick="switchTab('shipping-board', this)">
+        TakeOut Board
+    </a>
+    <a class="nav-item text-text-muted hover:text-primary text-xs" onclick="window.open('https://jaking-ku.github.io/Team_schedule/', '_blank')" style="cursor:pointer;">
+        Schedule
+    </a>
+</nav>
     </div>
     <div class="flex items-center h-full overflow-x-auto no-scrollbar">
         <button onclick="toggleDarkMode()" class="text-text-muted hover:text-primary transition-colors flex items-center px-4 h-full shrink-0">
