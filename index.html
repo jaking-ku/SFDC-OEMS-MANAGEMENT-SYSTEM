@@ -601,7 +601,7 @@
         <p class="text-xs text-text-muted" id="toast-msg">Success.</p>
     </div>
 </div>
-
+<input type="file" id="mobile-db-upload" accept=".txt" style="display: none;" onchange="handleMobileDB(event)">
 <script>
 const BOX_PATH = "Box\\@int_Metrology∙Analysis systems Div\\폴더정리_1. 総括1部\\5. 評価5部\\0. 評価5部共通\\002_광학 설비\\02-05_가동리스트(IS_DI_LS)\\SFDC OEMS Manage Program";
 let currentMailTemplate = 'work', shipBlockCount = 0;
@@ -932,8 +932,9 @@ async function verifyPermission(h, rw, isUserGesture = false) {
 
 async function linkBoxFile() {
     if ('showOpenFilePicker' in window) {
+        // [PC 환경] 기존과 동일
         try {
-            const copyPath = prompt("👇 [최초 1회 설정] 아래 Box 폴더 경로를 복사하여 공용 파일을 선택하세요.", BOX_PATH);
+            const copyPath = prompt("👇 [최초 1회 설정] 아래 Box 폴더 경로를 복사하여 공용 파일을 선택하세요.", typeof BOX_PATH !== 'undefined' ? BOX_PATH : "");
             if (copyPath === null) return;
             const [h] = await window.showOpenFilePicker({ types: [{ description: 'Text Files', accept: {'text/plain': ['.txt']} }] });
             await saveFileHandle('boxBackupFile', h); 
@@ -942,24 +943,131 @@ async function linkBoxFile() {
             if(btn) btn.classList.remove("text-red-500", "font-black");
             document.getElementById("syncIcon").innerText = "sync"; document.getElementById("syncText").innerText = "Sync";
         } catch (e) { if (e.name !== 'AbortError') alert("연결 실패"); }
-    } else alert("지원되지 않는 브라우저입니다.");
+    } else {
+        // 💡 [모바일/아이폰 전용] HTML 수정 없이 투명한 파일 선택창을 생성하여 실행
+        let fileInput = document.getElementById('mobile-db-upload');
+        if (!fileInput) {
+            fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.id = 'mobile-db-upload';
+            fileInput.accept = '.txt';
+            fileInput.style.display = 'none';
+            fileInput.onchange = handleMobileDB;
+            document.body.appendChild(fileInput);
+        }
+        fileInput.click();
+    }
+}
+
+// 💡 [아이폰 전용] Box 앱에서 DB.txt를 선택했을 때 병합을 처리하는 함수
+async function handleMobileDB(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        const text = e.target.result;
+        try {
+            let boxData = text ? JSON.parse(text) : {};
+            
+            // --- PC와 100% 동일한 데이터 병합(Merge) 엔진 가동 ---
+            let boxHistory = boxData.workHistory || [];
+            let localHistory = await getIDBHistory();
+            let mergedMap = new Map();
+            
+            const getLegacyId = (item) => "LEGACY_" + item.date + "_" + item.machine + "_" + (item.content || "").substring(0, 10);
+            boxHistory.forEach(item => { if (!item.id) item.id = getLegacyId(item); mergedMap.set(item.id, item); });
+            localHistory.forEach(item => {
+                if (!item.id) item.id = getLegacyId(item);
+                let existing = mergedMap.get(item.id);
+                if (!existing || (item.updatedAt || 0) >= (existing.updatedAt || 0)) mergedMap.set(item.id, item);
+            });
+            
+            let finalMergedHistory = Array.from(mergedMap.values());
+            let uniqueHistory = [];
+            let seenContent = new Set();
+            finalMergedHistory.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+            finalMergedHistory.forEach(item => {
+                const cleanDate = (item.date || "미상").replace(/[^0-9]/g, ""); 
+                const cleanMachine = (item.machine || "").trim().toUpperCase();
+                const cleanContent = (item.content || "").trim().replace(/\s/g, "");
+                let uniqueKey = `${cleanMachine}|${cleanDate}|${cleanContent}`;
+                if (!seenContent.has(uniqueKey)) { seenContent.add(uniqueKey); uniqueHistory.push(item); }
+            });
+
+            boxData.workHistory = uniqueHistory;
+            await putIDBHistory(uniqueHistory);
+
+            let localEq = JSON.parse(localStorage.getItem("equipmentData") || "[]"); let isEditingEq = localEq.some(i => i.isEditing);
+            if(boxData.equipment && !isEditingEq) { localStorage.setItem("equipmentData", JSON.stringify(boxData.equipment)); renderTable(); }
+            if(boxData.recipient) { localStorage.setItem("recipientData", JSON.stringify(boxData.recipient)); renderRecipientTable(); }
+            if(boxData.machineNotes) localStorage.setItem("machineNotes", JSON.stringify(boxData.machineNotes));
+
+            let localShipping = JSON.parse(localStorage.getItem("shippingData") || "[]");
+            let boxShipping = boxData.shippingData || [];
+            let mergedShippingMap = new Map();
+            boxShipping.forEach(item => mergedShippingMap.set(item.id, item));
+            localShipping.forEach(item => mergedShippingMap.set(item.id, item));
+            let mergedShipping = Array.from(mergedShippingMap.values());
+            localStorage.setItem("shippingData", JSON.stringify(mergedShipping));
+            boxData.shippingData = mergedShipping;
+
+            // 모바일 화면 리렌더링
+            if(document.getElementById('shipping-board') && !document.getElementById('shipping-board').classList.contains('hidden')) {
+                if(typeof renderKanban === 'function') renderKanban();
+            }
+            await updateHistoryBadge();
+            if(document.getElementById('history') && document.getElementById('history').classList.contains('block')) await renderHistory();
+
+            // 💡 아이폰은 '자동 덮어쓰기'가 안되므로, 병합 완료된 최신 파일을 다운로드 받도록 유도
+            alert("✅ Box 데이터 로드 및 로컬 데이터 병합 완료!\n(아이폰은 보안상 파일 자동 저장이 불가능합니다.)");
+            
+            if (confirm("방금 병합된 최신 데이터를 파일로 다운로드 하시겠습니까?\n다운로드 후 Box 폴더에 직접 덮어쓰시면 팀원들에게도 적용됩니다.")) {
+                const blob = new Blob([JSON.stringify(boxData, null, 2)], { type: "text/plain" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = "DB.txt";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+
+        } catch (error) {
+            console.error(error);
+            alert('DB 파일 형식이 올바르지 않거나 오류가 발생했습니다.');
+        }
+        event.target.value = ''; 
+    };
+    reader.readAsText(file);
 }
 
 async function syncWithBox(isUserGesture = false, isPushSettings = false, isManualButton = false) {
-    if (isSyncing) { if (isPushSettings) pendingPush = true; return; }
+    let isSyncingStatus = typeof isSyncing !== 'undefined' ? isSyncing : false;
+    if (isSyncingStatus) { if (isPushSettings && typeof pendingPush !== 'undefined') pendingPush = true; return; }
     
     let handle = await getFileHandle('boxBackupFile');
-    if (!handle) { if (isManualButton) alert("⚠️ 상단의 [DB 연결] 버튼을 눌러 공용 파일을 연결해 주세요."); return; }
+    if (!handle) { 
+        if (isManualButton) {
+            if (!('showOpenFilePicker' in window)) {
+                // 💡 [아이폰 대응] Sync 버튼 눌렀을 때 핸들이 없으면 파일 첨부 창 띄우기
+                linkBoxFile();
+                return;
+            }
+            alert("⚠️ 상단의 [DB 연결] 버튼을 눌러 공용 파일을 연결해 주세요."); 
+        }
+        return; 
+    }
 
     const hasPerm = await verifyPermission(handle, true, isUserGesture);
     if (!hasPerm) { if (isManualButton) alert("권한이 필요합니다."); return; }
 
-    isSyncing = true;
+    if(typeof isSyncing !== 'undefined') isSyncing = true;
     const syncIcon = document.getElementById("syncIcon"); const syncText = document.getElementById("syncText"); const btn = document.getElementById("syncBtn");
 
     if (btn) btn.classList.remove("text-red-500", "font-black");
     if (syncIcon) syncIcon.innerText = "sync";
-
     if (syncIcon && isManualButton) { syncIcon.classList.add("animate-spin"); syncText.innerText = "Syncing..."; if (btn) btn.style.opacity = "0.7"; }
 
     try {
@@ -967,13 +1075,11 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
         let boxData = text ? JSON.parse(text) : {};
         
         let boxHistory = boxData.workHistory || [];
-        let localHistory = await getIDBHistory(); // 창고에서 가져옴
+        let localHistory = await getIDBHistory();
         let mergedMap = new Map();
         
         const getLegacyId = (item) => "LEGACY_" + item.date + "_" + item.machine + "_" + (item.content || "").substring(0, 10);
-
         boxHistory.forEach(item => { if (!item.id) item.id = getLegacyId(item); mergedMap.set(item.id, item); });
-        
         localHistory.forEach(item => {
             if (!item.id) item.id = getLegacyId(item);
             let existing = mergedMap.get(item.id);
@@ -981,33 +1087,20 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
         });
         
         let finalMergedHistory = Array.from(mergedMap.values());
-        // =========================================================
-        // 💡 [개선된 자동 청소기] 날짜까지 엄격하게 구분하여 중복 제거
-        // =========================================================
         let uniqueHistory = [];
         let seenContent = new Set();
-        
-        // 최신 수정된 순으로 정렬
         finalMergedHistory.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
         finalMergedHistory.forEach(item => {
-            // 💡 날짜 데이터의 공백과 특수문자를 제거하여 순수 텍스트로만 비교 (정확도 향상)
             const cleanDate = (item.date || "미상").replace(/[^0-9]/g, ""); 
             const cleanMachine = (item.machine || "").trim().toUpperCase();
             const cleanContent = (item.content || "").trim().replace(/\s/g, "");
-
-            // 호기 + 날짜 + 내용의 결합키 (파이프 기호로 구분하여 혼선 방지)
             let uniqueKey = `${cleanMachine}|${cleanDate}|${cleanContent}`;
-            
-            if (!seenContent.has(uniqueKey)) {
-                seenContent.add(uniqueKey);
-                uniqueHistory.push(item);
-            }
+            if (!seenContent.has(uniqueKey)) { seenContent.add(uniqueKey); uniqueHistory.push(item); }
         });
 
         boxData.workHistory = uniqueHistory;
         await putIDBHistory(uniqueHistory);
-        // =========================================================
 
         if (isPushSettings) {
             let eqToPush = JSON.parse(localStorage.getItem("equipmentData") || "[]").map(e => { let obj = {...e}; delete obj.isEditing; return obj; });
@@ -1018,35 +1111,27 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
             if(boxData.recipient) { localStorage.setItem("recipientData", JSON.stringify(boxData.recipient)); renderRecipientTable(); }
             if(boxData.machineNotes) localStorage.setItem("machineNotes", JSON.stringify(boxData.machineNotes));
         }
-        // =========================================================
-        // 💡 [반출품 데이터 동기화 로직 추가]
-        // =========================================================
+
         let localShipping = JSON.parse(localStorage.getItem("shippingData") || "[]");
         let boxShipping = boxData.shippingData || [];
-        
-        // Box 데이터와 로컬 데이터를 고유 ID 기준으로 병합 (로컬 최신 변경분 우선)
         let mergedShippingMap = new Map();
         boxShipping.forEach(item => mergedShippingMap.set(item.id, item));
         localShipping.forEach(item => mergedShippingMap.set(item.id, item));
-        
         let mergedShipping = Array.from(mergedShippingMap.values());
         
-        // 1. 브라우저(로컬)에 병합된 결과 업데이트
         localStorage.setItem("shippingData", JSON.stringify(mergedShipping));
-        // 2. Box 파일(database.txt)에 쓸 준비
         boxData.shippingData = mergedShipping;
         
-        // (만약 현재 탭이 반출 보드라면 화면 즉시 새로고침)
         if(document.getElementById('shipping-board') && !document.getElementById('shipping-board').classList.contains('hidden')) {
-            renderKanban();
+            if(typeof renderKanban === 'function') renderKanban();
         }
-        // =========================================================
+
         const writable = await handle.createWritable();
         await writable.write(JSON.stringify(boxData, null, 2));
         await writable.close();
         
         await updateHistoryBadge();
-        if(document.getElementById('history').classList.contains('block')) await renderHistory();
+        if(document.getElementById('history') && document.getElementById('history').classList.contains('block')) await renderHistory();
 
         if (isManualButton) setTimeout(() => showToast("동기화 완료", "최신 데이터가 적용되었습니다."), 100);
     } catch (error) {
@@ -1054,8 +1139,8 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
         if (isManualButton) alert("동기화 중 오류가 발생했습니다. 파일 연결을 확인해주세요.");
     } finally {
         const finishSync = () => {
-            isSyncing = false;
-            if (pendingPush) { pendingPush = false; syncWithBox(true, true, false); }
+            if(typeof isSyncing !== 'undefined') isSyncing = false;
+            if (typeof pendingPush !== 'undefined' && pendingPush) { pendingPush = false; syncWithBox(true, true, false); }
         };
         if (isManualButton) { setTimeout(() => { if (syncIcon) syncIcon.classList.remove("animate-spin"); if (syncText) syncText.innerText = "Sync"; if (btn) btn.style.opacity = "1"; finishSync(); }, 800); } else { finishSync(); }
     }
