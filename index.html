@@ -75,6 +75,167 @@
         @keyframes timelineIn { to { opacity: 1; transform: translateY(0); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .save-badge { display: inline-flex; align-items: center; gap: 4px; background: #b7000c; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .08em; padding: 2px 8px; text-transform: uppercase; }
+
+        /* =============================================
+           📱 모바일 전용 최적화 (PC 레이아웃 무영향)
+           max-width: 767px 이하에서만 적용됨
+           ============================================= */
+        @media (max-width: 767px) {
+
+            /* ── 헤더 ── */
+            header {
+                height: auto !important;
+                flex-direction: column !important;
+                align-items: stretch !important;
+                padding: 0 !important;
+                gap: 0 !important;
+            }
+            /* 로고 + 내비 영역 */
+            header > div:first-child {
+                flex-direction: column !important;
+                align-items: stretch !important;
+                gap: 0 !important;
+            }
+            /* 로고 행 */
+            header > div:first-child > div:first-child {
+                padding: 12px 16px 8px !important;
+                gap: 8px !important;
+            }
+            header .text-3xl { font-size: 1.25rem !important; }
+            header .text-sm.font-bold.uppercase { font-size: 10px !important; }
+            /* 내비게이션 탭 - 가로 스크롤 바 */
+            header nav {
+                height: 44px !important;
+                padding: 0 12px !important;
+                gap: 0 !important;
+                border-top: 1px solid var(--border-color);
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+            }
+            header nav::-webkit-scrollbar { display: none; }
+            header nav a {
+                font-size: 10px !important;
+                white-space: nowrap;
+                padding: 0 10px !important;
+                height: 44px !important;
+                flex-shrink: 0;
+            }
+            /* DB 버튼 행 */
+            header > div:last-child {
+                height: 40px !important;
+                border-top: 1px solid var(--border-color);
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+                padding: 0 !important;
+            }
+            header > div:last-child::-webkit-scrollbar { display: none; }
+            header > div:last-child button {
+                font-size: 9px !important;
+                padding: 0 10px !important;
+                height: 40px !important;
+                white-space: nowrap;
+                flex-shrink: 0;
+            }
+            header > div:last-child .material-symbols-outlined { font-size: 14px !important; }
+
+            /* ── 메인 패딩 ── */
+            main { padding: 16px !important; }
+
+            /* ── 섹션 공통 ── */
+            .tab-content { gap: 16px !important; }
+            .tab-content > .border-b { padding-bottom: 12px !important; }
+            .tab-content h2 { font-size: 1.1rem !important; }
+            .tab-content > p { font-size: 12px !important; }
+
+            /* ── 추출(Extraction) 섹션 ── */
+            #extraction .card-base { padding: 16px !important; }
+            #extraction textarea#mailInput { height: 120px !important; }
+            #extraction .flex.justify-end { justify-content: stretch !important; }
+            #extraction .flex.justify-end button { width: 100% !important; padding: 12px !important; }
+            /* 결과 테이블 헤더/툴바 */
+            #extractResult .flex.justify-between { flex-direction: column !important; gap: 8px !important; align-items: flex-start !important; }
+            /* 결과 테이블 - 카드 형태로 전환 */
+            #extractResult table { display: block !important; }
+            #extractResult thead { display: none !important; }
+            #extractResult tbody { display: block !important; }
+            #extractResult tbody tr { display: flex !important; flex-direction: column !important; padding: 12px 16px !important; gap: 6px !important; }
+            #extractResult tbody td { padding: 2px 0 !important; border: none !important; font-size: 13px !important; text-align: left !important; }
+            #extractResult tbody td#resWorker::before { content: "작업자: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+            #extractResult tbody td#resLine::before { content: "라인: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+            #extractResult tbody td#resMachine::before { content: "설비호기: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+            #extractResult tbody td#resDate::before { content: "작업일자: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+            #extractResult tbody td#resContent { text-align: left !important; }
+            #extractResult tbody td#resContent::before { content: "작업내용: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+
+            /* ── 메일 작성(Email Gen) 섹션 ── */
+            #email-gen > .border-b { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
+            #email-gen > .border-b > div.flex { width: 100% !important; }
+            #email-gen > .border-b button { flex: 1 !important; font-size: 9px !important; padding: 8px 4px !important; }
+            /* 12컬럼 그리드 → 1컬럼 */
+            #email-gen .grid.grid-cols-1.xl\\:grid-cols-12 { grid-template-columns: 1fr !important; gap: 16px !important; }
+            #email-gen .xl\\:col-span-4 { padding: 16px !important; }
+            #email-gen .xl\\:col-span-8 { padding: 0 !important; }
+            #email-gen .xl\\:col-span-8 > div:last-child { padding: 16px !important; }
+            /* 2컬럼 입력 그리드 → 1컬럼 */
+            #email-gen .grid.grid-cols-2 { grid-template-columns: 1fr !important; }
+            #email-gen #area-ship-only .grid.grid-cols-2 { grid-template-columns: 1fr !important; }
+
+            /* ── 관리(Database) 섹션 ── */
+            #database .card-base { overflow: hidden; }
+            /* 수신처 추가 폼 */
+            #database .flex.gap-4.items-end { flex-direction: column !important; gap: 8px !important; }
+            #database .flex.gap-4.items-end .flex-1,
+            #database .flex.gap-4.items-end .flex-\\[3\\] { width: 100% !important; }
+            #database .flex.gap-4.items-end button { width: 100% !important; }
+            /* 설비 등록 그리드 */
+            #database .grid.grid-cols-2.md\\:grid-cols-5 { grid-template-columns: 1fr 1fr !important; }
+            /* 마스터 테이블 - 가로 스크롤 허용 */
+            #database .overflow-x-auto.h-\\[600px\\] { height: 400px !important; }
+            /* 검색창 영역 */
+            #database .p-4.bg-background.flex.flex-col { flex-direction: column !important; gap: 8px !important; }
+            #database .relative.w-full.md\\:w-96 { width: 100% !important; }
+            /* 수신처 테이블 - 가로 스크롤 */
+            #database .overflow-x-auto { -webkit-overflow-scrolling: touch; }
+
+            /* ── 작업 히스토리 섹션 ── */
+            #history > .flex.items-end { flex-direction: column !important; align-items: flex-start !important; gap: 10px !important; }
+            #history > .flex.items-end > div:last-child { flex-direction: column !important; align-items: stretch !important; width: 100% !important; gap: 8px !important; }
+            #history #historySearch { width: 100% !important; }
+            #history #historySortOrder { width: 100% !important; }
+            #history > .flex.items-end button { width: 100% !important; justify-content: center; }
+            /* 칩 선택 영역 */
+            #history .card-base .p-4.flex.flex-wrap { padding: 12px !important; gap: 6px !important; }
+
+            /* ── TakeOut Board (칸반) ── */
+            #shipping-board > .border-b { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
+            #shipping-board > .border-b button { align-self: flex-start; }
+            /* 칸반 컬럼: 세로 스택 */
+            #shipping-board .flex.gap-6.overflow-x-auto {
+                flex-direction: column !important;
+                overflow-x: visible !important;
+                gap: 12px !important;
+                min-height: unset !important;
+                padding-bottom: 0 !important;
+            }
+            #shipping-board .flex.gap-6.overflow-x-auto > div {
+                width: 100% !important;
+                min-height: 120px !important;
+            }
+            /* 칸반 카드 버튼 - 모바일은 항상 표시 */
+            #shipping-board .group .absolute.top-2.right-2 {
+                opacity: 1 !important;
+            }
+
+            /* ── 푸터 ── */
+            footer { padding: 24px 16px !important; margin-top: 32px !important; }
+            footer .max-w-7xl { flex-direction: column !important; text-align: center !important; gap: 12px !important; }
+            footer .flex.flex-col.items-center { align-items: center !important; }
+
+            /* ── 토스트 알림 ── */
+            #toast { right: 12px !important; bottom: 12px !important; left: 12px !important; right: 12px !important; padding: 16px !important; }
+        }
     </style>
 </head>
 <body class="flex flex-col min-h-screen">
