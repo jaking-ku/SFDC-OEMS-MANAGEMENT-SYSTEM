@@ -290,12 +290,15 @@
         </div>
         <div class="card-base p-8 rounded-md">
             <label class="label-base mb-4">작업 메일 텍스트 붙여넣기</label>
-            <textarea class="input-base bg-background h-32 p-4 mb-6 font-mono rounded" id="mailInput" placeholder="작성한 메일을 통째로 붙여넣으십시오..."></textarea>
-            <div class="flex justify-end">
-                <button class="btn-primary px-10 py-3 text-sm rounded" onclick="extractData()">
-                    <span class="material-symbols-outlined">data_exploration</span> 데이터 추출 실행
-                </button>
-            </div>
+<textarea class="input-base bg-background h-32 p-4 mb-6 font-mono rounded" id="mailInput" placeholder="작성한 메일을 통째로 붙여넣으십시오..."></textarea>
+
+<label class="label-base mb-4">특이사항 / 부품교체 (선택)</label>
+<textarea class="input-base bg-background h-20 p-4 mb-6 font-mono rounded" id="extraNoteInput" placeholder="특이사항이나 부품교체 내역이 있다면 입력하세요..."></textarea>
+<div class="flex justify-end">
+    <button class="btn-primary px-10 py-3 text-sm rounded" onclick="extractData()">
+        <span class="material-symbols-outlined">data_exploration</span> 데이터 추출 실행
+    </button>
+</div>
         </div>
 
         <div id="extractResult" class="card-base overflow-hidden rounded-md" style="display:none;">
@@ -823,6 +826,22 @@ function extractData() {
     if (machine !== "미상") { 
         saveHistoryEntry({ machine, line, date: df, content, worker, rawText: text, savedAt: new Date().toISOString() }); 
         document.getElementById("autoSavedBadge").classList.remove("hidden"); 
+
+        // ⭐ 추가할 부분 시작 (특이사항 노트에 자동 누적)
+        const extraNote = document.getElementById("extraNoteInput") ? document.getElementById("extraNoteInput").value.trim() : "";
+        if (extraNote) {
+            let ns = JSON.parse(localStorage.getItem("machineNotes") || "{}");
+            let prevNote = ns[machine] || "";
+            let newEntry = `-${df}-\n${extraNote}`; // -작업 날짜- 와 입력내용 폼
+            
+            // 기존에 메모가 있으면 줄바꿈 2번 하고 추가, 없으면 그냥 추가
+            ns[machine] = prevNote ? (prevNote + "\n\n" + newEntry) : newEntry;
+            localStorage.setItem("machineNotes", JSON.stringify(ns));
+            
+            // 추출 완료 후 다음 작업을 위해 입력칸 비우기
+            document.getElementById("extraNoteInput").value = "";
+        }
+        // ⭐ 추가할 부분 끝
     }
 }
 
