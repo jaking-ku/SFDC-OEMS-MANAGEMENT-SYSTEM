@@ -40,7 +40,7 @@
             .btn-text { @apply text-[10px] font-bold text-text-muted hover:text-primary uppercase tracking-widest transition-colors inline-flex items-center gap-1; }
             .th-base { @apply px-4 py-3 text-[10px] font-bold text-text-muted uppercase; }
             .td-base { @apply px-4 py-3 text-sm text-text-main border-b border-border; }
-            .nav-item { @apply flex items-center h-full text-sm uppercase tracking-wider transition-colors cursor-pointer; }
+            .nav-item { @apply flex items-center w-full text-sm uppercase tracking-wider transition-colors cursor-pointer; }
         }
     </style>
     <style>
@@ -58,9 +58,11 @@
             --text-main: #f8fafc;
             --text-muted: #94a3b8;
         }
+        #topbar { display: none; }
+        #sidebar-overlay { display: none; }
         body { font-family: 'Inter', 'Malgun Gothic', sans-serif; background-color: var(--bg-body); color: var(--text-main); transition: background-color 0.3s, color 0.3s; }
         .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
-        .nav-active { border-bottom: 3px solid #b7000c; color: #b7000c !important; font-weight: 700; }
+        .nav-active { border-left: 3px solid #b7000c; color: #b7000c !important; font-weight: 700; background: rgba(183,0,12,0.06); }
         .accordion-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
         .accordion-open .accordion-content { max-height: 800px; transition: max-height 0.5s ease-in; overflow-y: auto;}
         .accordion-rotate { transition: transform 0.3s ease; }
@@ -77,71 +79,29 @@
         .save-badge { display: inline-flex; align-items: center; gap: 4px; background: #b7000c; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .08em; padding: 2px 8px; text-transform: uppercase; }
 
         /* =============================================
-           📱 모바일 전용 최적화 (PC 레이아웃 무영향)
+           📱 모바일 전용 최적화 (사이드바 레이아웃)
            max-width: 767px 이하에서만 적용됨
            ============================================= */
         @media (max-width: 767px) {
 
-            /* ── 헤더 ── */
-            header {
-                height: auto !important;
-                flex-direction: column !important;
-                align-items: stretch !important;
-                padding: 0 !important;
-                gap: 0 !important;
+            /* ── 사이드바 숨김 / 상단 topbar 전환 ── */
+            #sidebar {
+                position: fixed !important;
+                left: -240px !important;
+                top: 0 !important;
+                bottom: 0 !important;
+                z-index: 50 !important;
+                transition: left 0.3s ease !important;
+                width: 240px !important;
             }
-            /* 로고 + 내비 영역 */
-            header > div:first-child {
-                flex-direction: column !important;
-                align-items: stretch !important;
-                gap: 0 !important;
-            }
-            /* 로고 행 */
-            header > div:first-child > div:first-child {
-                padding: 12px 16px 8px !important;
-                gap: 8px !important;
-            }
-            header .text-3xl { font-size: 1.25rem !important; }
-            header .text-sm.font-bold.uppercase { font-size: 10px !important; }
-            /* 내비게이션 탭 - 가로 스크롤 바 */
-            header nav {
-                height: 44px !important;
-                padding: 0 12px !important;
-                gap: 0 !important;
-                border-top: 1px solid var(--border-color);
-                overflow-x: auto !important;
-                -webkit-overflow-scrolling: touch;
-                scrollbar-width: none;
-            }
-            header nav::-webkit-scrollbar { display: none; }
-            header nav a {
-                font-size: 10px !important;
-                white-space: nowrap;
-                padding: 0 10px !important;
-                height: 44px !important;
-                flex-shrink: 0;
-            }
-            /* DB 버튼 행 */
-            header > div:last-child {
-                height: 40px !important;
-                border-top: 1px solid var(--border-color);
-                overflow-x: auto !important;
-                -webkit-overflow-scrolling: touch;
-                scrollbar-width: none;
-                padding: 0 !important;
-            }
-            header > div:last-child::-webkit-scrollbar { display: none; }
-            header > div:last-child button {
-                font-size: 9px !important;
-                padding: 0 10px !important;
-                height: 40px !important;
-                white-space: nowrap;
-                flex-shrink: 0;
-            }
-            header > div:last-child .material-symbols-outlined { font-size: 14px !important; }
+            #sidebar.open { left: 0 !important; }
+            #topbar { display: flex !important; }
+            #sidebar-overlay { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 49; }
 
-            /* ── 메인 패딩 ── */
-            main { padding: 16px !important; }
+            /* ── 메인 영역 ── */
+            #app-body { margin-left: 0 !important; }
+            footer { margin-left: 0 !important; }
+            main { padding: 16px !important; padding-top: 72px !important; }
 
             /* ── 섹션 공통 ── */
             .tab-content { gap: 16px !important; }
@@ -238,50 +198,94 @@
         }
     </style>
 </head>
-<body class="flex flex-col min-h-screen">
+<body class="min-h-screen">
 
-<header class="sticky top-0 z-40 bg-surface border-b border-border px-6 h-20 flex items-center justify-between transition-colors">
-    <div class="flex items-center gap-8">
-        <div class="flex items-center gap-3">
-            <span class="text-3xl font-black tracking-tighter text-primary">HITACHI</span>
-            <div class="h-6 w-[1px] bg-border mx-2"></div>
-            <span class="text-sm font-bold uppercase tracking-widest text-text-main">SFDC/OEMS Manager</span>
-        </div>
-        <nav class="flex items-center gap-4 md:gap-10 h-20 overflow-x-auto no-scrollbar">
-    <a class="nav-item nav-active text-text-main text-xs" onclick="switchTab('extraction', this)">Information Extraction</a>
-    <a class="nav-item text-text-muted hover:text-primary text-xs" onclick="switchTab('email-gen', this)">Email Generation</a>
-    <a class="nav-item text-text-muted hover:text-primary text-xs" onclick="switchTab('database', this)">Management</a>
-    <a class="nav-item text-text-muted hover:text-primary text-xs" onclick="switchTab('history', this)">
-        Work History <span id="historyBadge" class="ml-2 bg-primary text-white text-[9px] font-black px-1.5 py-0.5 hidden">0</span>
-    </a>
-    <a class="nav-item text-text-muted hover:text-primary text-xs" onclick="switchTab('shipping-board', this)">
-        TakeOut Board
-    </a>
-    <a class="nav-item text-text-muted hover:text-primary text-xs" onclick="window.open('https://jaking-ku.github.io/Team_schedule/', '_blank')" style="cursor:pointer;">
-        Schedule
-    </a>
-</nav>
+<!-- 모바일 오버레이 (사이드바 열렸을 때 배경 dimming) -->
+<div id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+<!-- 모바일 상단 Topbar -->
+<header id="topbar" class="fixed top-0 left-0 right-0 z-40 bg-surface border-b border-border h-14 items-center justify-between px-4 transition-colors">
+    <button onclick="openSidebar()" class="text-text-muted hover:text-primary transition-colors flex items-center">
+        <span class="material-symbols-outlined">menu</span>
+    </button>
+    <div class="flex items-center gap-2">
+        <span class="text-lg font-black tracking-tighter text-primary">HITACHI</span>
+        <span class="text-[10px] font-bold uppercase tracking-widest text-text-muted">SFDC/OEMS</span>
     </div>
-    <div class="flex items-center h-full overflow-x-auto no-scrollbar">
-        <button onclick="toggleDarkMode()" class="text-text-muted hover:text-primary transition-colors flex items-center px-4 h-full shrink-0">
-            <span class="material-symbols-outlined text-xl" id="darkModeIcon">dark_mode</span>
-        </button>
-
-        
-        <button class="btn-text px-4 border-l border-border h-full hover:!text-blue-500" onclick="linkBoxFile()">
-            <span class="material-symbols-outlined text-sm">link</span> DB 연결
-        </button>
-
-        <button class="btn-text px-4 border-l border-border h-full hover:!text-red-500 transition-all" onclick="disconnectDB()">
-    <span class="material-symbols-outlined text-sm">link_off</span> 연결 끊기
-        </button>
-        <button id="syncBtn" class="btn-text px-4 border-l border-border h-full hover:!text-green-500 transition-all duration-300" onclick="manualSync()">
-            <span id="syncIcon" class="material-symbols-outlined text-sm">sync</span> <span id="syncText">Sync</span>
-        </button>
-    </div>
+    <button onclick="toggleDarkMode()" class="text-text-muted hover:text-primary transition-colors flex items-center">
+        <span class="material-symbols-outlined text-xl" id="darkModeIconMobile">dark_mode</span>
+    </button>
 </header>
 
-<main class="flex-1 max-w-7xl w-full mx-auto p-8 relative">
+<!-- 전체 앱 래퍼 -->
+<div id="app-body" class="flex min-h-screen" style="margin-left: 240px;">
+
+    <!-- ── 좌측 사이드바 (LNB) ── -->
+    <aside id="sidebar" class="fixed top-0 left-0 bottom-0 w-[240px] z-40 bg-surface border-r border-border flex flex-col transition-colors overflow-y-auto">
+
+        <!-- 로고 영역 -->
+        <div class="px-6 py-5 border-b border-border shrink-0">
+            <div class="flex items-center gap-2 mb-1">
+                <span class="text-2xl font-black tracking-tighter text-black">HITACHI</span>
+            </div>
+            <span class="text-[10px] font-bold uppercase tracking-widest text-text-muted">평가4부 Management System</span>
+        </div>
+
+        <!-- 내비게이션 메뉴 -->
+        <nav class="flex flex-col py-4 flex-1 gap-1 px-3">
+            <a class="nav-item nav-active text-text-main text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('extraction', this)">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">data_exploration</span>
+                Information Extraction
+            </a>
+            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('email-gen', this)">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">mail</span>
+                Email Generation
+            </a>
+            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('database', this)">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">database</span>
+                Management
+            </a>
+            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('history', this)">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">history</span>
+                Work History
+                <span id="historyBadge" class="ml-auto bg-primary text-white text-[9px] font-black px-1.5 py-0.5 hidden rounded-sm">0</span>
+            </a>
+            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('shipping-board', this)">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">local_shipping</span>
+                TakeOut Board
+            </a>
+            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="window.open('https://jaking-ku.github.io/Team_schedule/', '_blank')" style="cursor:pointer;">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">calendar_month</span>
+                Schedule
+            </a>
+        </nav>
+
+        <!-- 하단 시스템 제어 버튼 -->
+        <div class="border-t border-border shrink-0 p-3 space-y-1">
+            <button onclick="toggleDarkMode()" class="btn-text w-full px-3 py-2.5 rounded hover:bg-background justify-start">
+                <span class="material-symbols-outlined text-base mr-3" id="darkModeIcon">dark_mode</span>
+                <span class="text-xs uppercase tracking-widest">Dark Mode</span>
+            </button>
+            <button class="btn-text w-full px-3 py-2.5 rounded hover:bg-background hover:!text-blue-500 justify-start" onclick="linkBoxFile()">
+                <span class="material-symbols-outlined text-base mr-3">link</span>
+                <span class="text-xs uppercase tracking-widest">DB 연결</span>
+            </button>
+            <button class="btn-text w-full px-3 py-2.5 rounded hover:bg-background hover:!text-red-500 justify-start" onclick="disconnectDB()">
+                <span class="material-symbols-outlined text-base mr-3">link_off</span>
+                <span class="text-xs uppercase tracking-widest">연결 끊기</span>
+            </button>
+            <button id="syncBtn" class="btn-text w-full px-3 py-2.5 rounded hover:bg-background hover:!text-green-500 justify-start transition-all duration-300" onclick="manualSync()">
+                <span id="syncIcon" class="material-symbols-outlined text-base mr-3">sync</span>
+                <span id="syncText" class="text-xs uppercase tracking-widest">Sync</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- ── 오른쪽 콘텐츠 영역 ── -->
+    <div class="flex flex-col flex-1 min-w-0">
+
+<main class="flex-1 w-full max-w-7xl mx-auto p-8 relative">
+
 
     <section id="extraction" class="tab-content block space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
         <div class="border-b border-border pb-4">
@@ -584,11 +588,14 @@
 </section>
 </main>
 
-<footer class="bg-[#1b1c1c] text-white py-12 px-8 mt-20 transition-none">
+    </div><!-- end content area -->
+</div><!-- end app-body -->
+
+<footer class="bg-[#1b1c1c] text-white py-12 px-8 mt-20 transition-none" style="margin-left: 240px;">
     <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
         <div class="flex items-center gap-6">
             <span class="text-2xl font-black tracking-tighter text-white">HITACHI</span>
-            <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest border-l border-gray-800 pl-6">SFDC OEMS MANAGEMENT SYSTEM</span>
+            <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest border-l border-gray-800 pl-6">평가4부 Management System</span>
         </div>
         <div class="flex flex-col items-center md:items-end gap-2">
             <div class="text-[10px] text-gray-400 font-medium">문의사항: <a href="mailto:jawon.ku.lf@hitachi-hightech.com" class="text-gray-400 hover:text-white underline decoration-gray-600 hover:decoration-white underline-offset-4 transition-colors">jawon.ku.lf@hitachi-hightech.com</a></div>
@@ -672,9 +679,11 @@ async function migrateToIndexedDB() {
 // ==========================================
 // 기존 UI 및 유틸 함수
 // ==========================================
-function toggleDarkMode() { const h = document.documentElement; h.classList.toggle('dark'); const is = h.classList.contains('dark'); localStorage.setItem('darkMode', is?'yes':'no'); document.getElementById('darkModeIcon').innerText = is?'light_mode':'dark_mode'; }
+function toggleDarkMode() { const h = document.documentElement; h.classList.toggle('dark'); const is = h.classList.contains('dark'); localStorage.setItem('darkMode', is?'yes':'no'); document.getElementById('darkModeIcon').innerText = is?'light_mode':'dark_mode'; const mobileIcon = document.getElementById('darkModeIconMobile'); if(mobileIcon) mobileIcon.innerText = is?'light_mode':'dark_mode'; }
+function openSidebar() { document.getElementById('sidebar').classList.add('open'); document.getElementById('sidebar-overlay').style.display = 'block'; }
+function closeSidebar() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebar-overlay').style.display = 'none'; }
 function initTheme() { if (localStorage.getItem('darkMode') === 'yes') { document.documentElement.classList.add('dark'); document.getElementById('darkModeIcon').innerText = 'light_mode'; } }
-function switchTab(t, e) { document.querySelectorAll('.tab-content').forEach(s => { s.classList.remove('block'); s.classList.add('hidden'); }); document.getElementById(t).classList.remove('hidden'); document.getElementById(t).classList.add('block'); document.querySelectorAll('nav a').forEach(a => { a.classList.remove('nav-active', 'text-text-main'); a.classList.add('text-text-muted'); }); e.classList.remove('text-text-muted'); e.classList.add('nav-active', 'text-text-main'); if (t === 'history') renderHistory(); }
+function switchTab(t, e) { document.querySelectorAll('.tab-content').forEach(s => { s.classList.remove('block'); s.classList.add('hidden'); }); document.getElementById(t).classList.remove('hidden'); document.getElementById(t).classList.add('block'); document.querySelectorAll('nav a').forEach(a => { a.classList.remove('nav-active', 'text-text-main'); a.classList.add('text-text-muted'); }); e.classList.remove('text-text-muted'); e.classList.add('nav-active', 'text-text-main'); if (t === 'history') renderHistory(); if(window.innerWidth < 768) closeSidebar(); }
 function showToast(t, m) { const ts = document.getElementById('toast'); document.getElementById('toast-title').innerText = t; document.getElementById('toast-msg').innerText = m; ts.classList.remove('translate-y-32', 'opacity-0'); setTimeout(() => ts.classList.add('translate-y-32', 'opacity-0'), 3000); }
 
 window.onload = async function() {
