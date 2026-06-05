@@ -1047,9 +1047,25 @@ async function handleMobileDB(event) {
 
             let localShipping = JSON.parse(localStorage.getItem("shippingData") || "[]");
             let boxShipping = boxData.shippingData || [];
+            // ── 충돌 해결: 같은 id면 더 최신 status를 우선 적용 ──
+            const STATUS_RANK = { pending: 0, requested: 1, completed: 2, deleted: 3 };
+            function mergeShippingItem(a, b) {
+                const ra = STATUS_RANK[a.status] ?? -1;
+                const rb = STATUS_RANK[b.status] ?? -1;
+                if (rb !== ra) return rb > ra ? b : a;
+                const ta = parseInt(String(a.id).replace("SHIP_","")) || 0;
+                const tb = parseInt(String(b.id).replace("SHIP_","")) || 0;
+                return tb > ta ? b : a;
+            }
             let mergedShippingMap = new Map();
             boxShipping.forEach(item => mergedShippingMap.set(item.id, item));
-            localShipping.forEach(item => mergedShippingMap.set(item.id, item));
+            localShipping.forEach(item => {
+                if (mergedShippingMap.has(item.id)) {
+                    mergedShippingMap.set(item.id, mergeShippingItem(mergedShippingMap.get(item.id), item));
+                } else {
+                    mergedShippingMap.set(item.id, item);
+                }
+            });
             let mergedShipping = Array.from(mergedShippingMap.values());
             localStorage.setItem("shippingData", JSON.stringify(mergedShipping));
             boxData.shippingData = mergedShipping;
@@ -1155,9 +1171,25 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
 
         let localShipping = JSON.parse(localStorage.getItem("shippingData") || "[]");
         let boxShipping = boxData.shippingData || [];
+        // ── 충돌 해결: 같은 id면 더 최신 status를 우선 적용 ──
+        const STATUS_RANK2 = { pending: 0, requested: 1, completed: 2, deleted: 3 };
+        function mergeShippingItem2(a, b) {
+            const ra = STATUS_RANK2[a.status] ?? -1;
+            const rb = STATUS_RANK2[b.status] ?? -1;
+            if (rb !== ra) return rb > ra ? b : a;
+            const ta = parseInt(String(a.id).replace("SHIP_","")) || 0;
+            const tb = parseInt(String(b.id).replace("SHIP_","")) || 0;
+            return tb > ta ? b : a;
+        }
         let mergedShippingMap = new Map();
         boxShipping.forEach(item => mergedShippingMap.set(item.id, item));
-        localShipping.forEach(item => mergedShippingMap.set(item.id, item));
+        localShipping.forEach(item => {
+            if (mergedShippingMap.has(item.id)) {
+                mergedShippingMap.set(item.id, mergeShippingItem2(mergedShippingMap.get(item.id), item));
+            } else {
+                mergedShippingMap.set(item.id, item);
+            }
+        });
         let mergedShipping = Array.from(mergedShippingMap.values());
         
         localStorage.setItem("shippingData", JSON.stringify(mergedShipping));
@@ -1396,38 +1428,11 @@ window.dropKanban = function(ev, newStatus) {
     }
 };
 
-// 7. 창 켜질 때 화면 그리기 + 1시간 자동 Sync
+// 7. 창 켜질 때 화면 그리기
 const originalOnload = window.onload;
 window.onload = async function() {
     if(originalOnload) await originalOnload();
     renderKanban();
-
-    // ── 자동 Sync: 1시간(3,600,000ms)마다 백그라운드 동기화 ──
-    const AUTO_SYNC_INTERVAL = 60 * 60 * 1000; // 1시간
-
-    // 마지막 자동 sync 시각을 사이드바에 조용히 표시
-    function updateAutoSyncLabel(ts) {
-        let el = document.getElementById("autoSyncLabel");
-        if (!el) {
-            el = document.createElement("p");
-            el.id = "autoSyncLabel";
-            el.style.cssText = "font-size:9px;color:var(--text-muted,#888);text-align:center;margin-top:4px;opacity:0.7;";
-            const syncBtn = document.getElementById("syncBtn");
-            if (syncBtn && syncBtn.parentNode) syncBtn.parentNode.appendChild(el);
-        }
-        const d = ts ? new Date(ts) : new Date();
-        el.textContent = "자동 sync: " + d.getHours().toString().padStart(2,"0") + ":" + d.getMinutes().toString().padStart(2,"0");
-    }
-
-    // 자동 sync 실행 (UI 스피너 없이 조용히)
-    function runAutoSync() {
-        syncWithBox(false, false, false);   // isManualButton=false → 스피너·텍스트 변경 없음
-        updateAutoSyncLabel(Date.now());
-    }
-
-    // 페이지 로드 직후 한 번 + 이후 1시간마다
-    runAutoSync();
-    setInterval(runAutoSync, AUTO_SYNC_INTERVAL);
 };
 
 </script>
