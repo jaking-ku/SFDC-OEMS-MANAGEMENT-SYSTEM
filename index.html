@@ -802,16 +802,24 @@ async function renderHistory() {
         <label class="label-base text-primary mb-2 flex items-center gap-1">
             <span class="material-symbols-outlined text-[16px]">edit_note</span>
             [${selectedChip}] 특이사항 및 부품차용
-            <button onclick="(function(el){el.classList.toggle('hidden')})(document.getElementById('noteReadView_${selectedChip}'));"
+            <button onclick="(function(btn){
+                    var rv=document.getElementById('noteReadView_${selectedChip}');
+                    var ea=document.getElementById('noteEditArea_${selectedChip}');
+                    var isEdit=!ea.classList.contains('hidden');
+                    rv.classList.toggle('hidden');
+                    ea.classList.toggle('hidden');
+                    btn.textContent=isEdit?'편집':'목록';
+                })(this)"
                     class="ml-auto text-[10px] bg-surface border border-border px-2 py-0.5 rounded hover:bg-primary hover:text-white transition-colors">
-                목록 보기 / 편집
+                편집
             </button>
         </label>
         <div id="noteReadView_${selectedChip}" class="mb-3 max-h-40 overflow-y-auto">
             ${noteListHtml}
         </div>
         <textarea class="input-base h-20 p-3 resize-y rounded hidden" id="noteEditArea_${selectedChip}"
-            placeholder="메모 입력" onchange="saveMachineNote('${selectedChip}', this.value)">${noteContent}</textarea>
+            placeholder="메모 입력\n\n새 항목은 기존 내용 아래에 이어서 작성하세요.\n예) -2026/06/11- [Laser 교체]\n상세 내용"
+            onchange="saveMachineNote('${selectedChip}', this.value)">${noteContent}</textarea>
     `;
     wrap.appendChild(noteDiv);
     const body = document.createElement("div"); body.className = "p-8"; const ul = document.createElement("ul"); ul.className = "relative space-y-0 pl-8";
@@ -861,26 +869,31 @@ function extractData() {
     content = content.replace(/\(.*?\)/g, "").replace(/^(?:에서|진행한|작업한|진행|한|확인)\s+/, "").replace(/\s+작업$/, "").trim();
     
     let worker = "미상";
-    // [1단계] '작업자' 패턴에서 대아/히타치 키워드 먼저 탐색
-    //   커버 바리에이션: '작업자:', '작업자 :', '작업자 : ', 콜론 없는 경우
-    const workerLineMatch = text.match(/작업자\s*:?\s*([가-힣a-zA-Z].{0,60})/);
-    if (workerLineMatch) {
-        const wLine = workerLineMatch[1].trim();
-        // 대아 단독 작업: '대아'로 시작하거나 포함, 히타치 키워드 없을 때
-        const hasDaea   = /대아/i.test(wLine);
-        const hasHitachi = /히타치|hitachi/i.test(wLine);
-        if (hasDaea && !hasHitachi) {
-            worker = "대아";
-        } else if (hasHitachi || !hasDaea) {
-            // 히타치 또는 키워드 없는 경우 → 이름 추출
-            const nameMatch = wLine.match(/(?:히타치|hitachi)?\s*([가-힣]{2,4})(?:\s*,|\s*$)/);
-            if (nameMatch) worker = nameMatch[1];
+    // [1순위] 메일 서명: "HITACHI\nㅇㅇㅇ 배상 / 드림" 에서 발신자 이름 추출
+    const signMatch = text.match(/HITACHI\s*[\r\n]+\s*([가-힣]{2,4})\s*(?:배상|드림|올림)?/i);
+    if (signMatch) {
+        worker = signMatch[1];
+    } else {
+        // [2순위] '작업자' 키워드 패턴 탐색
+        //   커버 바리에이션: '작업자:', '작업자 :', '작업자 : ', 콜론 없는 경우
+        const workerLineMatch = text.match(/작업자\s*:?\s*([가-힣a-zA-Z].{0,60})/);
+        if (workerLineMatch) {
+            const wLine = workerLineMatch[1].trim();
+            const hasDaea    = /대아/i.test(wLine);
+            const hasHitachi = /히타치|hitachi/i.test(wLine);
+            if (hasDaea && !hasHitachi) {
+                // 대아 단독 작업
+                worker = "대아";
+            } else if (hasDaea && hasHitachi) {
+                // 히타치 + 대아 혼합 → 히타치 이름만 추출
+                const nameMatch = wLine.match(/(?:히타치|hitachi)\s*([가-힣]{2,4})/);
+                if (nameMatch) worker = nameMatch[1];
+            } else {
+                // 히타치만 또는 키워드 없는 경우
+                const nameMatch = wLine.match(/(?:히타치|hitachi)?\s*([가-힣]{2,4})(?:\s*,|\s*$)/);
+                if (nameMatch) worker = nameMatch[1];
+            }
         }
-    }
-    // [2단계] 작업자 패턴으로 못 찾으면 메일 서명 HITACHI\n이름 추출 (기존 알고리즘)
-    if (worker === "미상") {
-        const sm = text.match(/HITACHI[\s\r\n]+([가-힣]{2,4})/i);
-        if (sm) worker = sm[1];
     }
     
     document.getElementById("resDate").innerText = df; 
