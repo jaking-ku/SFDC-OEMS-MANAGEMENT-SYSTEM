@@ -233,7 +233,7 @@
 
         <!-- 내비게이션 메뉴 -->
         <nav class="flex flex-col py-4 flex-1 gap-1 px-3">
-            <a class="nav-item nav-active text-text-main text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('extraction', this)">
+            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('extraction', this)">
                 <span class="material-symbols-outlined text-base mr-3 shrink-0">data_exploration</span>
                 Information Extraction
             </a>
@@ -241,7 +241,7 @@
                 <span class="material-symbols-outlined text-base mr-3 shrink-0">mail</span>
                 Email Generation
             </a>
-            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('database', this)">
+            <a class="nav-item nav-active text-text-main text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('database', this)">
                 <span class="material-symbols-outlined text-base mr-3 shrink-0">database</span>
                 Management
             </a>
@@ -287,7 +287,7 @@
 <main class="flex-1 w-full max-w-7xl mx-auto p-8 relative">
 
 
-    <section id="extraction" class="tab-content block space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+    <section id="extraction" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
         <div class="border-b border-border pb-4">
             <h2 class="text-2xl font-bold text-text-main">메일 정보 추출</h2>
             <p class="text-sm text-text-muted mt-1">작업 메일 텍스트 분석 및 엑셀 데이터화 · 추출 시 원본 내용이 PC 로컬 히스토리에 안전하게 저장됩니다</p>
@@ -437,12 +437,13 @@
         </div>
     </section>
 
-    <section id="database" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+    <section id="database" class="tab-content block space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
         <div class="border-b border-border pb-4">
             <h2 class="text-2xl font-bold text-text-main">설비 & 수신처 관리</h2>
         </div>
 
-        <div class="card-base overflow-hidden accordion-open rounded-md">
+        <!-- 💡 accordion-open 클래스 삭제됨 -->
+        <div class="card-base overflow-hidden rounded-md">
             <button class="w-full px-6 py-4 bg-background border-b border-border flex justify-between items-center hover:opacity-80 transition-opacity text-left" onclick="this.parentElement.classList.toggle('accordion-open')">
                 <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">mail</span> 👥 라인별 메일 수신처 관리</span>
                 <span class="material-symbols-outlined accordion-rotate text-text-main">expand_more</span>
