@@ -521,7 +521,7 @@
         </div>
     </section>
 
-    <section id="equipDetail" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+<section id="equipDetail" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
         <div class="border-b border-border pb-4">
             <button class="btn-text mb-3 flex items-center gap-1" onclick="closeEquipDetail()">
                 <span class="material-symbols-outlined text-sm">arrow_back</span> 설비 목록으로
@@ -532,13 +532,7 @@
 
         <div class="card-base p-6 rounded-md grid grid-cols-2 md:grid-cols-4 gap-6" id="detailInfoGrid"></div>
 
-        <div class="card-base overflow-hidden rounded-md">
-            <div class="px-6 py-4 bg-background border-b border-border">
-                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">history</span> 작업 이력</span>
-            </div>
-            <div id="detailHistoryWrap" class="p-6"></div>
-        </div>
-
+        <!-- 1. Laser 사용시간 (위로 올림) -->
         <div class="card-base overflow-hidden rounded-md">
             <div class="px-6 py-4 bg-background border-b border-border">
                 <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">bolt</span> Laser 사용시간</span>
@@ -546,6 +540,7 @@
             <div id="detailLaserWrap" class="p-6"></div>
         </div>
 
+        <!-- 2. Scale Head 교체 상태 (위로 올림) -->
         <div class="card-base overflow-hidden rounded-md">
             <div class="px-6 py-4 bg-background border-b border-border">
                 <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">straighten</span> Scale Head 교체 상태</span>
@@ -553,11 +548,20 @@
             <div id="detailScaleHeadWrap" class="p-6"></div>
         </div>
 
+        <!-- 3. 소모품 교환 이력 (위로 올림) -->
         <div class="card-base overflow-hidden rounded-md">
             <div class="px-6 py-4 bg-background border-b border-border">
                 <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">build</span> 소모품 교환 이력</span>
             </div>
             <div id="detailConsumablesWrap" class="p-6"></div>
+        </div>
+
+        <!-- 4. 작업 이력 (맨 아래로 내림) -->
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="px-6 py-4 bg-background border-b border-border">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">history</span> 작업 이력</span>
+            </div>
+            <div id="detailHistoryWrap" class="p-6"></div>
         </div>
     </section>
 
