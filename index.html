@@ -979,7 +979,7 @@ function elapsedParts(dtStr) {
 }
 
 // ----------------------------------------------------
-// [수정] Laser 섹션 렌더링 (N일 / 총 누적 M시간 표시, S/N 입력란)
+// [수정] Laser 섹션 렌더링 (UI 레이아웃 분리 및 결합)
 // ----------------------------------------------------
 function renderLaserSection(name) {
     const data = getMaintData(name); const l = data.laser;
@@ -996,31 +996,43 @@ function renderLaserSection(name) {
     
     const wrap = document.getElementById('detailLaserWrap');
     wrap.innerHTML = `
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end mb-4">
-            <div><label class="label-base mb-2">최근 교체일시</label><input type="datetime-local" class="input-base h-10 px-3 rounded" id="laserDateInput" value="${normalizeDatetimeValue(l.replaceDate)}"></div>
-            <div><label class="label-base mb-2">수동입력 (누적 시간 단위)</label><input type="number" class="input-base h-10 px-3 rounded" id="laserOffsetInput" value="${totalManualHours}" placeholder="예: 168 (7일)"></div>
-            <button class="btn-primary h-10 text-[10px] rounded" onclick="saveLaserSettings('${escapeHtml(name)}')">설정 저장</button>
+        <!-- 1. 수동입력(누적 시간) 단독 영역 -->
+        <div class="flex flex-wrap gap-4 items-end mb-6 bg-background p-4 border border-border rounded">
+            <div class="w-full md:w-64">
+                <label class="label-base mb-2">수동입력 (누적 시간 단위 추가)</label>
+                <input type="number" class="input-base h-10 px-3 rounded" id="laserOffsetInput" value="${totalManualHours}" placeholder="예: 168 (7일)">
+            </div>
+            <button class="btn-text bg-surface border border-border h-10 px-6 text-[10px] rounded hover:!text-primary" onclick="saveLaserOffset('${escapeHtml(name)}')">시간 저장</button>
         </div>
         
-        <div class="bg-background p-4 border border-border rounded mb-4">
-            <div class="flex items-center justify-between mb-4">
-                <div><span class="label-base !mb-0">누적 사용시간</span>
-                <p class="text-2xl font-black text-primary mt-1">${hasRecord ? `${displayDays}일 / ${totalHours}시간 사용 중` : '기록 없음'}</p></div>
+        <div class="mb-4">
+            <div class="flex items-center justify-between mb-2">
+                <div>
+                    <span class="label-base !mb-0">현재 누적 사용시간</span>
+                    <p class="text-2xl font-black text-primary mt-1">${hasRecord ? `${displayDays}일 / ${totalHours}시간 사용 중` : '기록 없음'}</p>
+                    ${l.replaceDate ? `<p class="text-xs text-text-muted mt-1">기준 시작일: <span class="font-mono">${l.replaceDate.replace('T', ' ')}</span></p>` : ''}
+                </div>
             </div>
-            <!-- S/N 입력 폼 -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end p-3 bg-surface border border-border rounded">
+        </div>
+
+        <!-- 2. 신규 교체 등록 (교체일시 + S/N + 완료버튼을 하나의 세트로 결합) -->
+        <div class="p-4 bg-surface border border-border rounded mb-6 shadow-sm">
+            <span class="label-base mb-3 text-primary block">🔄 신규 교체 등록</span>
+            <div class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+                <div><label class="label-base mb-2">교체 일시</label><input type="datetime-local" class="input-base h-10 px-3 rounded" id="laserNewDateInput" value="${localDatetimeValue(new Date())}"></div>
                 <div><label class="label-base mb-2">Head S/N</label><input type="text" class="input-base h-10 px-3 rounded" id="laserSnHead" placeholder="입력"></div>
                 <div><label class="label-base mb-2">P/S S/N</label><input type="text" class="input-base h-10 px-3 rounded" id="laserSnPs" placeholder="입력"></div>
                 <div><label class="label-base mb-2">Diode S/N</label><input type="text" class="input-base h-10 px-3 rounded" id="laserSnDiode" placeholder="입력"></div>
-                <button class="btn-primary h-10 text-[10px] rounded" onclick="completeLaserReplace('${escapeHtml(name)}')">🔄 이력 추가 및 교체완료</button>
+                <button class="btn-primary h-10 text-[10px] rounded" onclick="completeLaserReplace('${escapeHtml(name)}')">이력 추가 및 교체완료</button>
             </div>
         </div>
         
+        <!-- 3. 교체 이력 리스트 -->
         <div><span class="label-base mb-2 block">교체 이력</span>
             ${l.history.length === 0 ? '<p class="text-text-muted text-xs">교체 이력이 없습니다.</p>' : 
             `<ul class="space-y-1">${l.history.slice().reverse().map((h, i) => {
                 const originalIndex = l.history.length - 1 - i;
-                return `<li class="text-xs text-text-muted border-b border-border/50 py-2 flex justify-between items-center">
+                return `<li class="text-xs text-text-muted border-b border-border/50 py-2 flex justify-between items-center hover:bg-background/50 transition-colors px-2 rounded">
                     <div>
                         <span class="font-bold text-text-main">${escapeHtml(h.date)}</span> 교체 (사용 ${h.daysUsed}일 / ${h.hoursUsed || 0}시간)<br>
                         <span class="text-[10px]">Head S/N: ${escapeHtml(h.snHead || '-')} | P/S S/N: ${escapeHtml(h.snPs || '-')} | Diode S/N: ${escapeHtml(h.snDiode || '-')}</span>
@@ -1032,47 +1044,53 @@ function renderLaserSection(name) {
     `;
 }
 
+// [수정됨] 수동입력(누적 시간) 전용 저장 함수
+function saveLaserOffset(name) {
+    const offset = parseInt(document.getElementById('laserOffsetInput').value, 10) || 0;
+    const data = getMaintData(name);
+    data.laser.offsetHours = offset;
+    saveMaintData(name, data); 
+    showToast('저장', '수동입력 시간이 업데이트되었습니다.'); 
+    renderLaserSection(name);
+}
+
+// [수정됨] 교체 일시와 S/N을 한 번에 처리하는 교체 완료 함수
 function completeLaserReplace(name) {
+    const newDateVal = document.getElementById('laserNewDateInput').value;
     const snHead = document.getElementById('laserSnHead').value.trim();
     const snPs = document.getElementById('laserSnPs').value.trim();
     const snDiode = document.getElementById('laserSnDiode').value.trim();
     
+    if (!newDateVal) return alert("교체 일시를 입력해주세요.");
+
     const data = getMaintData(name); const l = data.laser;
     const auto = elapsedParts(l.replaceDate);
     const totalManualHours = l.offsetHours !== undefined ? l.offsetHours : (l.offsetDays ? l.offsetDays * 24 : 0);
     
-    // 총 누적 시간 계산
+    // 총 누적 시간 계산 (기존 누적 기록을 이력에 남김)
     const totalHours = (auto.days * 24) + auto.hours + totalManualHours;
     const displayDays = Math.floor(totalHours / 24);
     
-    if ((displayDays > 0 || totalHours > 0) && !confirm(`현재 누적 ${displayDays}일 / ${totalHours}시간 사용 기록을 이력에 남기고 지금 시각으로 교체 처리하시겠습니까?`)) return;
+    if ((displayDays > 0 || totalHours > 0) && !confirm(`현재 누적 ${displayDays}일 / ${totalHours}시간 사용 기록을 이력에 남기고, 지정한 시각(${newDateVal.replace('T', ' ')})으로 교체 처리하시겠습니까?`)) return;
     
-    const now = new Date(); const nowVal = localDatetimeValue(now);
     l.history.push({ 
-        date: nowVal.replace('T', ' '), 
+        date: newDateVal.replace('T', ' '), 
         daysUsed: displayDays, 
-        hoursUsed: totalHours, // 나머지 시간이 아닌 총 누적 시간을 저장합니다.
+        hoursUsed: totalHours, 
         snHead: snHead,
         snPs: snPs,
         snDiode: snDiode,
-        savedAt: now.toISOString() 
+        savedAt: new Date().toISOString() 
     });
-    l.replaceDate = nowVal; 
-    l.offsetHours = 0; // 초기화
-    saveMaintData(name, data); showToast('교체 완료', 'Laser 교체 이력이 저장되고 카운터가 초기화되었습니다.'); renderLaserSection(name);
+    
+    l.replaceDate = newDateVal; 
+    l.offsetHours = 0; // 새 레이저로 교체되었으므로 수동입력 보정치 초기화
+    saveMaintData(name, data); 
+    showToast('교체 완료', 'Laser 교체 이력이 저장되고 카운터가 초기화되었습니다.'); 
+    renderLaserSection(name);
 }
 
-function saveLaserSettings(name) {
-    const date = document.getElementById('laserDateInput').value;
-    const offset = parseInt(document.getElementById('laserOffsetInput').value, 10) || 0;
-    const data = getMaintData(name);
-    data.laser.replaceDate = date || null; 
-    data.laser.offsetHours = offset;
-    saveMaintData(name, data); showToast('저장', 'Laser 사용시간 정보가 저장되었습니다.'); renderLaserSection(name);
-}
-
-
-// [신규 추가] Laser 이력 삭제 기능
+// Laser 이력 삭제 함수 (유지)
 function deleteLaserHistory(name, index) {
     if (!confirm('해당 교체 이력을 삭제하시겠습니까?')) return;
     const data = getMaintData(name);
