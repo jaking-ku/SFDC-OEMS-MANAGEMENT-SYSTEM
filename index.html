@@ -521,6 +521,47 @@
         </div>
     </section>
 
+    <section id="equipDetail" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+        <div class="border-b border-border pb-4">
+            <button class="btn-text mb-3 flex items-center gap-1" onclick="closeEquipDetail()">
+                <span class="material-symbols-outlined text-sm">arrow_back</span> 설비 목록으로
+            </button>
+            <h2 class="text-2xl font-bold text-text-main" id="detailTitle">-</h2>
+            <p class="text-sm text-text-muted mt-1" id="detailSubtitle">-</p>
+        </div>
+
+        <div class="card-base p-6 rounded-md grid grid-cols-2 md:grid-cols-4 gap-6" id="detailInfoGrid"></div>
+
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="px-6 py-4 bg-background border-b border-border">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">history</span> 작업 이력</span>
+            </div>
+            <div id="detailHistoryWrap" class="p-6"></div>
+        </div>
+
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="px-6 py-4 bg-background border-b border-border">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">bolt</span> Laser 사용시간</span>
+            </div>
+            <div id="detailLaserWrap" class="p-6"></div>
+        </div>
+
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="px-6 py-4 bg-background border-b border-border">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">straighten</span> Scale Head 교체 상태</span>
+            </div>
+            <div id="detailScaleHeadWrap" class="p-6"></div>
+        </div>
+
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="px-6 py-4 bg-background border-b border-border">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">build</span> 소모품 교환 이력</span>
+            </div>
+            <div id="detailConsumablesWrap" class="p-6"></div>
+        </div>
+    </section>
+
+
     <section id="history" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
         <div class="flex items-end justify-between border-b border-border pb-4 flex-wrap gap-4">
             <div>
@@ -718,7 +759,7 @@ window.onload = async function() {
 
 async function resetAllData() { 
     if(!confirm("⚠️ [경고] 모든 데이터를 완전히 초기화하시겠습니까?")) return; 
-    localStorage.setItem("equipmentData", "[]"); localStorage.setItem("recipientData", "{}"); localStorage.setItem("machineNotes", "{}"); 
+    localStorage.setItem("equipmentData", "[]"); localStorage.setItem("recipientData", "{}"); localStorage.setItem("machineNotes", "{}"); localStorage.setItem("equipMaintenance", "{}"); 
     await putIDBHistory([]); // DB 비우기
     renderTable(); renderRecipientTable(); await updateHistoryBadge(); 
     if(document.getElementById('history').classList.contains('block')) await renderHistory(); 
@@ -837,8 +878,346 @@ async function renderHistory() {
     body.appendChild(ul); wrap.appendChild(body); timelineWrap.appendChild(wrap);
 }
 
+// ── 설비 상세페이지 라우팅 ──
+function openEquipDetail(name) {
+    const data = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+    const eq = data.find(d => d.name === name);
+    if (!eq) { showToast("오류", "해당 설비를 찾을 수 없습니다."); return; }
+    window.location.hash = `detail-${encodeURIComponent(name)}`;
+    document.querySelectorAll('.tab-content').forEach(s => { s.classList.remove('block'); s.classList.add('hidden'); });
+    document.getElementById('equipDetail').classList.remove('hidden');
+    document.getElementById('equipDetail').classList.add('block');
+    document.querySelectorAll('nav a').forEach(a => { a.classList.remove('nav-active', 'text-text-main'); a.classList.add('text-text-muted'); });
+    renderEquipDetail(eq);
+    if (window.innerWidth < 768) closeSidebar();
+}
+function closeEquipDetail() {
+    window.location.hash = '';
+    const dbNav = Array.from(document.querySelectorAll('nav a')).find(a => (a.getAttribute('onclick') || '').includes("'database'"));
+    switchTab('database', dbNav);
+}
+async function renderEquipDetail(eq) {
+    document.getElementById('detailTitle').textContent = eq.name;
+    document.getElementById('detailSubtitle').textContent = `${eq.line || '-'} Line · ${eq.model || '-'} · ${eq.location || '-'}`;
+    document.getElementById('detailInfoGrid').innerHTML = `
+        <div><span class="label-base">라인</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.line || '-')}</p></div>
+        <div><span class="label-base">모델명</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.model || '-')}</p></div>
+        <div><span class="label-base">S/N</span><p class="text-sm font-mono text-text-main mt-1">${escapeHtml(eq.sn || '-')}</p></div>
+        <div><span class="label-base">위치</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.location || '-')}</p></div>
+    `;
+    const wrap = document.getElementById('detailHistoryWrap');
+    wrap.innerHTML = '<p class="text-text-muted text-xs">불러오는 중...</p>';
+    const raw = await getIDBHistory();
+    const entries = raw.filter(e => !e.isDeleted && e.machine === eq.name).sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
+    if (entries.length === 0) {
+        wrap.innerHTML = '<p class="text-text-muted text-xs">등록된 작업 이력이 없습니다.</p>';
+    } else {
+        const ul = document.createElement('ul'); ul.className = 'relative space-y-0 pl-8';
+        ul.innerHTML = '<div class="timeline-line"></div>';
+        entries.forEach((e, idx) => {
+            const li = document.createElement('li'); li.className = 'timeline-item relative flex gap-5 pb-8'; li.style.animationDelay = `${idx * 50}ms`;
+            const d = new Date(e.savedAt); const savedStr = `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+            li.innerHTML = `<div class="timeline-dot mt-1"></div><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-1"><span class="px-2 py-0.5 border border-border text-primary text-[10px] font-bold rounded">EVENT</span><span class="text-sm font-black text-text-main">${escapeHtml(e.date || '날짜 미상')}</span></div>
+                <div class="${e.rawText ? 'cursor-pointer hover:text-primary transition-colors' : ''}" ${e.rawText ? `onclick="document.getElementById('detailRaw_${e.id}').classList.toggle('hidden')"` : ''}><p class="text-sm text-text-main font-medium leading-relaxed">${escapeHtml(e.content || '—')}</p>${e.rawText ? '<span class="material-symbols-outlined text-sm text-text-muted mt-1 block">open_in_full</span>' : ''}</div>
+                ${e.rawText ? `<div id="detailRaw_${e.id}" class="hidden mt-3 p-4 bg-background/70 text-text-main border border-border text-xs leading-relaxed whitespace-pre-wrap rounded backdrop-blur-sm">${escapeHtml(e.rawText)}</div>` : ''}
+                <div class="mt-3 text-[10px] text-text-muted flex gap-3 items-center flex-wrap"><span>👤 ${escapeHtml(e.worker || '—')}</span><span>⏱️ Recorded: ${savedStr}</span><button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="loadToMailGen('${escapeHtml(e.machine)}', '${escapeHtml(e.content).replace(/'/g, "\\'")}')">메일 작성</button></div></div>`;
+            ul.appendChild(li);
+        });
+        wrap.innerHTML = ''; wrap.appendChild(ul);
+    }
+    renderLaserSection(eq.name);
+    renderScaleHeadSection(eq.name);
+    renderConsumablesSection(eq.name);
+}
+
+// ── 설비별 유지보수 데이터 (Laser / Scale Head / 소모품) ──
+const SCALE_AXES = [
+    { key: 'X', label: 'X' },
+    { key: 'Y1', label: 'Y1 (YL)' },
+    { key: 'Y2', label: 'Y2 (YR)' },
+    { key: 'Z1', label: 'Z1 (ZL)' },
+    { key: 'Z2', label: 'Z2 (ZR)' },
+];
+function getMaintData(name) {
+    const all = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+    if (!all[name]) all[name] = {};
+    const d = all[name];
+    if (!d.laser) d.laser = { replaceDate: null, offsetDays: 0, history: [] };
+    // 구버전(단일 Scale Head) 구조 감지 시 축 구조로 마이그레이션
+    if (!d.scaleHead || typeof d.scaleHead !== 'object' || 'replaceDate' in d.scaleHead) d.scaleHead = {};
+    SCALE_AXES.forEach(a => { if (!d.scaleHead[a.key]) d.scaleHead[a.key] = { replaceDate: null, history: [] }; });
+    if (!d.consumables) d.consumables = [];
+    all[name] = d;
+    return d;
+}
+function saveMaintData(name, data) {
+    const all = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+    all[name] = data;
+    localStorage.setItem("equipMaintenance", JSON.stringify(all));
+    if (typeof autoMergeAndSave === "function") autoMergeAndSave();
+}
+function daysSince(dateStr) {
+    if (!dateStr) return 0;
+    const d = new Date(dateStr + 'T00:00:00');
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    return Math.floor((today - d) / 86400000);
+}
+function localDatetimeValue(date) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+function normalizeDatetimeValue(v) { if (!v) return ''; return v.length === 10 ? v + 'T00:00' : v; }
+function elapsedParts(dtStr) {
+    if (!dtStr) return { days: 0, hours: 0 };
+    const d = new Date(normalizeDatetimeValue(dtStr));
+    let diffMs = new Date() - d; if (diffMs < 0) diffMs = 0;
+    return { days: Math.floor(diffMs / 86400000), hours: Math.floor((diffMs % 86400000) / 3600000) };
+}
+
+// ----------------------------------------------------
+// [수정] Laser 섹션 렌더링 (N일 / 총 누적 M시간 표시, S/N 입력란)
+// ----------------------------------------------------
+function renderLaserSection(name) {
+    const data = getMaintData(name); const l = data.laser;
+    const auto = elapsedParts(l.replaceDate);
+    
+    // 기존 보정일수(offsetDays) 데이터가 있으면 시간으로 변환하여 하위호환성 유지
+    const totalManualHours = l.offsetHours !== undefined ? l.offsetHours : (l.offsetDays ? l.offsetDays * 24 : 0);
+    
+    // 총 누적 시간 및 일수 계산
+    const totalHours = (auto.days * 24) + auto.hours + totalManualHours;
+    const displayDays = Math.floor(totalHours / 24);
+    
+    const hasRecord = l.replaceDate || totalManualHours > 0;
+    
+    const wrap = document.getElementById('detailLaserWrap');
+    wrap.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end mb-4">
+            <div><label class="label-base mb-2">최근 교체일시</label><input type="datetime-local" class="input-base h-10 px-3 rounded" id="laserDateInput" value="${normalizeDatetimeValue(l.replaceDate)}"></div>
+            <div><label class="label-base mb-2">수동입력 (누적 시간 단위)</label><input type="number" class="input-base h-10 px-3 rounded" id="laserOffsetInput" value="${totalManualHours}" placeholder="예: 168 (7일)"></div>
+            <button class="btn-primary h-10 text-[10px] rounded" onclick="saveLaserSettings('${escapeHtml(name)}')">설정 저장</button>
+        </div>
+        
+        <div class="bg-background p-4 border border-border rounded mb-4">
+            <div class="flex items-center justify-between mb-4">
+                <div><span class="label-base !mb-0">누적 사용시간</span>
+                <p class="text-2xl font-black text-primary mt-1">${hasRecord ? `${displayDays}일 / ${totalHours}시간 사용 중` : '기록 없음'}</p></div>
+            </div>
+            <!-- S/N 입력 폼 -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end p-3 bg-surface border border-border rounded">
+                <div><label class="label-base mb-2">Head S/N</label><input type="text" class="input-base h-10 px-3 rounded" id="laserSnHead" placeholder="입력"></div>
+                <div><label class="label-base mb-2">P/S S/N</label><input type="text" class="input-base h-10 px-3 rounded" id="laserSnPs" placeholder="입력"></div>
+                <div><label class="label-base mb-2">Diode S/N</label><input type="text" class="input-base h-10 px-3 rounded" id="laserSnDiode" placeholder="입력"></div>
+                <button class="btn-primary h-10 text-[10px] rounded" onclick="completeLaserReplace('${escapeHtml(name)}')">🔄 이력 추가 및 교체완료</button>
+            </div>
+        </div>
+        
+        <div><span class="label-base mb-2 block">교체 이력</span>
+            ${l.history.length === 0 ? '<p class="text-text-muted text-xs">교체 이력이 없습니다.</p>' : 
+            `<ul class="space-y-1">${l.history.slice().reverse().map((h, i) => {
+                const originalIndex = l.history.length - 1 - i;
+                return `<li class="text-xs text-text-muted border-b border-border/50 py-2 flex justify-between items-center">
+                    <div>
+                        <span class="font-bold text-text-main">${escapeHtml(h.date)}</span> 교체 (사용 ${h.daysUsed}일 / ${h.hoursUsed || 0}시간)<br>
+                        <span class="text-[10px]">Head S/N: ${escapeHtml(h.snHead || '-')} | P/S S/N: ${escapeHtml(h.snPs || '-')} | Diode S/N: ${escapeHtml(h.snDiode || '-')}</span>
+                    </div>
+                    <button class="btn-text hover:!text-red-600 ml-2" onclick="deleteLaserHistory('${escapeHtml(name)}', ${originalIndex})">삭제</button>
+                </li>`;
+            }).join('')}</ul>`}
+        </div>
+    `;
+}
+
+function completeLaserReplace(name) {
+    const snHead = document.getElementById('laserSnHead').value.trim();
+    const snPs = document.getElementById('laserSnPs').value.trim();
+    const snDiode = document.getElementById('laserSnDiode').value.trim();
+    
+    const data = getMaintData(name); const l = data.laser;
+    const auto = elapsedParts(l.replaceDate);
+    const totalManualHours = l.offsetHours !== undefined ? l.offsetHours : (l.offsetDays ? l.offsetDays * 24 : 0);
+    
+    // 총 누적 시간 계산
+    const totalHours = (auto.days * 24) + auto.hours + totalManualHours;
+    const displayDays = Math.floor(totalHours / 24);
+    
+    if ((displayDays > 0 || totalHours > 0) && !confirm(`현재 누적 ${displayDays}일 / ${totalHours}시간 사용 기록을 이력에 남기고 지금 시각으로 교체 처리하시겠습니까?`)) return;
+    
+    const now = new Date(); const nowVal = localDatetimeValue(now);
+    l.history.push({ 
+        date: nowVal.replace('T', ' '), 
+        daysUsed: displayDays, 
+        hoursUsed: totalHours, // 나머지 시간이 아닌 총 누적 시간을 저장합니다.
+        snHead: snHead,
+        snPs: snPs,
+        snDiode: snDiode,
+        savedAt: now.toISOString() 
+    });
+    l.replaceDate = nowVal; 
+    l.offsetHours = 0; // 초기화
+    saveMaintData(name, data); showToast('교체 완료', 'Laser 교체 이력이 저장되고 카운터가 초기화되었습니다.'); renderLaserSection(name);
+}
+
+function saveLaserSettings(name) {
+    const date = document.getElementById('laserDateInput').value;
+    const offset = parseInt(document.getElementById('laserOffsetInput').value, 10) || 0;
+    const data = getMaintData(name);
+    data.laser.replaceDate = date || null; 
+    data.laser.offsetHours = offset;
+    saveMaintData(name, data); showToast('저장', 'Laser 사용시간 정보가 저장되었습니다.'); renderLaserSection(name);
+}
+
+
+// [신규 추가] Laser 이력 삭제 기능
+function deleteLaserHistory(name, index) {
+    if (!confirm('해당 교체 이력을 삭제하시겠습니까?')) return;
+    const data = getMaintData(name);
+    data.laser.history.splice(index, 1);
+    saveMaintData(name, data);
+    renderLaserSection(name);
+}
+
+function toggleScaleHeadHistory(key) { document.getElementById(`scaleHeadHist_${key}`).classList.toggle('hidden'); }
+function saveScaleHeadAxisDate(name, key, value) {
+    const data = getMaintData(name);
+    data.scaleHead[key].replaceDate = value || null;
+    saveMaintData(name, data); renderScaleHeadSection(name);
+}
+
+// ----------------------------------------------------
+// [수정] Scale Head 섹션 렌더링 (지정 날짜 및 S/N 입력칸 추가)
+// ----------------------------------------------------
+function renderScaleHeadSection(name) {
+    const data = getMaintData(name);
+    const wrap = document.getElementById('detailScaleHeadWrap');
+    
+    wrap.innerHTML = `
+        <div class="overflow-x-auto border border-border rounded">
+            <table class="w-full text-left text-sm">
+                <thead class="bg-background border-b border-border">
+                    <tr><th class="th-base px-4 w-16">축</th><th class="th-base px-4">최근 교체 상태</th><th class="th-base px-4">신규 교체 등록</th><th class="th-base px-4 text-right">관리</th></tr>
+                </thead>
+                <tbody class="divide-y divide-border">
+                    ${SCALE_AXES.map(a => {
+                        const ax = data.scaleHead[a.key];
+                        const elapsed = daysSince(ax.replaceDate);
+                        return `<tr>
+                            <td class="td-base px-4 font-bold text-primary">${a.label}</td>
+                            <td class="td-base px-4 text-xs">
+                                최근일자: ${ax.replaceDate ? `<span class="font-bold text-text-main">${ax.replaceDate}</span>` : '없음'}<br>
+                                경과일수: ${ax.replaceDate ? `<span class="font-bold text-primary">${elapsed}일</span>` : '-'}
+                            </td>
+                            <td class="td-base px-4">
+                                <div class="flex flex-col gap-2 py-1 w-40">
+                                    <input type="date" class="input-base h-8 px-2 rounded text-xs" id="shDate_${a.key}" value="${new Date().toISOString().slice(0, 10)}">
+                                    <input type="text" class="input-base h-8 px-2 rounded text-xs" id="shSn_${a.key}" placeholder="S/N 입력">
+                                </div>
+                            </td>
+                            <td class="td-base px-4 text-right whitespace-nowrap">
+                                <button class="btn-text" onclick="toggleScaleHeadHistory('${a.key}')">이력(${ax.history.length})</button>
+                                <button class="btn-primary px-3 py-1 mt-1 text-[10px] rounded" onclick="completeScaleHeadReplace('${escapeHtml(name)}','${a.key}')">교체완료</button>
+                            </td>
+                        </tr>
+                        <tr id="scaleHeadHist_${a.key}" class="hidden">
+                            <td colspan="4" class="td-base px-4 bg-background/40">
+                                ${ax.history.length === 0 ? '<p class="text-text-muted text-xs py-2">교체 이력이 없습니다.</p>' : 
+                                `<ul class="py-2 space-y-1">
+                                    ${ax.history.slice().reverse().map((h, i) => {
+                                        const originalIndex = ax.history.length - 1 - i;
+                                        return `<li class="text-xs text-text-muted flex justify-between items-center border-b border-border/50 pb-1">
+                                            <span>${escapeHtml(h.date)} 교체 (이전 ${h.daysUsed}일 사용) - S/N: ${escapeHtml(h.sn || '-')}</span>
+                                            <button class="btn-text hover:!text-red-600" onclick="deleteScaleHeadHistory('${escapeHtml(name)}', '${a.key}', ${originalIndex})">삭제</button>
+                                        </li>`;
+                                    }).join('')}
+                                </ul>`}
+                            </td>
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function completeScaleHeadReplace(name, key) {
+    const dateInput = document.getElementById(`shDate_${key}`).value;
+    const snInput = document.getElementById(`shSn_${key}`).value.trim();
+    
+    if (!dateInput) return alert("교체 날짜를 입력해주세요.");
+    
+    const data = getMaintData(name); const ax = data.scaleHead[key];
+    const elapsed = daysSince(ax.replaceDate);
+    
+    if (ax.replaceDate && !confirm(`[${key}] 현재 ${elapsed}일 경과 기록을 이력에 남기고 입력한 날짜(${dateInput})로 교체 처리하시겠습니까?`)) return;
+    
+    ax.history.push({ 
+        date: dateInput, 
+        daysUsed: elapsed, 
+        sn: snInput,
+        savedAt: new Date().toISOString() 
+    });
+    ax.replaceDate = dateInput;
+    
+    saveMaintData(name, data); 
+    showToast('교체 완료', `[${key}] Scale Head 교체 이력이 저장되었습니다.`); 
+    renderScaleHeadSection(name);
+}
+
+// [신규 추가] Scale Head 이력 삭제 기능
+function deleteScaleHeadHistory(name, key, index) {
+    if (!confirm('해당 이력을 삭제하시겠습니까?')) return;
+    const data = getMaintData(name);
+    data.scaleHead[key].history.splice(index, 1);
+    saveMaintData(name, data);
+    renderScaleHeadSection(name);
+    // 삭제 후 렌더링되더라도 해당 축의 이력창을 다시 열어둠
+    document.getElementById(`scaleHeadHist_${key}`).classList.remove('hidden');
+}
+
+function renderConsumablesSection(name) {
+    const data = getMaintData(name);
+    const list = data.consumables.slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+    const wrap = document.getElementById('detailConsumablesWrap');
+    wrap.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end mb-4">
+            <div><label class="label-base mb-2">부품명</label><input class="input-base h-10 px-3 rounded" id="consumNameInput" placeholder="예: Revolver"></div>
+            <div><label class="label-base mb-2">교체일</label><input type="date" class="input-base h-10 px-3 rounded" id="consumDateInput"></div>
+            <div><label class="label-base mb-2">메모</label><input class="input-base h-10 px-3 rounded" id="consumNoteInput" placeholder="선택 입력"></div>
+            <button class="btn-primary h-10 text-[10px] rounded" onclick="addConsumable('${escapeHtml(name)}')">추가</button>
+        </div>
+        <div class="overflow-x-auto border border-border rounded">
+            <table class="w-full text-left text-sm">
+                <thead class="bg-background border-b border-border"><tr><th class="th-base px-4">부품명</th><th class="th-base px-4">교체일</th><th class="th-base px-4">메모</th><th class="th-base px-4 text-right">관리</th></tr></thead>
+                <tbody class="divide-y divide-border">${list.length === 0 ? '<tr><td colspan="4" class="td-base px-4 text-text-muted text-xs">등록된 소모품 교환 이력이 없습니다.</td></tr>' : list.map(c => `<tr><td class="td-base px-4 font-medium">${escapeHtml(c.name)}</td><td class="td-base px-4 font-mono text-xs">${escapeHtml(c.date || '-')}</td><td class="td-base px-4 text-text-muted text-xs">${escapeHtml(c.note || '-')}</td><td class="td-base px-4 text-right"><button class="btn-text hover:!text-red-600" onclick="deleteConsumable('${escapeHtml(name)}','${c.id}')">삭제</button></td></tr>`).join('')}</tbody>
+            </table>
+        </div>
+    `;
+}
+function addConsumable(name) {
+    const nameInput = document.getElementById('consumNameInput').value.trim();
+    const date = document.getElementById('consumDateInput').value;
+    const note = document.getElementById('consumNoteInput').value.trim();
+    if (!nameInput) { alert('부품명을 입력해주세요.'); return; }
+    const data = getMaintData(name);
+    data.consumables.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: nameInput, date: date || new Date().toISOString().slice(0, 10), note, savedAt: new Date().toISOString() });
+    saveMaintData(name, data); showToast('추가', '소모품 교환 이력이 추가되었습니다.'); renderConsumablesSection(name);
+}
+function deleteConsumable(name, id) {
+    if (!confirm('삭제하시겠습니까?')) return;
+    const data = getMaintData(name);
+    data.consumables = data.consumables.filter(c => c.id !== id);
+    saveMaintData(name, data); renderConsumablesSection(name);
+}
+window.addEventListener('load', () => {
+    if (location.hash.startsWith('#detail-')) {
+        const name = decodeURIComponent(location.hash.replace('#detail-', ''));
+        openEquipDetail(name);
+    }
+});
+
 function renderRecipientTable() { const tbody = document.getElementById("recipientTableBody"); const data = JSON.parse(localStorage.getItem("recipientData") || "{}"); tbody.innerHTML = ""; Object.keys(data).sort().forEach(line => { tbody.innerHTML += `<tr class="hover:bg-background/40 transition-colors"><td class="td-base font-medium px-6">${line}</td><td class="td-base text-text-muted px-6" id="recip_${line}">${data[line]}</td><td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-text" onclick="copyRecipient('${line}')">Copy</button><button class="btn-text" onclick="editRecipient('${line}')">Edit</button><button class="btn-text hover:!text-red-600" onclick="deleteRecipient('${line}')">Del</button></div></td></tr>`; }); }
-function renderTable() { const tbody = document.getElementById("dataTableBody"); const raw = JSON.parse(localStorage.getItem("equipmentData") || "[]"); tbody.innerHTML = ""; const data = raw.map((item, i) => ({ item, i })).sort((a, b) => a.item.line.localeCompare(b.item.line, 'ko', { numeric: true }) || a.i - b.i); data.forEach(({ item, i }) => { if (item.isEditing) { tbody.innerHTML += `<tr class="bg-background/60"><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editLine_${i}" value="${item.line}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editModel_${i}" value="${item.model}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editName_${i}" value="${item.name}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editSN_${i}" value="${item.sn}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editLoc_${i}" value="${item.location}"></td><td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-primary px-3 py-1 text-[10px] rounded" onclick="saveEdit(${i})">Save</button></div></td></tr>`; } else { tbody.innerHTML += `<tr class="hover:bg-background/40 transition-colors"><td class="td-base px-6 font-medium">${item.line}</td><td class="td-base px-6 text-text-muted">${item.model}</td><td class="td-base px-6 text-primary font-bold">${item.name}</td><td class="td-base px-6 text-xs text-text-muted font-mono">${item.sn}</td><td class="td-base px-6 text-text-muted">${item.location}</td><td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-text" onclick="enableEdit(${i})">Edit</button><button class="btn-text hover:!text-red-600" onclick="deleteData(${i})">Del</button></div></td></tr>`; } }); filterTable(); }
+function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function renderTable() { const tbody = document.getElementById("dataTableBody"); const raw = JSON.parse(localStorage.getItem("equipmentData") || "[]"); tbody.innerHTML = ""; const data = raw.map((item, i) => ({ item, i })).sort((a, b) => a.item.line.localeCompare(b.item.line, 'ko', { numeric: true }) || a.i - b.i); data.forEach(({ item, i }) => { if (item.isEditing) { tbody.innerHTML += `<tr class="bg-background/60"><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editLine_${i}" value="${item.line}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editModel_${i}" value="${item.model}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editName_${i}" value="${item.name}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editSN_${i}" value="${item.sn}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editLoc_${i}" value="${item.location}"></td><td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-primary px-3 py-1 text-[10px] rounded" onclick="saveEdit(${i})">Save</button></div></td></tr>`; } else { tbody.innerHTML += `<tr class="hover:bg-background/40 transition-colors"><td class="td-base px-6 font-medium">${item.line}</td><td class="td-base px-6 text-text-muted">${item.model}</td><td class="td-base px-6 text-primary font-bold equip-link cursor-pointer hover:underline" data-name="${escapeHtml(item.name)}">${item.name}</td><td class="td-base px-6 text-xs text-text-muted font-mono">${item.sn}</td><td class="td-base px-6 text-text-muted">${item.location}</td><td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-text" onclick="enableEdit(${i})">Edit</button><button class="btn-text hover:!text-red-600" onclick="deleteData(${i})">Del</button></div></td></tr>`; } }); tbody.querySelectorAll(".equip-link").forEach(el => el.addEventListener("click", () => openEquipDetail(el.dataset.name))); filterTable(); }
 
 function extractData() {
     const text = document.getElementById("mailInput").value; 
