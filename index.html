@@ -1531,7 +1531,7 @@ async function handleMobileDB(event) {
     reader.readAsText(file);
 }
 
-// 2. [수정] 메인 Box 동기화 함수
+// 2. [수정] 메인 Box 동기화 함수ㅅ
 async function syncWithBox(isUserGesture = false, isPushSettings = false, isManualButton = false) {
     let isSyncingStatus = typeof isSyncing !== 'undefined' ? isSyncing : false;
     if (isSyncingStatus) { if (isPushSettings && typeof pendingPush !== 'undefined') pendingPush = true; return; }
