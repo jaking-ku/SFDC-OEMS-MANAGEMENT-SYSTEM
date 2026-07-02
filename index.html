@@ -1439,7 +1439,7 @@ async function linkBoxFile() {
     }
 }
 
-// 💡 [아이폰 전용] Box 앱에서 DB.txt를 선택했을 때 병합을 처리하는 함수
+// 1. [수정] 모바일/아이폰 전용 DB 병합 함수
 async function handleMobileDB(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -1450,7 +1450,6 @@ async function handleMobileDB(event) {
         try {
             let boxData = text ? JSON.parse(text) : {};
             
-            // --- PC와 100% 동일한 데이터 병합(Merge) 엔진 가동 ---
             let boxHistory = boxData.workHistory || [];
             let localHistory = await getIDBHistory();
             let mergedMap = new Map();
@@ -1483,10 +1482,11 @@ async function handleMobileDB(event) {
             if(boxData.equipment && !isEditingEq) { localStorage.setItem("equipmentData", JSON.stringify(boxData.equipment)); renderTable(); }
             if(boxData.recipient) { localStorage.setItem("recipientData", JSON.stringify(boxData.recipient)); renderRecipientTable(); }
             if(boxData.machineNotes) localStorage.setItem("machineNotes", JSON.stringify(boxData.machineNotes));
+            // 💡 [추가됨] 소모품(Laser, Scale Head) 이력 병합
+            if(boxData.equipMaintenance) localStorage.setItem("equipMaintenance", JSON.stringify(boxData.equipMaintenance)); 
 
             let localShipping = JSON.parse(localStorage.getItem("shippingData") || "[]");
             let boxShipping = boxData.shippingData || [];
-            // ── 충돌 해결: updatedAt 타임스탬프 기준으로 최신 수정 우선 ──
             function _mergeItem(a, b) {
                 if (a.status === 'deleted') return a;
                 if (b.status === 'deleted') return b;
@@ -1503,14 +1503,12 @@ async function handleMobileDB(event) {
             localStorage.setItem("shippingData", JSON.stringify(mergedShipping));
             boxData.shippingData = mergedShipping;
 
-            // 모바일 화면 리렌더링
             if(document.getElementById('shipping-board') && !document.getElementById('shipping-board').classList.contains('hidden')) {
                 if(typeof renderKanban === 'function') renderKanban();
             }
             await updateHistoryBadge();
             if(document.getElementById('history') && document.getElementById('history').classList.contains('block')) await renderHistory();
 
-            // 💡 아이폰은 '자동 덮어쓰기'가 안되므로, 병합 완료된 최신 파일을 다운로드 받도록 유도
             alert("✅ Box 데이터 로드 및 로컬 데이터 병합 완료!\n(아이폰은 보안상 파일 자동 저장이 불가능합니다.)");
             
             if (confirm("방금 병합된 최신 데이터를 파일로 다운로드 하시겠습니까?\n다운로드 후 Box 폴더에 직접 덮어쓰시면 팀원들에게도 적용됩니다.")) {
@@ -1533,6 +1531,7 @@ async function handleMobileDB(event) {
     reader.readAsText(file);
 }
 
+// 2. [수정] 메인 Box 동기화 함수
 async function syncWithBox(isUserGesture = false, isPushSettings = false, isManualButton = false) {
     let isSyncingStatus = typeof isSyncing !== 'undefined' ? isSyncing : false;
     if (isSyncingStatus) { if (isPushSettings && typeof pendingPush !== 'undefined') pendingPush = true; return; }
@@ -1541,7 +1540,6 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
     if (!handle) { 
         if (isManualButton) {
             if (!('showOpenFilePicker' in window)) {
-                // 💡 [아이폰 대응] Sync 버튼 눌렀을 때 핸들이 없으면 파일 첨부 창 띄우기
                 linkBoxFile();
                 return;
             }
@@ -1594,23 +1592,25 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
 
         if (isPushSettings) {
             let eqToPush = JSON.parse(localStorage.getItem("equipmentData") || "[]").map(e => { let obj = {...e}; delete obj.isEditing; return obj; });
-            boxData.equipment = eqToPush; boxData.recipient = JSON.parse(localStorage.getItem("recipientData") || "{}"); boxData.machineNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
+            boxData.equipment = eqToPush; 
+            boxData.recipient = JSON.parse(localStorage.getItem("recipientData") || "{}"); 
+            boxData.machineNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
+            // 💡 [추가됨] Box 파일로 내보낼 때 소모품 이력 포함
+            boxData.equipMaintenance = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
         } else {
             let localEq = JSON.parse(localStorage.getItem("equipmentData") || "[]"); let isEditingEq = localEq.some(i => i.isEditing);
             if(boxData.equipment && !isEditingEq) { localStorage.setItem("equipmentData", JSON.stringify(boxData.equipment)); renderTable(); }
             if(boxData.recipient) { localStorage.setItem("recipientData", JSON.stringify(boxData.recipient)); renderRecipientTable(); }
             if(boxData.machineNotes) localStorage.setItem("machineNotes", JSON.stringify(boxData.machineNotes));
+            // 💡 [추가됨] Box 파일에서 불러올 때 소모품 이력 반영
+            if(boxData.equipMaintenance) localStorage.setItem("equipMaintenance", JSON.stringify(boxData.equipMaintenance));
         }
 
         let localShipping = JSON.parse(localStorage.getItem("shippingData") || "[]");
         let boxShipping = boxData.shippingData || [];
-        // ── 충돌 해결: updatedAt 타임스탬프 기준으로 최신 수정 우선 ──
-        //    (status 우선순위 제거 → 역방향 이동도 정상 반영)
         function _mergeItem2(a, b) {
-            // deleted는 항상 유지
             if (a.status === 'deleted') return a;
             if (b.status === 'deleted') return b;
-            // updatedAt이 있으면 최신 우선, 없으면 id 타임스탬프 비교
             const ta = a.updatedAt || (parseInt(String(a.id).replace('SHIP_',''))||0);
             const tb = b.updatedAt || (parseInt(String(b.id).replace('SHIP_',''))||0);
             return tb >= ta ? b : a;
@@ -1657,42 +1657,39 @@ async function disconnectDB() {
     alert("✅ 연결이 해제되었습니다. 처음 상태로 돌아갑니다."); location.reload();
 }
 
-// 💡 [추가] 1주일 단위로 PC에 데이터를 안전하게 자동 백업하는 함수
+// 3. [수정] 1주일 단위 PC 자동 백업 함수
 async function autoLocalBackup() {
     const lastBackup = localStorage.getItem('lastBackupDate');
     const now = Date.now();
-    const ONE_WEEK = 7 * 24 * 60 * 60 * 1000; // 7일을 밀리초(ms)로 계산
+    const ONE_WEEK = 7 * 24 * 60 * 60 * 1000; 
 
-    // 마지막 백업이 없거나(처음 접속), 7일이 지났다면 백업 실행!
     if (!lastBackup || (now - parseInt(lastBackup)) > ONE_WEEK) {
         try {
-            // 1. 하이브리드 창고 및 서랍에서 모든 데이터 긁어오기
             let history = await getIDBHistory();
             let equipment = JSON.parse(localStorage.getItem("equipmentData") || "[]").map(e => { let obj = {...e}; delete obj.isEditing; return obj; });
             let recipient = JSON.parse(localStorage.getItem("recipientData") || "{}");
             let machineNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
+            // 💡 [추가됨] 백업 생성 시 소모품 데이터 긁어오기
+            let equipMaintenance = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
             let shipping = JSON.parse(localStorage.getItem("shippingData") || "[]");
 
-            // 2. 백업용 통합 데이터 생성
             let backupData = {
                 workHistory: history,
                 equipment: equipment,
                 recipient: recipient,
                 machineNotes: machineNotes,
-                shippingData: shipping, // 💡 [추가] 백업 파일에 반출품 데이터 포함
+                equipMaintenance: equipMaintenance, // 💡 [추가됨] 백업 파일에 기록
+                shippingData: shipping,
                 backupDate: new Date().toISOString()
             };
 
-            // 3. 텍스트 파일(Blob)로 변환
             const dataStr = JSON.stringify(backupData, null, 2);
             const blob = new Blob([dataStr], { type: "text/plain" });
             const url = URL.createObjectURL(blob);
             
-            // 4. 날짜가 포함된 파일명 생성 (예: SFDC_Backup_20260414.txt)
             const d = new Date();
             const dateString = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
             
-            // 5. 다운로드 실행 (사용자 몰래 백그라운드 클릭)
             const a = document.createElement('a');
             a.href = url;
             a.download = `SFDC_Backup_${dateString}.txt`;
@@ -1701,10 +1698,8 @@ async function autoLocalBackup() {
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
 
-            // 6. 마지막 백업 날짜 갱신
             localStorage.setItem('lastBackupDate', now.toString());
             
-            // 7. 완료 안내 토스트 메시지
             setTimeout(() => showToast("정기 자동 백업", "PC 다운로드 폴더에 백업 파일이 저장되었습니다."), 1500);
 
         } catch (error) {
@@ -1712,6 +1707,7 @@ async function autoLocalBackup() {
         }
     }
 }
+    
 // ==========================================
 // 🚚 반출품 보드 (Kanban) 통합 패키지 코드
 // ==========================================
