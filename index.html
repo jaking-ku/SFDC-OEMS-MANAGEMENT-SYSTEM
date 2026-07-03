@@ -747,6 +747,8 @@ window.onload = async function() {
     
     // 🚀 [추가] 윈도우 로딩 시 엔진 예열 및 데이터 이사
     await migrateToIndexedDB();
+    // 💡 [추가] 이력 데이터를 S/N 기준 식별 구조로 1회 전환
+    await migrateEquipmentDataToSN();
 
     renderTable(); renderRecipientTable(); await updateHistoryBadge();
     if (localStorage.getItem("storedMyName")) document.getElementById("mailMyName").value = localStorage.getItem("storedMyName");
@@ -884,11 +886,11 @@ async function renderHistory() {
 }
 
 // ── 설비 상세페이지 라우팅 ──
-function openEquipDetail(name) {
+function openEquipDetail(sn) {
     const data = JSON.parse(localStorage.getItem("equipmentData") || "[]");
-    const eq = data.find(d => d.name === name);
+    const eq = data.find(d => d.sn === sn);
     if (!eq) { showToast("오류", "해당 설비를 찾을 수 없습니다."); return; }
-    window.location.hash = `detail-${encodeURIComponent(name)}`;
+    window.location.hash = `detail-${encodeURIComponent(sn)}`;
     document.querySelectorAll('.tab-content').forEach(s => { s.classList.remove('block'); s.classList.add('hidden'); });
     document.getElementById('equipDetail').classList.remove('hidden');
     document.getElementById('equipDetail').classList.add('block');
@@ -913,7 +915,8 @@ async function renderEquipDetail(eq) {
     const wrap = document.getElementById('detailHistoryWrap');
     wrap.innerHTML = '<p class="text-text-muted text-xs">불러오는 중...</p>';
     const raw = await getIDBHistory();
-    const entries = raw.filter(e => !e.isDeleted && e.machine === eq.name).sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
+    // 💡 S/N으로 우선 매칭하고, S/N이 아직 연결 안 된 옛 데이터는 이름으로 폴백 매칭 (데이터 유실 방지)
+    const entries = raw.filter(e => !e.isDeleted && (e.sn === eq.sn || (!e.sn && e.machine === eq.name))).sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
     if (entries.length === 0) {
         wrap.innerHTML = '<p class="text-text-muted text-xs">등록된 작업 이력이 없습니다.</p>';
     } else {
@@ -925,14 +928,14 @@ async function renderEquipDetail(eq) {
             li.innerHTML = `<div class="timeline-dot mt-1"></div><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-1"><span class="px-2 py-0.5 border border-border text-primary text-[10px] font-bold rounded">EVENT</span><span class="text-sm font-black text-text-main">${escapeHtml(e.date || '날짜 미상')}</span></div>
                 <div class="${e.rawText ? 'cursor-pointer hover:text-primary transition-colors' : ''}" ${e.rawText ? `onclick="document.getElementById('detailRaw_${e.id}').classList.toggle('hidden')"` : ''}><p class="text-sm text-text-main font-medium leading-relaxed">${escapeHtml(e.content || '—')}</p>${e.rawText ? '<span class="material-symbols-outlined text-sm text-text-muted mt-1 block">open_in_full</span>' : ''}</div>
                 ${e.rawText ? `<div id="detailRaw_${e.id}" class="hidden mt-3 p-4 bg-background/70 text-text-main border border-border text-xs leading-relaxed whitespace-pre-wrap rounded backdrop-blur-sm">${escapeHtml(e.rawText)}</div>` : ''}
-                <div class="mt-3 text-[10px] text-text-muted flex gap-3 items-center flex-wrap"><span>👤 ${escapeHtml(e.worker || '—')}</span><span>⏱️ Recorded: ${savedStr}</span><button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="loadToMailGen('${escapeHtml(e.machine)}', '${escapeHtml(e.content).replace(/'/g, "\\'")}')">메일 작성</button></div></div>`;
+                <div class="mt-3 text-[10px] text-text-muted flex gap-3 items-center flex-wrap"><span>👤 ${escapeHtml(e.worker || '—')}</span><span>⏱️ Recorded: ${savedStr}</span><button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="loadToMailGen('${escapeHtml(eq.name)}', '${escapeHtml(e.content).replace(/'/g, "\\'")}')">메일 작성</button></div></div>`;
             ul.appendChild(li);
         });
         wrap.innerHTML = ''; wrap.appendChild(ul);
     }
-    renderLaserSection(eq.name);
-    renderScaleHeadSection(eq.name);
-    renderConsumablesSection(eq.name);
+    renderLaserSection(eq.sn);
+    renderScaleHeadSection(eq.sn);
+    renderConsumablesSection(eq.sn);
 }
 
 // ── 설비별 유지보수 데이터 (Laser / Scale Head / 소모품) ──
@@ -943,23 +946,137 @@ const SCALE_AXES = [
     { key: 'Z1', label: 'Z1 (ZL)' },
     { key: 'Z2', label: 'Z2 (ZR)' },
 ];
-function getMaintData(name) {
-    const all = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
-    if (!all[name]) all[name] = {};
-    const d = all[name];
+// 💡 같은 날짜의 중복 이력 제거 (정보가 더 채워진 쪽을 우선 유지)
+function dedupeHistoryArray(arr) {
+    const seen = {};
+    (arr || []).forEach(h => {
+        const key = h.date;
+        if (!key) return;
+        if (!seen[key]) { seen[key] = h; return; }
+        const score = x => Object.values(x).filter(v => v && v !== '-').length;
+        if (score(h) > score(seen[key])) seen[key] = h;
+    });
+    return Object.values(seen).sort((x, y) => new Date((x.date || '').replace(' ', 'T')) - new Date((y.date || '').replace(' ', 'T')));
+}
+function normalizeMaintShape(d) {
     if (!d.laser) d.laser = { replaceDate: null, offsetDays: 0, history: [] };
+    d.laser.history = dedupeHistoryArray(d.laser.history);
     // 구버전(단일 Scale Head) 구조 감지 시 축 구조로 마이그레이션
     if (!d.scaleHead || typeof d.scaleHead !== 'object' || 'replaceDate' in d.scaleHead) d.scaleHead = {};
-    SCALE_AXES.forEach(a => { if (!d.scaleHead[a.key]) d.scaleHead[a.key] = { replaceDate: null, history: [] }; });
+    SCALE_AXES.forEach(a => { if (!d.scaleHead[a.key]) d.scaleHead[a.key] = { replaceDate: null, history: [] }; d.scaleHead[a.key].history = dedupeHistoryArray(d.scaleHead[a.key].history); });
     if (!d.consumables) d.consumables = [];
-    all[name] = d;
     return d;
 }
-function saveMaintData(name, data) {
+function getMaintData(key) {
     const all = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
-    all[name] = data;
+    if (!all[key]) all[key] = {};
+    all[key] = normalizeMaintShape(all[key]);
+    return all[key];
+}
+function saveMaintData(key, data) {
+    const all = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+    all[key] = data;
     localStorage.setItem("equipMaintenance", JSON.stringify(all));
     if (typeof autoMergeAndSave === "function") autoMergeAndSave();
+}
+
+// ── 설비 식별키(S/N) 변경 시 유지보수 이력 병합/이관 ──
+function mergeMaintDataObjects(target, source) {
+    if (!source) return target;
+    target = normalizeMaintShape(target); source = normalizeMaintShape(source);
+    target.laser.history = dedupeHistoryArray([...(target.laser.history || []), ...(source.laser.history || [])]);
+    if (source.laser.replaceDate && (!target.laser.replaceDate || new Date(source.laser.replaceDate) > new Date(target.laser.replaceDate))) {
+        target.laser.replaceDate = source.laser.replaceDate;
+        target.laser.offsetHours = source.laser.offsetHours || 0;
+        target.laser.headSN = source.laser.headSN || target.laser.headSN;
+        target.laser.psSN = source.laser.psSN || target.laser.psSN;
+        target.laser.diodeSN = source.laser.diodeSN || target.laser.diodeSN;
+    }
+    SCALE_AXES.forEach(a => {
+        const sa = source.scaleHead[a.key]; const ta = target.scaleHead[a.key];
+        ta.history = dedupeHistoryArray([...ta.history, ...sa.history]);
+        if (ta.history.length) { const last = ta.history[ta.history.length - 1]; ta.replaceDate = last.date; ta.sn = last.sn || ta.sn; }
+    });
+    const consMerged = {}; [...(target.consumables || []), ...(source.consumables || [])].forEach(c => { consMerged[`${c.date}|${c.name}`] = c; });
+    target.consumables = Object.values(consMerged);
+    return target;
+}
+function migrateEquipmentMaintenanceKey(oldKey, newKey) {
+    const all = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+    const oldData = all[oldKey];
+    if (!oldData) return;
+    all[newKey] = all[newKey] ? mergeMaintDataObjects(all[newKey], oldData) : oldData;
+    delete all[oldKey];
+    localStorage.setItem("equipMaintenance", JSON.stringify(all));
+}
+async function migrateEquipmentHistoryKey(oldSN, newSN) {
+    const all = await getIDBHistory();
+    let changed = false;
+    all.forEach(e => { if (e.sn === oldSN) { e.sn = newSN; changed = true; } });
+    if (changed) await putIDBHistory(all);
+}
+// ── 💡 외부 백업(Box/File)에서 들어오는 equipMaintenance를 S/N 기준으로 안전 병합 ──
+// (백업 파일이 옛날 '이름' 기준 포맷이어도 자동으로 S/N 키로 맞춰서 병합, 덮어쓰기로 인한 유실 방지)
+function applyIncomingMaintenance(incomingMaint) {
+    try {
+        const equipList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+        const nameToSN = {}; const snSet = new Set();
+        equipList.forEach(eq => { if (eq.name && eq.sn) nameToSN[eq.name.trim()] = eq.sn.trim(); if (eq.sn) snSet.add(eq.sn.trim()); });
+        const resolveKey = k => (snSet.has((k || '').trim()) ? k : (nameToSN[(k || '').trim()] || k));
+
+        const current = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+        const result = {};
+        Object.keys(current).forEach(key => {
+            const t = resolveKey(key);
+            result[t] = result[t] ? mergeMaintDataObjects(result[t], current[key]) : normalizeMaintShape(current[key]);
+        });
+        Object.keys(incomingMaint || {}).forEach(key => {
+            const t = resolveKey(key);
+            result[t] = result[t] ? mergeMaintDataObjects(result[t], incomingMaint[key]) : normalizeMaintShape(incomingMaint[key]);
+        });
+        localStorage.setItem("equipMaintenance", JSON.stringify(result));
+    } catch (err) {
+        console.error("유지보수 데이터 병합 실패 (기존 로컬 데이터는 보존됨):", err);
+    }
+}
+
+async function migrateEquipmentSN(oldSN, newSN) {
+    if (!oldSN || !newSN || oldSN === newSN) return;
+    migrateEquipmentMaintenanceKey(oldSN, newSN);
+    await migrateEquipmentHistoryKey(oldSN, newSN);
+    autoMergeAndSave();
+    showToast("S/N 변경 반영", `이력이 새 S/N(${newSN})으로 이전되었습니다.`);
+}
+
+// ── 💡 최초 1회: 기존 이름 기반 이력 데이터를 S/N 기반으로 전환 ──
+async function migrateEquipmentDataToSN() {
+    try {
+        const equipList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+        const nameToSN = {}; const snSet = new Set();
+        equipList.forEach(eq => { if (eq.name && eq.sn) nameToSN[eq.name.trim()] = eq.sn.trim(); if (eq.sn) snSet.add(eq.sn.trim()); });
+        const resolveKey = k => (snSet.has((k || '').trim()) ? k : (nameToSN[(k || '').trim()] || k));
+
+        // 1) equipMaintenance: 이름 키 → S/N 키로 이전 (매칭 안 되면 원래 키 그대로 보존해 데이터 유실 방지)
+        //    💡 플래그로 한 번만 실행하지 않고 매 로드마다 점검 — 백업 동기화 등으로 다시 흐트러져도 자동 복구됨
+        const maint = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+        const newMaint = {};
+        Object.keys(maint).forEach(key => {
+            const targetKey = resolveKey(key);
+            newMaint[targetKey] = newMaint[targetKey] ? mergeMaintDataObjects(newMaint[targetKey], maint[key]) : normalizeMaintShape(maint[key]);
+        });
+        localStorage.setItem("equipMaintenance", JSON.stringify(newMaint));
+
+        // 2) 작업이력(IndexedDB): 각 항목에 sn 필드 부여 (없는 것만)
+        const hist = await getIDBHistory();
+        let changed = false;
+        hist.forEach(e => { if (!e.sn && nameToSN[(e.machine || '').trim()]) { e.sn = nameToSN[e.machine.trim()]; changed = true; } });
+        if (changed) await putIDBHistory(hist);
+
+        localStorage.setItem("snMigrationV1Done", "true");
+        console.log(`[S/N 정합성 점검] 완료 (설비 ${Object.keys(nameToSN).length}대 매칭)`);
+    } catch (err) {
+        console.error("S/N 마이그레이션 실패:", err);
+    }
 }
 function daysSince(dateStr) {
     if (!dateStr) return 0;
@@ -1233,14 +1350,14 @@ function deleteConsumable(name, id) {
 }
 window.addEventListener('load', () => {
     if (location.hash.startsWith('#detail-')) {
-        const name = decodeURIComponent(location.hash.replace('#detail-', ''));
-        openEquipDetail(name);
+        const sn = decodeURIComponent(location.hash.replace('#detail-', ''));
+        openEquipDetail(sn);
     }
 });
 
 function renderRecipientTable() { const tbody = document.getElementById("recipientTableBody"); const data = JSON.parse(localStorage.getItem("recipientData") || "{}"); tbody.innerHTML = ""; Object.keys(data).sort().forEach(line => { tbody.innerHTML += `<tr class="hover:bg-background/40 transition-colors"><td class="td-base font-medium px-6">${line}</td><td class="td-base text-text-muted px-6" id="recip_${line}">${data[line]}</td><td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-text" onclick="copyRecipient('${line}')">Copy</button><button class="btn-text" onclick="editRecipient('${line}')">Edit</button><button class="btn-text hover:!text-red-600" onclick="deleteRecipient('${line}')">Del</button></div></td></tr>`; }); }
 function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function renderTable() { const tbody = document.getElementById("dataTableBody"); const raw = JSON.parse(localStorage.getItem("equipmentData") || "[]"); tbody.innerHTML = ""; const data = raw.map((item, i) => ({ item, i })).sort((a, b) => a.item.line.localeCompare(b.item.line, 'ko', { numeric: true }) || a.i - b.i); data.forEach(({ item, i }) => { if (item.isEditing) { tbody.innerHTML += `<tr class="bg-background/60"><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editLine_${i}" value="${item.line}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editModel_${i}" value="${item.model}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editName_${i}" value="${item.name}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editSN_${i}" value="${item.sn}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editLoc_${i}" value="${item.location}"></td><td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-primary px-3 py-1 text-[10px] rounded" onclick="saveEdit(${i})">Save</button></div></td></tr>`; } else { tbody.innerHTML += `<tr class="hover:bg-background/40 transition-colors"><td class="td-base px-6 font-medium">${item.line}</td><td class="td-base px-6 text-text-muted">${item.model}</td><td class="td-base px-6 text-primary font-bold equip-link cursor-pointer hover:underline" data-name="${escapeHtml(item.name)}">${item.name}</td><td class="td-base px-6 text-xs text-text-muted font-mono">${item.sn}</td><td class="td-base px-6 text-text-muted">${item.location}</td><td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-text" onclick="enableEdit(${i})">Edit</button><button class="btn-text hover:!text-red-600" onclick="deleteData(${i})">Del</button></div></td></tr>`; } }); tbody.querySelectorAll(".equip-link").forEach(el => el.addEventListener("click", () => openEquipDetail(el.dataset.name))); filterTable(); }
+function renderTable() { const tbody = document.getElementById("dataTableBody"); const raw = JSON.parse(localStorage.getItem("equipmentData") || "[]"); tbody.innerHTML = ""; const data = raw.map((item, i) => ({ item, i })).sort((a, b) => a.item.line.localeCompare(b.item.line, 'ko', { numeric: true }) || a.i - b.i); data.forEach(({ item, i }) => { if (item.isEditing) { tbody.innerHTML += `<tr class="bg-background/60"><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editLine_${i}" value="${item.line}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editModel_${i}" value="${item.model}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editName_${i}" value="${item.name}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editSN_${i}" value="${item.sn}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editLoc_${i}" value="${item.location}"></td><td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-primary px-3 py-1 text-[10px] rounded" onclick="saveEdit(${i})">Save</button></div></td></tr>`; } else { tbody.innerHTML += `<tr class="hover:bg-background/40 transition-colors"><td class="td-base px-6 font-medium">${item.line}</td><td class="td-base px-6 text-text-muted">${item.model}</td><td class="td-base px-6 text-primary font-bold equip-link cursor-pointer hover:underline" data-sn="${escapeHtml(item.sn)}">${item.name}</td><td class="td-base px-6 text-xs text-text-muted font-mono">${item.sn}</td><td class="td-base px-6 text-text-muted">${item.location}</td><td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-text" onclick="enableEdit(${i})">Edit</button><button class="btn-text hover:!text-red-600" onclick="deleteData(${i})">Del</button></div></td></tr>`; } }); tbody.querySelectorAll(".equip-link").forEach(el => el.addEventListener("click", () => { if (!el.dataset.sn) { showToast("오류", "S/N이 없는 설비는 상세페이지를 열 수 없습니다. S/N을 먼저 입력해주세요."); return; } openEquipDetail(el.dataset.sn); })); filterTable(); }
 
 function extractData() {
     const text = document.getElementById("mailInput").value; 
@@ -1331,6 +1448,12 @@ async function saveHistoryEntry(entry) {
     let history = await getIDBHistory();
     entry.id = Date.now() + "_" + Math.floor(Math.random() * 1000); 
     entry.updatedAt = Date.now();
+    // 💡 설비 목록에서 이름이 일치하는 S/N을 찾아 함께 저장 (호기명 변경에도 이력이 끊기지 않도록)
+    if (!entry.sn) {
+        const eqList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+        const matched = eqList.find(eq => eq.name === entry.machine);
+        if (matched && matched.sn) entry.sn = matched.sn;
+    }
     if(history.some(e => e.machine === entry.machine && e.date === entry.date && e.content === entry.content)) return; 
     history.push(entry); 
     await putIDBHistory(history);
@@ -1351,7 +1474,7 @@ function addRecipient() { const l=document.getElementById("newRecipLine").value.
 function deleteRecipient(l) { if(confirm("삭제하시겠습니까?")){ const d=JSON.parse(localStorage.getItem("recipientData")||"{}"); delete d[l]; localStorage.setItem("recipientData", JSON.stringify(d)); renderRecipientTable(); autoMergeAndSave(); } }
 
 function enableEdit(i) { const d = JSON.parse(localStorage.getItem("equipmentData") || "[]"); d[i].isEditing = true; localStorage.setItem("equipmentData", JSON.stringify(d)); renderTable(); }
-function saveEdit(i) { const d = JSON.parse(localStorage.getItem("equipmentData") || "[]"); d[i] = { line: document.getElementById(`editLine_${i}`).value.trim(), model: document.getElementById(`editModel_${i}`).value.trim(), name: document.getElementById(`editName_${i}`).value.trim(), sn: document.getElementById(`editSN_${i}`).value.trim(), location: document.getElementById(`editLoc_${i}`).value.trim(), isEditing: false }; localStorage.setItem("equipmentData", JSON.stringify(d)); renderTable(); autoMergeAndSave(); }
+function saveEdit(i) { const d = JSON.parse(localStorage.getItem("equipmentData") || "[]"); const oldSN = d[i].sn; const newSN = document.getElementById(`editSN_${i}`).value.trim(); d[i] = { line: document.getElementById(`editLine_${i}`).value.trim(), model: document.getElementById(`editModel_${i}`).value.trim(), name: document.getElementById(`editName_${i}`).value.trim(), sn: newSN, location: document.getElementById(`editLoc_${i}`).value.trim(), isEditing: false }; localStorage.setItem("equipmentData", JSON.stringify(d)); renderTable(); autoMergeAndSave(); if (oldSN && newSN && oldSN !== newSN) migrateEquipmentSN(oldSN, newSN); }
 function importFromExcel() { const v = document.getElementById("excelInput").value.trim(); if(!v)return; const d = JSON.parse(localStorage.getItem("equipmentData")||"[]"); let a=0; v.split('\n').forEach(r=>{ const c=r.split('\t'); if(c.length>=3){ d.push({line:c[0]?.trim()||"",model:c[1]?.trim()||"",name:c[2]?.trim()||"",sn:c[3]?.trim()||"",location:c[4]?.trim()||""}); a++; } }); if(a>0){ localStorage.setItem("equipmentData",JSON.stringify(d)); renderTable(); document.getElementById("excelInput").value=""; showToast("등록",`${a}개 설비 추가 완료`); autoMergeAndSave(); } }
 function addNewData() { const n=document.getElementById("newName").value.trim(); if(!n)return alert("호기 필수"); const d=JSON.parse(localStorage.getItem("equipmentData")||"[]"); d.push({line:document.getElementById("newLine").value, model:document.getElementById("newModel").value, name:n, sn:document.getElementById("newSN").value, location:document.getElementById("newLocation").value}); localStorage.setItem("equipmentData",JSON.stringify(d)); renderTable(); autoMergeAndSave(); }
 function deleteData(i) { if(confirm("삭제하시겠습니까?")){ const d=JSON.parse(localStorage.getItem("equipmentData")||"[]"); d.splice(i,1); localStorage.setItem("equipmentData",JSON.stringify(d)); renderTable(); autoMergeAndSave(); } }
@@ -1502,7 +1625,7 @@ async function handleMobileDB(event) {
             if(boxData.recipient) { localStorage.setItem("recipientData", JSON.stringify(boxData.recipient)); renderRecipientTable(); }
             if(boxData.machineNotes) localStorage.setItem("machineNotes", JSON.stringify(boxData.machineNotes));
             // 💡 [추가됨] 소모품(Laser, Scale Head) 이력 병합
-            if(boxData.equipMaintenance) localStorage.setItem("equipMaintenance", JSON.stringify(boxData.equipMaintenance)); 
+            if(boxData.equipMaintenance) applyIncomingMaintenance(boxData.equipMaintenance); 
 
             let localShipping = JSON.parse(localStorage.getItem("shippingData") || "[]");
             let boxShipping = boxData.shippingData || [];
@@ -1622,7 +1745,7 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
             if(boxData.recipient) { localStorage.setItem("recipientData", JSON.stringify(boxData.recipient)); renderRecipientTable(); }
             if(boxData.machineNotes) localStorage.setItem("machineNotes", JSON.stringify(boxData.machineNotes));
             // 💡 [추가됨] Box 파일에서 불러올 때 소모품 이력 반영
-            if(boxData.equipMaintenance) localStorage.setItem("equipMaintenance", JSON.stringify(boxData.equipMaintenance));
+            if(boxData.equipMaintenance) applyIncomingMaintenance(boxData.equipMaintenance);
         }
 
         let localShipping = JSON.parse(localStorage.getItem("shippingData") || "[]");
