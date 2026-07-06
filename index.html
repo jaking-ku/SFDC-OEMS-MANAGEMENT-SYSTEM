@@ -297,13 +297,45 @@
 <textarea class="input-base bg-background h-32 p-4 mb-6 font-mono rounded" id="mailInput" placeholder="작성한 메일을 통째로 붙여넣으십시오..."></textarea>
 
 <label class="label-base mb-4">특이사항 / 부품교체 (선택)</label>
-<select class="input-base bg-background h-10 px-3 mb-3 rounded" id="extraNoteCategory">
+<select class="input-base bg-background h-10 px-3 mb-3 rounded" id="extraNoteCategory" onchange="onExtraCategoryChange()">
     <option value="">— 항목 선택 (없으면 비워두세요) —</option>
     <option value="Laser 교체">Laser 교체</option>
     <option value="Scale Head">Scale Head</option>
-    <option value="Revolver">Revolver</option>
-    <option value="기타(Swap 등)">기타(Swap 등)</option>
+    <option value="기타 소모품">기타 소모품</option>
 </select>
+
+<!-- Laser 교체 입력폼 -->
+<div id="extraLaserFields" class="hidden border border-border rounded p-4 mb-3 space-y-3 bg-background/40">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div><label class="label-base mb-1 text-[10px]">교체 일시</label><input type="datetime-local" class="input-base h-9 px-2 rounded text-xs" id="extraLaserDate"></div>
+        <div><label class="label-base mb-1 text-[10px]">Head S/N</label><input class="input-base h-9 px-2 rounded text-xs" id="extraLaserHead" placeholder="Head S/N"></div>
+        <div><label class="label-base mb-1 text-[10px]">P/S S/N</label><input class="input-base h-9 px-2 rounded text-xs" id="extraLaserPs" placeholder="P/S S/N"></div>
+        <div><label class="label-base mb-1 text-[10px]">Diode S/N</label><input class="input-base h-9 px-2 rounded text-xs" id="extraLaserDiode" placeholder="Diode S/N"></div>
+    </div>
+    <p class="text-[10px] text-text-muted">💡 교체 일시를 비워두면 메일에서 추출된 작업일자가 자동 적용됩니다.</p>
+</div>
+
+<!-- Scale Head 입력폼 (5축, 날짜 입력된 축만 반영) -->
+<div id="extraScaleFields" class="hidden border border-border rounded p-4 mb-3 space-y-2 bg-background/40">
+    <div class="grid grid-cols-3 gap-2 text-[10px] text-text-muted font-bold px-1"><span>축</span><span>교체일</span><span>S/N</span></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">X</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_X"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_X" placeholder="S/N"></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">Y1 (YL)</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_Y1"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_Y1" placeholder="S/N"></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">Y2 (YR)</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_Y2"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_Y2" placeholder="S/N"></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">Z1 (ZL)</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_Z1"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_Z1" placeholder="S/N"></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">Z2 (ZR)</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_Z2"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_Z2" placeholder="S/N"></div>
+    <p class="text-[10px] text-text-muted">💡 교체일이 입력된 축만 반영됩니다. (여러 축 동시 입력 가능)</p>
+</div>
+
+<!-- 기타 소모품 입력폼 -->
+<div id="extraConsumFields" class="hidden border border-border rounded p-4 mb-3 bg-background/40">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div><label class="label-base mb-1 text-[10px]">부품명</label><input class="input-base h-9 px-2 rounded text-xs" id="extraConsumName" placeholder="예: Mirror"></div>
+        <div><label class="label-base mb-1 text-[10px]">교체일</label><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraConsumDate"></div>
+        <div><label class="label-base mb-1 text-[10px]">메모</label><input class="input-base h-9 px-2 rounded text-xs" id="extraConsumNote" placeholder="선택 입력"></div>
+    </div>
+    <p class="text-[10px] text-text-muted mt-2">💡 교체일을 비워두면 메일에서 추출된 작업일자가 자동 적용됩니다.</p>
+</div>
+
 <textarea class="input-base bg-background h-20 p-4 mb-6 font-mono rounded" id="extraNoteInput" placeholder="특이사항이나 부품교체 내역이 있다면 입력하세요..."></textarea>
 <div class="flex justify-end">
     <button class="btn-primary px-10 py-3 text-sm rounded" onclick="extractData()">
@@ -1418,28 +1450,106 @@ function extractData() {
         saveHistoryEntry({ machine, line, date: df, content, worker, rawText: text, savedAt: new Date().toISOString() }); 
         document.getElementById("autoSavedBadge").classList.remove("hidden"); 
 
-        // ⭐ 추가할 부분 시작 (특이사항 노트에 자동 누적)
+        // ⭐ 특이사항/부품교체: Management 유지보수 데이터에 자동 반영 + 노트 요약 누적
         const extraNote = document.getElementById("extraNoteInput") ? document.getElementById("extraNoteInput").value.trim() : "";
         const extraCategory = document.getElementById("extraNoteCategory") ? document.getElementById("extraNoteCategory").value.trim() : "";
+        let maintSummary = "";
+        if (extraCategory) {
+            maintSummary = applyExtractedMaintenance(machine, extraCategory, df);
+        }
         if (extraNote || extraCategory) {
             let ns = JSON.parse(localStorage.getItem("machineNotes") || "{}");
             let prevNote = ns[machine] || "";
-            
-            // 날짜 + 선택 항목(카테고리) + 입력 내용을 조합하여 기록
             let categoryPart = extraCategory ? `[${extraCategory}]` : "";
+            let summaryPart = maintSummary ? `\n${maintSummary}` : "";
             let notePart = extraNote ? `\n${extraNote}` : "";
-            let newEntry = `-${df}- ${categoryPart}${notePart}`.trim();
-            
-            // 기존에 메모가 있으면 줄바꿈 2번 하고 추가, 없으면 그냥 추가
+            let newEntry = `-${df}- ${categoryPart}${summaryPart}${notePart}`.trim();
             ns[machine] = prevNote ? (prevNote + "\n\n" + newEntry) : newEntry;
             localStorage.setItem("machineNotes", JSON.stringify(ns));
             
-            // 추출 완료 후 다음 작업을 위해 입력칸 비우기
             document.getElementById("extraNoteInput").value = "";
             document.getElementById("extraNoteCategory").value = "";
+            onExtraCategoryChange();
         }
-        // ⭐ 추가할 부분 끝
     }
+}
+
+// ── 특이사항/부품교체 카테고리별 입력폼 전환 ──
+function onExtraCategoryChange() {
+    const cat = document.getElementById("extraNoteCategory").value;
+    document.getElementById("extraLaserFields").classList.toggle("hidden", cat !== "Laser 교체");
+    document.getElementById("extraScaleFields").classList.toggle("hidden", cat !== "Scale Head");
+    document.getElementById("extraConsumFields").classList.toggle("hidden", cat !== "기타 소모품");
+}
+
+// ── 추출된 부품교체 정보를 Management 유지보수 데이터(S/N 키)에 반영 ──
+// 반환값: 노트에 남길 요약 문자열
+function applyExtractedMaintenance(machine, category, mailDate) {
+    const eqList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+    const eq = eqList.find(e => e.name === machine);
+    if (!eq || !eq.sn) {
+        showToast("⚠️ 설비 미등록", `[${machine}] 설비가 관리 목록에 없거나 S/N이 비어있어 유지보수 이력에 반영하지 못했습니다. (노트에만 기록됨)`);
+        return "";
+    }
+    const snKey = eq.sn;
+    // 메일 추출 날짜(YYYY.MM.DD 등)를 YYYY-MM-DD로 정규화
+    const dm = (mailDate || "").match(/(\d{4})[.\-\/년\s]*(\d{1,2})[.\-\/월\s]*(\d{1,2})/);
+    const fallbackDate = dm ? `${dm[1]}-${String(dm[2]).padStart(2,'0')}-${String(dm[3]).padStart(2,'0')}` : new Date().toISOString().slice(0, 10);
+    let summary = "";
+
+    if (category === "Laser 교체") {
+        const dtVal = document.getElementById("extraLaserDate").value || (fallbackDate + "T00:00");
+        const snHead = document.getElementById("extraLaserHead").value.trim();
+        const snPs = document.getElementById("extraLaserPs").value.trim();
+        const snDiode = document.getElementById("extraLaserDiode").value.trim();
+        const data = getMaintData(snKey); const l = data.laser;
+        const auto = elapsedParts(l.replaceDate);
+        const manualHours = l.offsetHours !== undefined ? l.offsetHours : (l.offsetDays ? l.offsetDays * 24 : 0);
+        const totalHours = (auto.days * 24) + auto.hours + manualHours;
+        l.history.push({ date: dtVal.replace('T', ' '), daysUsed: Math.floor(totalHours / 24), hoursUsed: totalHours, snHead, snPs, snDiode, savedAt: new Date().toISOString() });
+        if (!l.replaceDate || new Date(dtVal) > new Date(normalizeDatetimeValue(l.replaceDate))) { l.replaceDate = dtVal; l.offsetHours = 0; }
+        saveMaintData(snKey, data);
+        document.getElementById("extraLaserDate").value = ""; document.getElementById("extraLaserHead").value = ""; document.getElementById("extraLaserPs").value = ""; document.getElementById("extraLaserDiode").value = "";
+        summary = `Head:${snHead || '-'} / P/S:${snPs || '-'} / Diode:${snDiode || '-'}`;
+        showToast("✅ 자동 반영", `[${machine}] Laser 교체 이력이 설비 정보에 반영되었습니다.`);
+    }
+    else if (category === "Scale Head") {
+        const data = getMaintData(snKey);
+        const applied = [];
+        SCALE_AXES.forEach(a => {
+            const dEl = document.getElementById(`extraShDate_${a.key}`); const sEl = document.getElementById(`extraShSn_${a.key}`);
+            if (!dEl || !dEl.value) return;
+            const ax = data.scaleHead[a.key];
+            const elapsed = ax.replaceDate ? daysSince(ax.replaceDate) : 0;
+            ax.history.push({ date: dEl.value, daysUsed: elapsed, sn: sEl.value.trim(), savedAt: new Date().toISOString() });
+            if (!ax.replaceDate || new Date(dEl.value) > new Date(ax.replaceDate)) ax.replaceDate = dEl.value;
+            applied.push(`${a.key}(${sEl.value.trim() || 'S/N 미입력'})`);
+            dEl.value = ""; sEl.value = "";
+        });
+        if (applied.length === 0) {
+            showToast("⚠️ 입력 없음", "Scale Head 교체일이 입력된 축이 없어 반영되지 않았습니다.");
+            return "";
+        }
+        saveMaintData(snKey, data);
+        summary = `교체 축: ${applied.join(', ')}`;
+        showToast("✅ 자동 반영", `[${machine}] Scale Head ${applied.length}개 축 이력이 설비 정보에 반영되었습니다.`);
+    }
+    else if (category === "기타 소모품") {
+        const cName = document.getElementById("extraConsumName").value.trim();
+        const cDate = document.getElementById("extraConsumDate").value || fallbackDate;
+        const cNote = document.getElementById("extraConsumNote").value.trim();
+        if (!cName) {
+            showToast("⚠️ 입력 없음", "부품명이 비어있어 소모품 이력이 반영되지 않았습니다.");
+            return "";
+        }
+        const data = getMaintData(snKey);
+        data.consumables.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: cName, date: cDate, note: cNote, savedAt: new Date().toISOString() });
+        saveMaintData(snKey, data);
+        document.getElementById("extraConsumName").value = ""; document.getElementById("extraConsumDate").value = ""; document.getElementById("extraConsumNote").value = "";
+        summary = `${cName} (${cDate})${cNote ? ' - ' + cNote : ''}`;
+        showToast("✅ 자동 반영", `[${machine}] 소모품(${cName}) 교환 이력이 설비 정보에 반영되었습니다.`);
+    }
+    return summary;
 }
 
 
