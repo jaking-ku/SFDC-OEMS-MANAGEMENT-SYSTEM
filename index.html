@@ -481,8 +481,15 @@
     </section>
 
     <section id="database" class="tab-content block space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
-        <div class="border-b border-border pb-4">
+        <div class="border-b border-border pb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <h2 class="text-2xl font-bold text-text-main">설비 & 수신처 관리</h2>
+            <!-- 🔎 SFDC(Salesforce) 검색창 -->
+            <div class="flex w-full md:w-96">
+                <input type="text" id="sfSearchInput" class="input-base h-10 px-4 rounded-l-md rounded-r-none border-r-0 flex-1" placeholder="SFDC 검색 창" onkeypress="if(event.key==='Enter')searchSalesforce()">
+                <button class="h-10 px-5 bg-[#0070d2] hover:bg-[#005fb2] text-white text-xs font-bold rounded-r-md transition-colors flex items-center gap-1" onclick="searchSalesforce()">
+                    <span class="material-symbols-outlined text-sm">search</span> 검색
+                </button>
+            </div>
         </div>
 
         <!-- 💡 accordion-open 클래스 삭제됨 -->
@@ -1696,6 +1703,33 @@ function importFromExcel() { const v = document.getElementById("excelInput").val
 function addNewData() { const n=document.getElementById("newName").value.trim(); if(!n)return alert("호기 필수"); const d=JSON.parse(localStorage.getItem("equipmentData")||"[]"); d.push({line:document.getElementById("newLine").value, model:document.getElementById("newModel").value, name:n, sn:document.getElementById("newSN").value, location:document.getElementById("newLocation").value}); localStorage.setItem("equipmentData",JSON.stringify(d)); renderTable(); autoMergeAndSave(); }
 function deleteData(i) { if(confirm("삭제하시겠습니까?")){ const d=JSON.parse(localStorage.getItem("equipmentData")||"[]"); d.splice(i,1); localStorage.setItem("equipmentData",JSON.stringify(d)); renderTable(); autoMergeAndSave(); } }
 function filterTable() { const v=document.getElementById("searchInput").value.toLowerCase(); const r=document.getElementById("dataTableBody").getElementsByTagName("tr"); for(let x of r) x.style.display=x.innerText.toLowerCase().includes(v)?"":"none"; }
+
+// ── 🔎 SFDC(Salesforce) 검색 ──
+function searchSalesforce() {
+    var query = document.getElementById('sfSearchInput').value.trim();
+    if (!query) { alert("검색어를 입력해주세요."); return; }
+    // 1. Salesforce Lightning 검색 페이지가 요구하는 JSON 데이터 구조 생성
+    var sfData = {
+        "componentDef": "forceSearch:searchPageDesktop",
+        "attributes": {
+            "term": query,
+            "scopeMap": { "type": "TOP_RESULTS" },
+            "context": {
+                "FILTERS": {},
+                "searchSource": "ASSISTANT_DIALOG",
+                "disableIntentQuery": false,
+                "disableSpellCorrection": false
+            },
+            "groupId": "DEFAULT"
+        },
+        "state": {}
+    };
+    // 2~3. JSON → 문자열 → 유니코드 안전 Base64 인코딩 (Lightning 방식과 동일)
+    var jsonString = JSON.stringify(sfData);
+    var encodedData = btoa(unescape(encodeURIComponent(jsonString)));
+    // 4~5. 최종 URL 생성 후 새 창에서 열기
+    window.open("https://hht.lightning.force.com/one/one.app#" + encodedData, "_blank");
+}
 
 // 💡 [변경] 삭제 로직도 DB 연동 비동기로 변경
 async function deleteEquipHistory(m) { 
