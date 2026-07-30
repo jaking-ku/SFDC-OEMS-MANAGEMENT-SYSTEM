@@ -1705,86 +1705,45 @@ function deleteData(i) { if(confirm("삭제하시겠습니까?")){ const d=JSON.
 function filterTable() { const v=document.getElementById("searchInput").value.toLowerCase(); const r=document.getElementById("dataTableBody").getElementsByTagName("tr"); for(let x of r) x.style.display=x.innerText.toLowerCase().includes(v)?"":"none"; }
 
 // ── 🔎 SFDC(Salesforce) 검색 ──
-function main(workbook: ExcelScript.Workbook) {
-  let sheet = workbook.getActiveWorksheet();
-  
-  // A2 셀에 검색어 입력, B2 셀에 결과 링크 생성
-  let query = sheet.getRange("A2").getValue() as string;
-
-  if (!query) {
-    sheet.getRange("B2").setValue("검색어를 입력해주세요.");
-    return;
-  }
-
-  // 1. JSON 구조 최소화
-  let sfData = {
-    "componentDef": "forceSearch:searchPageDesktop",
-    "attributes": {
-      "term": query.toString().trim(),
-      "scopeMap": { "type": "TOP_RESULTS" }
-    }
-  };
-
-  // 2. JSON 문자열 변환 및 Base64 인코딩
-  let jsonString = JSON.stringify(sfData);
-  let encodedData = encodeBase64(jsonString);
-
-  // ==========================================
-  // 🚀 핵심 변경: 로그인 리다이렉트 완벽 처리
-  // ==========================================
-  let targetPath = "/one/one.app#" + encodedData;
-  
-  // lightning.force.com 대신 my.salesforce.com(로그인 도메인)을 거치도록 하고,
-  // retURL 대신 startURL 파라미터를 사용합니다.
-  let sfSearchUrl = "https://hht.my.salesforce.com/?startURL=" + encodeURIComponent(targetPath);
-  // ==========================================
-
-  // 3. B2 셀에 링크 삽입
-  sheet.getRange("B2").setHyperlink({
-    address: sfSearchUrl,
-    textToDisplay: "🔍 클릭하여 검색결과 보기"
-  });
-}
-
-// -------------------------------------------------------------
-// Base64 및 UTF-8 인코딩 함수 (이전과 동일)
-// -------------------------------------------------------------
-function encodeBase64(str: string): string {
-  let utf8Bytes = encodeUTF8(str);
-  return bytesToBase64(utf8Bytes);
-}
-
-function encodeUTF8(str: string): number[] {
-  let utf8: number[] = [];
-  for (let i = 0; i < str.length; i++) {
-    let charcode = str.charCodeAt(i);
-    if (charcode < 0x80) utf8.push(charcode);
-    else if (charcode < 0x800) {
-      utf8.push(0xc0 | (charcode >> 6), 0x80 | (charcode & 0x3f));
-    }
-    else if (charcode < 0xd800 || charcode >= 0xe000) {
-      utf8.push(0xe0 | (charcode >> 12), 0x80 | ((charcode >> 6) & 0x3f), 0x80 | (charcode & 0x3f));
-    }
-    else {
-      i++;
-      charcode = 0x10000 + (((charcode & 0x3ff) << 10) | (str.charCodeAt(i) & 0x3ff));
-      utf8.push(0xf0 | (charcode >> 18), 0x80 | ((charcode >> 12) & 0x3f), 0x80 | ((charcode >> 6) & 0x3f), 0x80 | (charcode & 0x3f));
-    }
-  }
-  return utf8;
-}
-
-function bytesToBase64(bytes: number[]): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  let base64 = '';
-  for (let i = 0; i < bytes.length; i += 3) {
-    let b1 = bytes[i], b2 = bytes[i + 1] || 0, b3 = bytes[i + 2] || 0;
-    let val = (b1 << 16) | (b2 << 8) | b3;
-    base64 += chars[(val >> 18) & 63] + chars[(val >> 12) & 63];
-    base64 += i + 1 < bytes.length ? chars[(val >> 6) & 63] : '=';
-    base64 += i + 2 < bytes.length ? chars[val & 63] : '=';
-  }
-  return base64;
+function searchSalesforce() {
+    var query = document.getElementById('sfSearchInput').value.trim();
+    if (!query) { alert("검색어를 입력해주세요."); return; }
+    
+    // 1. Salesforce Lightning 검색 페이지가 요구하는 JSON 데이터 구조 생성
+    var sfData = {
+        "componentDef": "forceSearch:searchPageDesktop",
+        "attributes": {
+            "term": query,
+            "scopeMap": { "type": "TOP_RESULTS" },
+            "context": {
+                "FILTERS": {},
+                "searchSource": "ASSISTANT_DIALOG",
+                "disableIntentQuery": false,
+                "disableSpellCorrection": false
+            },
+            "groupId": "DEFAULT"
+        },
+        "state": {}
+    };
+    
+    // 2~3. JSON → 문자열 → 유니코드 안전 Base64 인코딩 (Lightning 방식과 동일)
+    // (웹 브라우저 환경이므로 내장 함수인 btoa를 그대로 사용합니다)
+    var jsonString = JSON.stringify(sfData);
+    var encodedData = btoa(unescape(encodeURIComponent(jsonString)));
+    
+    // ==========================================
+    // 🚀 핵심 변경: 로그인 리다이렉트(startURL) 처리
+    // ==========================================
+    // 이동할 목표 경로(Path)를 지정합니다.
+    var targetPath = "/one/one.app#" + encodedData;
+    
+    // lightning.force.com 대신 my.salesforce.com(로그인 도메인)을 거치도록 하고,
+    // startURL 파라미터에 목표 경로를 인코딩하여 붙여줍니다.
+    var sfSearchUrl = "https://hht.my.salesforce.com/?startURL=" + encodeURIComponent(targetPath);
+    // ==========================================
+    
+    // 4~5. 최종 URL 생성 후 새 창에서 열기
+    window.open(sfSearchUrl, "_blank");
 }
 
 // 💡 [변경] 삭제 로직도 DB 연동 비동기로 변경
