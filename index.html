@@ -168,26 +168,6 @@
             /* 칩 선택 영역 */
             #history .card-base .p-4.flex.flex-wrap { padding: 12px !important; gap: 6px !important; }
 
-            /* ── TakeOut Board (칸반) ── */
-            #shipping-board > .border-b { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
-            #shipping-board > .border-b button { align-self: flex-start; }
-            /* 칸반 컬럼: 세로 스택 */
-            #shipping-board .flex.gap-6.overflow-x-auto {
-                flex-direction: column !important;
-                overflow-x: visible !important;
-                gap: 12px !important;
-                min-height: unset !important;
-                padding-bottom: 0 !important;
-            }
-            #shipping-board .flex.gap-6.overflow-x-auto > div {
-                width: 100% !important;
-                min-height: 120px !important;
-            }
-            /* 칸반 카드 버튼 - 모바일은 항상 표시 */
-            #shipping-board .group .absolute.top-2.right-2 {
-                opacity: 1 !important;
-            }
-
             /* ── 푸터 ── */
             footer { padding: 24px 16px !important; margin-top: 32px !important; }
             footer .max-w-7xl { flex-direction: column !important; text-align: center !important; gap: 12px !important; }
@@ -199,6 +179,26 @@
     </style>
 </head>
 <body class="min-h-screen">
+
+<!-- 🔒 [v1.1 추가] 최초 DB 연결 게이트 — 팀 데이터 정합성 보호 -->
+<div class="hidden fixed inset-0 z-[200] flex items-center justify-center p-6" id="syncGateOverlay" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(2px);">
+    <div class="card-base bg-surface rounded-lg shadow-2xl max-w-md w-full p-8 text-center space-y-5">
+        <div class="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+            <span class="material-symbols-outlined text-3xl text-primary">cloud_sync</span>
+        </div>
+        <div>
+            <h3 class="text-lg font-bold text-text-main" id="syncGateTitle">DB 연결이 필요합니다</h3>
+            <p class="text-xs text-text-muted mt-2 leading-relaxed" id="syncGateDesc">
+                이 브라우저에서는 아직 팀 공용 DB(Box) 파일과 연결된 적이 없습니다.<br>
+                먼저 연결하고 최신 데이터를 불러와야 다른 팀원의 이력이 누락되지 않습니다.
+            </p>
+        </div>
+        <button class="btn-primary w-full py-3 text-xs rounded flex items-center justify-center gap-2" onclick="gateConnect()">
+            <span class="material-symbols-outlined text-base">link</span> 지금 DB 연결하기
+        </button>
+        <p class="text-[10px] text-text-muted cursor-pointer hover:text-primary underline" onclick="gateSkip()">연결 없이 계속 진행 (비권장 · 팀 데이터와 어긋날 수 있음)</p>
+    </div>
+</div>
 
 <!-- 모바일 오버레이 (사이드바 열렸을 때 배경 dimming) -->
 <div id="sidebar-overlay" onclick="closeSidebar()"></div>
@@ -227,6 +227,7 @@
         <div class="px-6 py-5 border-b border-border shrink-0">
             <div class="flex items-center gap-2 mb-1">
                 <span class="text-2xl font-black tracking-tighter text-black">HITACHI</span>
+                <span class="text-[9px] font-bold text-primary border border-primary/40 rounded px-1.5 py-0.5 leading-none">v1.0</span>
             </div>
             <span class="text-[10px] font-bold uppercase tracking-widest text-text-muted">평가4부 Management System</span>
         </div>
@@ -249,10 +250,6 @@
                 <span class="material-symbols-outlined text-base mr-3 shrink-0">history</span>
                 Work History
                 <span id="historyBadge" class="ml-auto bg-primary text-white text-[9px] font-black px-1.5 py-0.5 hidden rounded-sm">0</span>
-            </a>
-            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('shipping-board', this)">
-                <span class="material-symbols-outlined text-base mr-3 shrink-0">local_shipping</span>
-                TakeOut Board
             </a>
             <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="window.open('https://jaking-ku.github.io/Team_schedule/', '_blank')" style="cursor:pointer;">
                 <span class="material-symbols-outlined text-base mr-3 shrink-0">calendar_month</span>
@@ -285,6 +282,15 @@
     <div class="flex flex-col flex-1 min-w-0">
 
 <main class="flex-1 w-full max-w-7xl mx-auto p-8 relative">
+
+    <!-- ⚠️ [v1.1 추가] 동기화 상태 배너 — 미연결/권한끊김/오래된 동기화 시에만 노출 -->
+    <div class="hidden mb-6 px-4 py-3 rounded-md border flex items-center justify-between gap-3 text-xs" id="syncStatusBanner">
+        <div class="flex items-center gap-2 min-w-0">
+            <span class="material-symbols-outlined text-base shrink-0" id="syncStatusIcon">warning</span>
+            <span id="syncStatusText" class="truncate"></span>
+        </div>
+        <button class="btn-primary px-3 py-1.5 text-[10px] rounded shrink-0" onclick="manualSync()">지금 동기화</button>
+    </div>
 
 
     <section id="extraction" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
@@ -376,17 +382,6 @@
                         </tr>
                     </tbody>
                 </table>
-            </div>
-        </div>
-
-        <!-- 📈 CNN Fear & Greed Index 위젯 (1일 1회 갱신) -->
-        <div class="card-base overflow-hidden rounded-md">
-            <div class="px-6 py-4 bg-background border-b border-border flex justify-between items-center">
-                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">monitoring</span> CNN 공포 & 탐욕 지수 (Fear &amp; Greed Index)</span>
-                <span class="text-[10px] text-text-muted" id="fgUpdatedAt"></span>
-            </div>
-            <div id="fearGreedWrap" class="p-6">
-                <p class="text-text-muted text-xs">불러오는 중...</p>
             </div>
         </div>
     </section>
@@ -651,44 +646,6 @@
             <p class="label-base">작업 기록 없음</p>
         </div>
     </section>
-<section id="shipping-board" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
-    <div class="border-b border-border pb-4 flex justify-between items-center">
-        <div>
-            <h2 class="text-2xl font-bold text-text-main">반출품 관리 보드</h2>
-            <p class="text-sm text-text-muted mt-1">드래그 앤 드롭으로 반출 상태를 변경하세요.</p>
-        </div>
-        <button class="btn-primary px-4 py-2 text-xs rounded" onclick="promptAddShipping()">
-            <span class="material-symbols-outlined text-sm">add</span> 새 반출품 추가
-        </button>
-    </div>
-
-    <!-- 칸반 보드 영역 -->
-    <div class="flex gap-6 overflow-x-auto pb-4 min-h-[500px]">
-        <!-- 1. 반출 신청 중 -->
-        <div class="flex flex-col w-[300px] shrink-0 bg-surface border border-border rounded-lg p-4 bg-red-50/30 dark:bg-red-900/10" ondrop="dropKanban(event, 'pending')" ondragover="allowDropKanban(event)">
-            <div class="label-base mb-4 px-2 text-primary flex justify-between items-center">
-                <span>반출 신청 중</span> <span id="cnt-pending" class="bg-primary/10 px-2 py-0.5 rounded text-primary">0</span>
-            </div>
-            <div id="col-pending" class="flex-1 space-y-3 overflow-y-auto no-scrollbar min-h-[100px]"></div>
-        </div>
-
-        <!-- 2. 반출 신청 완료 -->
-        <div class="flex flex-col w-[300px] shrink-0 bg-surface border border-border rounded-lg p-4 bg-blue-50/30 dark:bg-blue-900/10" ondrop="dropKanban(event, 'requested')" ondragover="allowDropKanban(event)">
-            <div class="label-base mb-4 px-2 text-blue-600 flex justify-between items-center">
-                <span>반출 신청 완료</span> <span id="cnt-requested" class="bg-blue-100 px-2 py-0.5 rounded text-blue-600">0</span>
-            </div>
-            <div id="col-requested" class="flex-1 space-y-3 overflow-y-auto no-scrollbar min-h-[100px]"></div>
-        </div>
-
-        <!-- 3. 반출 완료 -->
-        <div class="flex flex-col w-[300px] shrink-0 bg-surface border border-border rounded-lg p-4 bg-green-50/30 dark:bg-green-900/10" ondrop="dropKanban(event, 'completed')" ondragover="allowDropKanban(event)">
-            <div class="label-base mb-4 px-2 text-green-600 flex justify-between items-center">
-                <span>반출 완료</span> <span id="cnt-completed" class="bg-green-100 px-2 py-0.5 rounded text-green-600">0</span>
-            </div>
-            <div id="col-completed" class="flex-1 space-y-3 overflow-y-auto no-scrollbar min-h-[100px]"></div>
-        </div>
-    </div>
-</section>
 </main>
 
     </div><!-- end content area -->
@@ -790,6 +747,9 @@ function switchTab(t, e) { document.querySelectorAll('.tab-content').forEach(s =
 function showToast(t, m) { const ts = document.getElementById('toast'); document.getElementById('toast-title').innerText = t; document.getElementById('toast-msg').innerText = m; ts.classList.remove('translate-y-32', 'opacity-0'); setTimeout(() => ts.classList.add('translate-y-32', 'opacity-0'), 3000); }
 
 window.onload = async function() {
+    // 🔒 [v1.1 추가] 이 브라우저에서 한 번도 Box와 동기화된 적 없으면 다른 작업보다 먼저 연결부터 유도
+    checkSyncGateOnLoad();
+
     initTheme();
     ["equipmentData"].forEach(k => { if (!localStorage.getItem(k)) localStorage.setItem(k, "[]"); });
     if (!localStorage.getItem("recipientData")) localStorage.setItem("recipientData", "{}");
@@ -812,6 +772,12 @@ window.onload = async function() {
         const btn = document.getElementById("syncBtn");
         if(btn) { btn.classList.add("text-red-500", "font-black"); document.getElementById("syncIcon").innerText = "error"; document.getElementById("syncText").innerText = "연결 끊김(클릭)"; }
     }
+
+    // 💡 [v1.1 추가] 상태 배너 초기 갱신 + 탭 복귀 시 재확인(연결 끊김을 놓치지 않도록) + 5분마다 주기 점검
+    await updateSyncStatusBanner();
+    window.addEventListener('focus', updateSyncStatusBanner);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') updateSyncStatusBanner(); });
+    setInterval(updateSyncStatusBanner, 5 * 60 * 1000);
 };
 
 async function resetAllData() { 
@@ -1403,103 +1369,7 @@ window.addEventListener('load', () => {
         const sn = decodeURIComponent(location.hash.replace('#detail-', ''));
         openEquipDetail(sn);
     }
-    loadFearGreedIndex();
 });
-
-// ── 📈 CNN Fear & Greed Index (1일 1회 갱신) ──
-const FG_CACHE_KEY = "fearGreedCacheV1";
-function fgRatingKo(rating) {
-    const map = { "extreme fear": "극단적 공포", "fear": "공포", "neutral": "중립", "greed": "탐욕", "extreme greed": "극단적 탐욕" };
-    return map[(rating || "").toLowerCase()] || rating || "-";
-}
-function fgColor(score) {
-    if (score < 25) return "#c0392b";      // 극단적 공포
-    if (score < 45) return "#e67e22";      // 공포
-    if (score < 55) return "#f1c40f";      // 중립
-    if (score < 75) return "#7dbb42";      // 탐욕
-    return "#27ae60";                       // 극단적 탐욕
-}
-async function loadFearGreedIndex(forceRefresh = false) {
-    const wrap = document.getElementById("fearGreedWrap");
-    if (!wrap) return;
-    const todayStr = new Date().toISOString().slice(0, 10);
-    // 1일 캐시: 오늘 이미 받아온 데이터가 있으면 재요청 없이 그대로 사용
-    if (!forceRefresh) {
-        try {
-            const cached = JSON.parse(localStorage.getItem(FG_CACHE_KEY) || "null");
-            if (cached && cached.date === todayStr && cached.data) { renderFearGreed(cached.data, cached.fetchedAt); return; }
-        } catch (e) { /* 캐시 파손 시 무시하고 새로 조회 */ }
-    }
-    wrap.innerHTML = '<p class="text-text-muted text-xs">불러오는 중...</p>';
-    const target = encodeURIComponent("https://production.dataviz.cnn.io/index/fearandgreed/graphdata");
-    const proxies = [
-        `https://api.allorigins.win/raw?url=${target}`,
-        `https://corsproxy.io/?url=${target}`,
-    ];
-    for (const url of proxies) {
-        try {
-            const res = await fetch(url, { cache: "no-store" });
-            if (!res.ok) continue;
-            const json = await res.json();
-            const fg = json && json.fear_and_greed;
-            if (!fg || typeof fg.score !== "number") continue;
-            const data = {
-                score: Math.round(fg.score),
-                rating: fg.rating,
-                prevClose: fg.previous_close != null ? Math.round(fg.previous_close) : null,
-                prevWeek: fg.previous_1_week != null ? Math.round(fg.previous_1_week) : null,
-                prevMonth: fg.previous_1_month != null ? Math.round(fg.previous_1_month) : null,
-                prevYear: fg.previous_1_year != null ? Math.round(fg.previous_1_year) : null,
-            };
-            const fetchedAt = new Date().toISOString();
-            localStorage.setItem(FG_CACHE_KEY, JSON.stringify({ date: todayStr, data, fetchedAt }));
-            renderFearGreed(data, fetchedAt);
-            return;
-        } catch (e) { /* 다음 프록시로 폴백 */ }
-    }
-    wrap.innerHTML = `<div class="text-center py-4"><p class="text-text-muted text-xs mb-3">지수를 불러오지 못했습니다. (네트워크 또는 프록시 서버 문제)</p><button class="btn-primary px-6 py-2 text-[10px] rounded" onclick="loadFearGreedIndex(true)">다시 시도</button></div>`;
-}
-function renderFearGreed(d, fetchedAt) {
-    const wrap = document.getElementById("fearGreedWrap");
-    const updEl = document.getElementById("fgUpdatedAt");
-    if (updEl && fetchedAt) { const t = new Date(fetchedAt); updEl.textContent = `갱신: ${t.getMonth() + 1}/${t.getDate()} ${t.getHours()}:${String(t.getMinutes()).padStart(2, '0')} (1일 1회)`; }
-    const score = Math.max(0, Math.min(100, d.score));
-    const color = fgColor(score);
-    // 반원 게이지: 180도(0점, 왼쪽) → 0도(100점, 오른쪽)
-    const angle = 180 - (score / 100) * 180;
-    const rad = angle * Math.PI / 180;
-    const cx = 100, cy = 95, r = 70;
-    const nx = cx + r * Math.cos(rad), ny = cy - r * Math.sin(rad);
-    const prevRow = (label, v) => v == null ? '' : `<div class="flex justify-between items-center text-xs py-1 border-b border-border/50"><span class="text-text-muted">${label}</span><span class="font-bold" style="color:${fgColor(v)}">${v} · ${fgRatingKo(v < 25 ? 'extreme fear' : v < 45 ? 'fear' : v < 55 ? 'neutral' : v < 75 ? 'greed' : 'extreme greed')}</span></div>`;
-    wrap.innerHTML = `
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-            <div class="flex flex-col items-center">
-                <svg viewBox="0 0 200 110" class="w-full max-w-[280px]">
-                    <path d="M 30 95 A 70 70 0 0 1 51.3 44.5" fill="none" stroke="#c0392b" stroke-width="12" stroke-linecap="round"/>
-                    <path d="M 55 40.7 A 70 70 0 0 1 89 26" fill="none" stroke="#e67e22" stroke-width="12"/>
-                    <path d="M 94 25.3 A 70 70 0 0 1 106 25.3" fill="none" stroke="#f1c40f" stroke-width="12"/>
-                    <path d="M 111 26 A 70 70 0 0 1 145 40.7" fill="none" stroke="#7dbb42" stroke-width="12"/>
-                    <path d="M 148.7 44.5 A 70 70 0 0 1 170 95" fill="none" stroke="#27ae60" stroke-width="12" stroke-linecap="round"/>
-                    <line x1="${cx}" y1="${cy}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="currentColor" stroke-width="3" stroke-linecap="round" class="text-text-main"/>
-                    <circle cx="${cx}" cy="${cy}" r="6" fill="currentColor" class="text-text-main"/>
-                    <text x="18" y="108" font-size="9" fill="currentColor" class="text-text-muted" opacity="0.6">0 공포</text>
-                    <text x="152" y="108" font-size="9" fill="currentColor" class="text-text-muted" opacity="0.6">탐욕 100</text>
-                </svg>
-                <div class="text-center -mt-2">
-                    <p class="text-4xl font-black" style="color:${color}">${score}</p>
-                    <p class="text-sm font-bold mt-1" style="color:${color}">${fgRatingKo(d.rating)}</p>
-                </div>
-            </div>
-            <div>
-                ${prevRow('전일 종가', d.prevClose)}
-                ${prevRow('1주 전', d.prevWeek)}
-                ${prevRow('1개월 전', d.prevMonth)}
-                ${prevRow('1년 전', d.prevYear)}
-                <p class="text-[10px] text-text-muted mt-3">출처: CNN Business Fear &amp; Greed Index · 미국 주식시장 투자심리 지표</p>
-            </div>
-        </div>
-    `;
-}
 
 function renderRecipientTable() { const tbody = document.getElementById("recipientTableBody"); const data = JSON.parse(localStorage.getItem("recipientData") || "{}"); tbody.innerHTML = ""; Object.keys(data).sort().forEach(line => { tbody.innerHTML += `<tr class="hover:bg-background/40 transition-colors"><td class="td-base font-medium px-6">${line}</td><td class="td-base text-text-muted px-6" id="recip_${line}">${data[line]}</td><td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-text" onclick="copyRecipient('${line}')">Copy</button><button class="btn-text" onclick="editRecipient('${line}')">Edit</button><button class="btn-text hover:!text-red-600" onclick="deleteRecipient('${line}')">Del</button></div></td></tr>`; }); }
 function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -1811,6 +1681,77 @@ function generateFullMail() {
 // ==========================================
 // 💡 [V8 하이브리드 동기화 엔진] Box 파일과 IndexedDB 병합
 // ==========================================
+// ==========================================
+// 4. [v1.1 추가] 동기화 안전장치 (연결 게이트 · 상태 배너 · 영속성)
+// ==========================================
+
+// 4-1. 최초 연결 게이트: 이 브라우저가 한 번도 Box와 동기화된 적 없으면 노출
+function checkSyncGateOnLoad() {
+    if (sessionStorage.getItem('syncGateBypassed') === 'yes') return; // 이번 세션엔 이미 "건너뛰기" 확인함
+    if (!localStorage.getItem('hasCompletedInitialSync')) showSyncGate();
+}
+function showSyncGate() { const o = document.getElementById('syncGateOverlay'); if (o) o.classList.remove('hidden'); }
+function hideSyncGate() { const o = document.getElementById('syncGateOverlay'); if (o) o.classList.add('hidden'); }
+
+async function gateConnect() { await linkBoxFile(); }
+
+function gateSkip() {
+    if (!confirm("⚠️ 연결 없이 계속하면 팀원들의 최신 작업 이력이 보이지 않고, 지금부터 작성하는 내용도 Box에 반영되지 않습니다.\n정말 계속하시겠습니까?")) return;
+    hideSyncGate();
+    sessionStorage.setItem('syncGateBypassed', 'yes'); // hasCompletedInitialSync는 세팅하지 않음 → 다음 접속 시 다시 안내
+    updateSyncStatusBanner();
+}
+
+// 최초 연결 성공 직후: Pull 1회 실행 + 플래그 기록 + 게이트 닫기
+async function completeInitialConnect() {
+    showToast("연결 완료", "최신 데이터를 불러오는 중입니다...");
+    await syncWithBox(true, false, true); // isPushSettings=false → 우선 Box 내용을 로컬로 Pull
+    localStorage.setItem('hasCompletedInitialSync', 'yes');
+    sessionStorage.removeItem('syncGateBypassed');
+    hideSyncGate();
+    await updateSyncStatusBanner();
+    alert("✅ Box 파일이 연결되고 팀 최신 데이터를 불러왔습니다!");
+}
+
+// 4-2. 상태 배너: 미연결 / 권한 끊김 / 오래된 동기화만 눈에 띄게 경고, 정상일 땐 조용히 숨김
+const SYNC_STALE_MS = 30 * 60 * 1000; // 30분 이상 미동기화 시 경고
+async function updateSyncStatusBanner() {
+    const banner = document.getElementById('syncStatusBanner');
+    const icon = document.getElementById('syncStatusIcon');
+    const text = document.getElementById('syncStatusText');
+    if (!banner || !icon || !text) return;
+
+    const DANGER = "mb-6 px-4 py-3 rounded-md border flex items-center justify-between gap-3 text-xs border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400";
+    const WARN   = "mb-6 px-4 py-3 rounded-md border flex items-center justify-between gap-3 text-xs border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-400";
+
+    const isDesktop = 'showOpenFilePicker' in window;
+    const handle = await getFileHandle('boxBackupFile');
+
+    if (isDesktop && !handle) {
+        banner.className = DANGER; icon.innerText = "link_off";
+        text.innerText = "Box DB 파일이 연결되어 있지 않습니다. 팀원과 데이터가 어긋날 수 있습니다.";
+        banner.classList.remove('hidden'); return;
+    }
+    if (handle) {
+        const hasPerm = await verifyPermission(handle, true, false);
+        if (!hasPerm) {
+            banner.className = DANGER; icon.innerText = "error";
+            text.innerText = "Box 연결 권한이 끊어졌습니다. [지금 동기화]를 눌러 재연결해주세요.";
+            banner.classList.remove('hidden'); return;
+        }
+    }
+
+    const last = parseInt(localStorage.getItem('lastSyncSuccessAt') || '0');
+    const elapsed = Date.now() - last;
+    if (!last || elapsed > SYNC_STALE_MS) {
+        banner.className = WARN; icon.innerText = "schedule";
+        text.innerText = last ? `마지막 동기화로부터 ${Math.floor(elapsed / 60000)}분 경과했습니다. 최신 데이터를 위해 동기화해주세요.` : "아직 동기화 기록이 없습니다.";
+        banner.classList.remove('hidden'); return;
+    }
+
+    banner.classList.add('hidden');
+}
+
 async function verifyPermission(h, rw, isUserGesture = false) { 
     const o = { mode: rw ? 'readwrite' : 'read' }; 
     if ((await h.queryPermission(o)) === 'granted') return true;
@@ -1820,16 +1761,19 @@ async function verifyPermission(h, rw, isUserGesture = false) {
 
 async function linkBoxFile() {
     if ('showOpenFilePicker' in window) {
-        // [PC 환경] 기존과 동일
+        // [PC 환경]
         try {
             const copyPath = prompt("👇 [최초 1회 설정] 아래 Box 폴더 경로를 복사하여 공용 파일을 선택하세요.", typeof BOX_PATH !== 'undefined' ? BOX_PATH : "");
             if (copyPath === null) return;
             const [h] = await window.showOpenFilePicker({ types: [{ description: 'Text Files', accept: {'text/plain': ['.txt']} }] });
             await saveFileHandle('boxBackupFile', h); 
-            alert("✅ Box 파일이 성공적으로 연결되었습니다!");
+            // 💡 [v1.1 추가] 이 사이트가 저장한 파일 핸들/로컬 DB가 브라우저 저장공간 정리 대상에서 제외되도록 영속 저장 요청
+            if (navigator.storage && navigator.storage.persist) { try { await navigator.storage.persist(); } catch(e) {} }
             const btn = document.getElementById("syncBtn");
             if(btn) btn.classList.remove("text-red-500", "font-black");
             document.getElementById("syncIcon").innerText = "sync"; document.getElementById("syncText").innerText = "Sync";
+            // 💡 [v1.1 추가] 연결 직후 곧바로 최초 Pull 실행 (연결만 하고 데이터는 안 불러온 상태 방지)
+            await completeInitialConnect();
         } catch (e) { if (e.name !== 'AbortError') alert("연결 실패"); }
     } else {
         // 💡 [모바일/아이폰 전용] HTML 수정 없이 투명한 파일 선택창을 생성하여 실행
@@ -1893,27 +1837,6 @@ async function handleMobileDB(event) {
             // 💡 [추가됨] 소모품(Laser, Scale Head) 이력 병합
             if(boxData.equipMaintenance) applyIncomingMaintenance(boxData.equipMaintenance); 
 
-            let localShipping = JSON.parse(localStorage.getItem("shippingData") || "[]");
-            let boxShipping = boxData.shippingData || [];
-            function _mergeItem(a, b) {
-                if (a.status === 'deleted') return a;
-                if (b.status === 'deleted') return b;
-                const ta = a.updatedAt || (parseInt(String(a.id).replace('SHIP_',''))||0);
-                const tb = b.updatedAt || (parseInt(String(b.id).replace('SHIP_',''))||0);
-                return tb >= ta ? b : a;
-            }
-            let mergedShippingMap = new Map();
-            boxShipping.forEach(item => mergedShippingMap.set(item.id, item));
-            localShipping.forEach(item => mergedShippingMap.has(item.id)
-                ? mergedShippingMap.set(item.id, _mergeItem(mergedShippingMap.get(item.id), item))
-                : mergedShippingMap.set(item.id, item));
-            let mergedShipping = Array.from(mergedShippingMap.values());
-            localStorage.setItem("shippingData", JSON.stringify(mergedShipping));
-            boxData.shippingData = mergedShipping;
-
-            if(document.getElementById('shipping-board') && !document.getElementById('shipping-board').classList.contains('hidden')) {
-                if(typeof renderKanban === 'function') renderKanban();
-            }
             await updateHistoryBadge();
             if(document.getElementById('history') && document.getElementById('history').classList.contains('block')) await renderHistory();
 
@@ -1930,6 +1853,13 @@ async function handleMobileDB(event) {
                 document.body.removeChild(a);
             }
 
+            // 💡 [v1.1 추가] 모바일도 최초 동기화 완료로 기록 → 게이트 해제 + 배너 갱신
+            localStorage.setItem('hasCompletedInitialSync', 'yes');
+            localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
+            sessionStorage.removeItem('syncGateBypassed');
+            hideSyncGate();
+            await updateSyncStatusBanner();
+
         } catch (error) {
             console.error(error);
             alert('DB 파일 형식이 올바르지 않거나 오류가 발생했습니다.');
@@ -1939,7 +1869,7 @@ async function handleMobileDB(event) {
     reader.readAsText(file);
 }
 
-// 2. [수정] 메인 Box 동기화 함수ㅅ
+// 2. [수정] 메인 Box 동기화 함수
 async function syncWithBox(isUserGesture = false, isPushSettings = false, isManualButton = false) {
     let isSyncingStatus = typeof isSyncing !== 'undefined' ? isSyncing : false;
     if (isSyncingStatus) { if (isPushSettings && typeof pendingPush !== 'undefined') pendingPush = true; return; }
@@ -1953,11 +1883,12 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
             }
             alert("⚠️ 상단의 [DB 연결] 버튼을 눌러 공용 파일을 연결해 주세요."); 
         }
+        await updateSyncStatusBanner();
         return; 
     }
 
     const hasPerm = await verifyPermission(handle, true, isUserGesture);
-    if (!hasPerm) { if (isManualButton) alert("권한이 필요합니다."); return; }
+    if (!hasPerm) { if (isManualButton) alert("권한이 필요합니다."); await updateSyncStatusBanner(); return; }
 
     if(typeof isSyncing !== 'undefined') isSyncing = true;
     const syncIcon = document.getElementById("syncIcon"); const syncText = document.getElementById("syncText"); const btn = document.getElementById("syncBtn");
@@ -1967,87 +1898,83 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
     if (syncIcon && isManualButton) { syncIcon.classList.add("animate-spin"); syncText.innerText = "Syncing..."; if (btn) btn.style.opacity = "0.7"; }
 
     try {
-        const file = await handle.getFile(); const text = await file.text();
-        let boxData = text ? JSON.parse(text) : {};
-        
-        let boxHistory = boxData.workHistory || [];
-        let localHistory = await getIDBHistory();
-        let mergedMap = new Map();
-        
-        const getLegacyId = (item) => "LEGACY_" + item.date + "_" + item.machine + "_" + (item.content || "").substring(0, 10);
-        boxHistory.forEach(item => { if (!item.id) item.id = getLegacyId(item); mergedMap.set(item.id, item); });
-        localHistory.forEach(item => {
-            if (!item.id) item.id = getLegacyId(item);
-            let existing = mergedMap.get(item.id);
-            if (!existing || (item.updatedAt || 0) >= (existing.updatedAt || 0)) mergedMap.set(item.id, item);
-        });
-        
-        let finalMergedHistory = Array.from(mergedMap.values());
-        let uniqueHistory = [];
-        let seenContent = new Set();
-        finalMergedHistory.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        // 💡 [v1.1 추가] 낙관적 동시성 제어: 읽기~쓰기 사이 다른 팀원이 파일을 먼저 바꿨으면
+        // 그 최신 내용으로 재병합 후 다시 시도한다 (최대 2회). 서로의 저장을 덮어쓰는 사고를 줄여준다.
+        const MAX_RETRY = 2;
+        for (let attempt = 0; ; attempt++) {
+            const file = await handle.getFile(); const text = await file.text();
+            const lastModAtRead = file.lastModified;
+            let boxData = text ? JSON.parse(text) : {};
 
-        finalMergedHistory.forEach(item => {
-            const cleanDate = (item.date || "미상").replace(/[^0-9]/g, ""); 
-            const cleanMachine = (item.machine || "").trim().toUpperCase();
-            const cleanContent = (item.content || "").trim().replace(/\s/g, "");
-            let uniqueKey = `${cleanMachine}|${cleanDate}|${cleanContent}`;
-            if (!seenContent.has(uniqueKey)) { seenContent.add(uniqueKey); uniqueHistory.push(item); }
-        });
+            let boxHistory = boxData.workHistory || [];
+            let localHistory = await getIDBHistory();
+            let mergedMap = new Map();
 
-        boxData.workHistory = uniqueHistory;
-        await putIDBHistory(uniqueHistory);
+            const getLegacyId = (item) => "LEGACY_" + item.date + "_" + item.machine + "_" + (item.content || "").substring(0, 10);
+            boxHistory.forEach(item => { if (!item.id) item.id = getLegacyId(item); mergedMap.set(item.id, item); });
+            localHistory.forEach(item => {
+                if (!item.id) item.id = getLegacyId(item);
+                let existing = mergedMap.get(item.id);
+                if (!existing || (item.updatedAt || 0) >= (existing.updatedAt || 0)) mergedMap.set(item.id, item);
+            });
 
-        if (isPushSettings) {
-            let eqToPush = JSON.parse(localStorage.getItem("equipmentData") || "[]").map(e => { let obj = {...e}; delete obj.isEditing; return obj; });
-            boxData.equipment = eqToPush; 
-            boxData.recipient = JSON.parse(localStorage.getItem("recipientData") || "{}"); 
-            boxData.machineNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
-            // 💡 [추가됨] Box 파일로 내보낼 때 소모품 이력 포함
-            boxData.equipMaintenance = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
-        } else {
-            let localEq = JSON.parse(localStorage.getItem("equipmentData") || "[]"); let isEditingEq = localEq.some(i => i.isEditing);
-            if(boxData.equipment && !isEditingEq) { localStorage.setItem("equipmentData", JSON.stringify(boxData.equipment)); renderTable(); }
-            if(boxData.recipient) { localStorage.setItem("recipientData", JSON.stringify(boxData.recipient)); renderRecipientTable(); }
-            if(boxData.machineNotes) localStorage.setItem("machineNotes", JSON.stringify(boxData.machineNotes));
-            // 💡 [추가됨] Box 파일에서 불러올 때 소모품 이력 반영
-            if(boxData.equipMaintenance) applyIncomingMaintenance(boxData.equipMaintenance);
+            let finalMergedHistory = Array.from(mergedMap.values());
+            let uniqueHistory = [];
+            let seenContent = new Set();
+            finalMergedHistory.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+            finalMergedHistory.forEach(item => {
+                const cleanDate = (item.date || "미상").replace(/[^0-9]/g, ""); 
+                const cleanMachine = (item.machine || "").trim().toUpperCase();
+                const cleanContent = (item.content || "").trim().replace(/\s/g, "");
+                let uniqueKey = `${cleanMachine}|${cleanDate}|${cleanContent}`;
+                if (!seenContent.has(uniqueKey)) { seenContent.add(uniqueKey); uniqueHistory.push(item); }
+            });
+
+            boxData.workHistory = uniqueHistory;
+            await putIDBHistory(uniqueHistory);
+
+            if (isPushSettings) {
+                let eqToPush = JSON.parse(localStorage.getItem("equipmentData") || "[]").map(e => { let obj = {...e}; delete obj.isEditing; return obj; });
+                boxData.equipment = eqToPush; 
+                boxData.recipient = JSON.parse(localStorage.getItem("recipientData") || "{}"); 
+                boxData.machineNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
+                // 💡 [추가됨] Box 파일로 내보낼 때 소모품 이력 포함
+                boxData.equipMaintenance = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+            } else {
+                let localEq = JSON.parse(localStorage.getItem("equipmentData") || "[]"); let isEditingEq = localEq.some(i => i.isEditing);
+                if(boxData.equipment && !isEditingEq) { localStorage.setItem("equipmentData", JSON.stringify(boxData.equipment)); renderTable(); }
+                if(boxData.recipient) { localStorage.setItem("recipientData", JSON.stringify(boxData.recipient)); renderRecipientTable(); }
+                if(boxData.machineNotes) localStorage.setItem("machineNotes", JSON.stringify(boxData.machineNotes));
+                // 💡 [추가됨] Box 파일에서 불러올 때 소모품 이력 반영
+                if(boxData.equipMaintenance) applyIncomingMaintenance(boxData.equipMaintenance);
+            }
+
+            // 쓰기 직전 재확인: 그 사이 파일이 바뀌었으면 새로 읽어서 재병합
+            const freshCheck = await handle.getFile();
+            if (freshCheck.lastModified !== lastModAtRead && attempt < MAX_RETRY) {
+                console.warn(`⚠️ 쓰기 직전 파일 변경 감지 — 최신 내용으로 재병합합니다. (재시도 ${attempt + 1}/${MAX_RETRY})`);
+                continue; // 처음부터 다시 읽고 병합
+            }
+
+            const writable = await handle.createWritable();
+            await writable.write(JSON.stringify(boxData, null, 2));
+            await writable.close();
+            break;
         }
-
-        let localShipping = JSON.parse(localStorage.getItem("shippingData") || "[]");
-        let boxShipping = boxData.shippingData || [];
-        function _mergeItem2(a, b) {
-            if (a.status === 'deleted') return a;
-            if (b.status === 'deleted') return b;
-            const ta = a.updatedAt || (parseInt(String(a.id).replace('SHIP_',''))||0);
-            const tb = b.updatedAt || (parseInt(String(b.id).replace('SHIP_',''))||0);
-            return tb >= ta ? b : a;
-        }
-        let mergedShippingMap = new Map();
-        boxShipping.forEach(item => mergedShippingMap.set(item.id, item));
-        localShipping.forEach(item => mergedShippingMap.has(item.id)
-            ? mergedShippingMap.set(item.id, _mergeItem2(mergedShippingMap.get(item.id), item))
-            : mergedShippingMap.set(item.id, item));
-        let mergedShipping = Array.from(mergedShippingMap.values());
-        
-        localStorage.setItem("shippingData", JSON.stringify(mergedShipping));
-        boxData.shippingData = mergedShipping;
-        
-        if(document.getElementById('shipping-board') && !document.getElementById('shipping-board').classList.contains('hidden')) {
-            if(typeof renderKanban === 'function') renderKanban();
-        }
-
-        const writable = await handle.createWritable();
-        await writable.write(JSON.stringify(boxData, null, 2));
-        await writable.close();
         
         await updateHistoryBadge();
         if(document.getElementById('history') && document.getElementById('history').classList.contains('block')) await renderHistory();
+
+        // 💡 [v1.1 추가] 마지막 성공 동기화 시각 기록 → 상태 배너 판단 기준
+        localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
+        await updateSyncStatusBanner();
 
         if (isManualButton) setTimeout(() => showToast("동기화 완료", "최신 데이터가 적용되었습니다."), 100);
     } catch (error) {
         console.error("동기화 실패:", error);
         if (isManualButton) alert("동기화 중 오류가 발생했습니다. 파일 연결을 확인해주세요.");
+        await updateSyncStatusBanner();
     } finally {
         const finishSync = () => {
             if(typeof isSyncing !== 'undefined') isSyncing = false;
@@ -2057,7 +1984,12 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
     }
 }
 
-function autoMergeAndSave() { syncWithBox(true, true, false); }
+// 💡 [v1.1 추가] 연속된 로컬 변경(연속 입력/일괄 등록 등)을 짧게 모아 한 번만 Push하는 디바운스
+let _autoSyncDebounceTimer = null;
+function autoMergeAndSave() {
+    clearTimeout(_autoSyncDebounceTimer);
+    _autoSyncDebounceTimer = setTimeout(() => { syncWithBox(true, true, false); }, 700);
+}
 function manualSync() { syncWithBox(true, false, true); }
 async function disconnectDB() {
     if(!confirm("⚠️ 현재 연결된 Box 파일 설정을 해제하시겠습니까? (로컬 데이터도 초기화됩니다)")) return;
@@ -2079,7 +2011,6 @@ async function autoLocalBackup() {
             let machineNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
             // 💡 [추가됨] 백업 생성 시 소모품 데이터 긁어오기
             let equipMaintenance = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
-            let shipping = JSON.parse(localStorage.getItem("shippingData") || "[]");
 
             let backupData = {
                 workHistory: history,
@@ -2087,7 +2018,6 @@ async function autoLocalBackup() {
                 recipient: recipient,
                 machineNotes: machineNotes,
                 equipMaintenance: equipMaintenance, // 💡 [추가됨] 백업 파일에 기록
-                shippingData: shipping,
                 backupDate: new Date().toISOString()
             };
 
@@ -2117,158 +2047,11 @@ async function autoLocalBackup() {
 }
     
 // ==========================================
-// 🚚 반출품 보드 (Kanban) 통합 패키지 코드
+// ⏱️ 자동 Sync (1시간 간격)
 // ==========================================
-
-// 1. 기본 세팅
-if (!localStorage.getItem("shippingData")) localStorage.setItem("shippingData", "[]");
-
-// 2. 새 반출품 추가
-function promptAddShipping() {
-    const machine = prompt("설비 호기를 입력하세요 (예: MDI3504):");
-    if (!machine) return;
-    const item = prompt("반출 품목을 입력하세요 (예: NEW Hand):");
-    if (!item) return;
-    const shipNum = prompt("반출 번호를 입력하세요 (예: 2026-0428-01):");
-    
-    const data = JSON.parse(localStorage.getItem("shippingData") || "[]");
-    const newCard = {
-        id: "SHIP_" + Date.now(),
-        machine: machine.trim(),
-        item: item.trim(),
-        shipNum: shipNum ? shipNum.trim() : "미상",
-        status: "pending", 
-        date: new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' })
-    };
-    data.push(newCard);
-    localStorage.setItem("shippingData", JSON.stringify(data));
-    renderKanban();
-    if(typeof autoMergeAndSave === "function") autoMergeAndSave();
-}
-
-// 3. 카드 삭제 (마우스 다운 즉시 실행 + 소프트 삭제)
-window.deleteShippingCard = function(event, id) {
-    event.preventDefault(); // 드래그 시작 원천 차단!
-    event.stopPropagation(); 
-    
-    if(!confirm("이 반출 기록을 삭제하시겠습니까?")) return;
-    let data = JSON.parse(localStorage.getItem("shippingData") || "[]");
-    const cardIndex = data.findIndex(c => c.id === id);
-    if(cardIndex > -1) {
-        data[cardIndex].status = "deleted";
-        localStorage.setItem("shippingData", JSON.stringify(data));
-        renderKanban();
-        if(typeof autoMergeAndSave === "function") autoMergeAndSave();
-    }
-};
-
-// 4. 카드 수정 (마우스 다운 즉시 실행)
-window.editShippingCard = function(event, id) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    let data = JSON.parse(localStorage.getItem("shippingData") || "[]");
-    const cardIndex = data.findIndex(c => c.id === id);
-    if(cardIndex === -1) return;
-
-    const card = data[cardIndex];
-    const newMachine = prompt("설비 호기를 수정하세요:", card.machine);
-    if(newMachine === null) return;
-    const newItem = prompt("반출 품목을 수정하세요:", card.item);
-    if(newItem === null) return;
-    const newShipNum = prompt("반출 번호를 수정하세요:", card.shipNum);
-    if(newShipNum === null) return;
-
-    data[cardIndex].machine   = newMachine.trim();
-    data[cardIndex].item      = newItem.trim();
-    data[cardIndex].shipNum   = newShipNum.trim() || "미상";
-    data[cardIndex].updatedAt = Date.now(); // 수정 시각 기록 → merge 시 최신 우선
-
-    localStorage.setItem("shippingData", JSON.stringify(data));
-    renderKanban();
-    if(typeof syncWithBox === "function") syncWithBox(true, true, false);
-};
-
-// 5. 화면 렌더링 (마우스 오작동 방지 속성 추가)
-window.renderKanban = function() {
-    const data = JSON.parse(localStorage.getItem("shippingData") || "[]");
-    document.getElementById('col-pending').innerHTML = '';
-    document.getElementById('col-requested').innerHTML = '';
-    document.getElementById('col-completed').innerHTML = '';
-    
-    let cnt = { pending: 0, requested: 0, completed: 0 };
-
-    data.forEach(card => {
-        if (card.status === "deleted") return; // 삭제된 카드는 그리지 않음
-
-        if (cnt[card.status] === undefined) cnt[card.status] = 0;
-        cnt[card.status]++;
-
-        const div = document.createElement('div');
-        div.className = "group relative bg-background border border-border p-4 rounded-lg shadow-sm cursor-grab active:cursor-grabbing hover:border-primary transition-colors hover:shadow-md animate-[fadeIn_0.2s_ease-in]";
-        div.draggable = true;
-        div.ondragstart = (e) => { 
-            e.dataTransfer.effectAllowed = "move"; 
-            e.dataTransfer.setData("text", card.id); 
-            setTimeout(() => { div.style.opacity = "0.4"; }, 0); 
-        };
-        div.ondragend = () => { div.style.opacity = "1"; };
-        
-        div.innerHTML = `
-            <div class="flex items-center gap-2 mb-2 pr-12">
-                <span class="material-symbols-outlined text-text-muted text-[16px]">work</span>
-                <span class="text-sm font-bold text-text-main">${card.machine}</span>
-            </div>
-            <p class="text-sm text-text-main font-medium mb-1 break-words">${card.item}</p>
-            <div class="flex justify-between items-end mt-3">
-                <span class="text-[10px] bg-surface border border-border px-2 py-1 rounded text-text-muted">번호: ${card.shipNum}</span>
-                <span class="text-[10px] text-text-muted">${card.date}</span>
-            </div>
-            <div class="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button type="button" class="text-text-muted hover:text-blue-500 bg-surface border border-border rounded p-1 flex items-center justify-center shadow-sm z-10" onmousedown="editShippingCard(event, '${card.id}')" title="수정">
-                    <span class="material-symbols-outlined text-[14px]">edit</span>
-                </button>
-                <button type="button" class="text-text-muted hover:text-red-500 bg-surface border border-border rounded p-1 flex items-center justify-center shadow-sm z-10" onmousedown="deleteShippingCard(event, '${card.id}')" title="삭제">
-                    <span class="material-symbols-outlined text-[14px]">delete</span>
-                </button>
-            </div>
-        `;
-        document.getElementById(`col-${card.status}`).appendChild(div);
-    });
-
-    document.getElementById('cnt-pending').innerText = cnt.pending;
-    document.getElementById('cnt-requested').innerText = cnt.requested;
-    document.getElementById('cnt-completed').innerText = cnt.completed;
-};
-
-// 6. 드래그 앤 드롭 함수
-window.allowDropKanban = function(ev) {
-    ev.preventDefault();
-    ev.dataTransfer.dropEffect = "move"; 
-};
-
-window.dropKanban = function(ev, newStatus) {
-    ev.preventDefault();
-    const id = ev.dataTransfer.getData("text");
-    if (!id || !id.startsWith("SHIP_")) return; 
-
-    let data = JSON.parse(localStorage.getItem("shippingData") || "[]");
-    const cardIndex = data.findIndex(c => c.id === id);
-    
-    if(cardIndex > -1 && data[cardIndex].status !== newStatus) {
-        data[cardIndex].status    = newStatus;
-        data[cardIndex].updatedAt = Date.now(); // 이동 시각 기록 → merge 시 최신 상태 우선
-        localStorage.setItem("shippingData", JSON.stringify(data));
-        renderKanban();
-        if(typeof syncWithBox === "function") syncWithBox(true, true, false);
-    }
-};
-
-// 7. 창 켜질 때 화면 그리기 + 1시간 자동 Sync
 const originalOnload = window.onload;
 window.onload = async function() {
     if(originalOnload) await originalOnload();
-    renderKanban();
 
     // ── 자동 Sync: 1시간마다 백그라운드 동기화 ──
     const AUTO_SYNC_INTERVAL = 60 * 60 * 1000;
