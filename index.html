@@ -1552,7 +1552,7 @@ async function extractData() {
     document.getElementById("extractResult").style.display = "block";
     
     if (machine !== "미상") { 
-        saveHistoryEntry({ machine, line, date: df, content, worker, rawText: text, savedAt: new Date().toISOString() }); 
+        await saveHistoryEntry({ machine, line, date: df, content, worker, rawText: text, savedAt: new Date().toISOString() }); 
         document.getElementById("autoSavedBadge").classList.remove("hidden"); 
 
         // ⭐ 특이사항/부품교체: Management 유지보수 데이터에 자동 반영 + 노트 요약 누적
@@ -2458,6 +2458,23 @@ async function pushPartitionedTeamData(dirHandle, pushScope = {}) {
 // ----------------------------------------------------
 // 🚀 통합 동기화 디스패처 (폴더 분할 엔진 및 레거시 단일파일 폴백)
 // ----------------------------------------------------
+async function ensureFreshTeamDb() {
+    const dirHandle = await getFileHandle('boxDirectoryHandle');
+    const legacyFileHandle = await getFileHandle('boxBackupFile');
+    if (!dirHandle && !legacyFileHandle) {
+        return true; // 미연결 상태여도 로컬 추출/저장은 정상 진행
+    }
+    try {
+        const ok = await syncWithBox(true, false, false);
+        if (!ok) {
+            console.warn('팀 DB 최신 동기화에 실패했으나 로컬 저장을 계속 진행합니다.');
+        }
+    } catch(e) {
+        console.warn('동기화 확인 중 오류:', e);
+    }
+    return true;
+}
+
 async function syncWithBox(isUserGesture = false, isPushSettings = false, isManualButton = false, pushScope = { scope: 'all' }) {
     if (activeSyncPromise) { 
         if (isPushSettings) pendingPush = true; 
