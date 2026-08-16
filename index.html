@@ -1708,7 +1708,12 @@ function gateSkip() {
 // 최초 연결 성공 직후: Pull 1회 실행 + 플래그 기록 + 게이트 닫기
 async function completeInitialConnect() {
     showToast("연결 완료", "최신 데이터를 불러오는 중입니다...");
-    await syncWithBox(true, false, true); // isPushSettings=false → 우선 Box 내용을 로컬로 Pull
+    const ok = await syncWithBox(true, false, true); // isPushSettings=false → 우선 Box 내용을 로컬로 Pull
+    if (!ok) {
+        showToast("연결 실패", "팀 DB를 불러오지 못했습니다. 연결과 권한을 다시 확인해주세요.");
+        await updateSyncStatusBanner();
+        return;
+    }
     localStorage.setItem('hasCompletedInitialSync', 'yes');
     sessionStorage.removeItem('syncGateBypassed');
     hideSyncGate();
@@ -1959,12 +1964,16 @@ async function buildMergedTeamData(boxData, includeLocalSettings = true) {
 }
 async function applyTeamDataToLocal(data) {
     await putIDBHistory(data.workHistory || []);
-    localStorage.setItem('equipmentData', JSON.stringify(data.equipment || []));
+    // 인라인 설비 편집 중에는 Pull 렌더링이 입력 중인 행을 덮어쓰지 않도록 보존한다.
+    const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]');
+    const isEditingEquipment = localEquipment.some(item => item.isEditing);
+    if (!isEditingEquipment) localStorage.setItem('equipmentData', JSON.stringify(data.equipment || []));
     localStorage.setItem('recipientData', JSON.stringify(data.recipient || {}));
     localStorage.setItem('machineNotes', JSON.stringify(data.machineNotes || {}));
     localStorage.setItem('equipMaintenance', JSON.stringify(data.equipMaintenance || {}));
     rememberTeamMeta(data);
-    renderTable(); renderRecipientTable(); await updateHistoryBadge();
+    if (!isEditingEquipment) renderTable();
+    renderRecipientTable(); await updateHistoryBadge();
     if (document.getElementById('history')?.classList.contains('block')) await renderHistory();
 }
 async function ensureFreshTeamDb() {
