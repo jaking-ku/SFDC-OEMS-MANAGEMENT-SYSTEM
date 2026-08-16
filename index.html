@@ -273,7 +273,7 @@
             </button>
             <button id="syncBtn" class="btn-text w-full px-3 py-2.5 rounded hover:bg-background hover:!text-green-500 justify-start transition-all duration-300" onclick="manualSync()">
                 <span id="syncIcon" class="material-symbols-outlined text-base mr-3">sync</span>
-                <span id="syncText" class="text-xs uppercase tracking-widest">Sync</span>
+                <span id="syncText" class="text-xs uppercase tracking-widest">강제 최신화</span>
             </button>
         </div>
     </aside>
@@ -1375,7 +1375,10 @@ function renderRecipientTable() { const tbody = document.getElementById("recipie
 function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function renderTable() { const tbody = document.getElementById("dataTableBody"); const raw = JSON.parse(localStorage.getItem("equipmentData") || "[]"); tbody.innerHTML = ""; const data = raw.map((item, i) => ({ item, i })).sort((a, b) => a.item.line.localeCompare(b.item.line, 'ko', { numeric: true }) || a.i - b.i); data.forEach(({ item, i }) => { if (item.isEditing) { tbody.innerHTML += `<tr class="bg-background/60"><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editLine_${i}" value="${item.line}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editModel_${i}" value="${item.model}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editName_${i}" value="${item.name}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editSN_${i}" value="${item.sn}"></td><td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editLoc_${i}" value="${item.location}"></td><td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-primary px-3 py-1 text-[10px] rounded" onclick="saveEdit(${i})">Save</button></div></td></tr>`; } else { tbody.innerHTML += `<tr class="hover:bg-background/40 transition-colors"><td class="td-base px-6 font-medium">${item.line}</td><td class="td-base px-6 text-text-muted">${item.model}</td><td class="td-base px-6 text-primary font-bold equip-link cursor-pointer hover:underline" data-sn="${escapeHtml(item.sn)}">${item.name}</td><td class="td-base px-6 text-xs text-text-muted font-mono">${item.sn}</td><td class="td-base px-6 text-text-muted">${item.location}</td><td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-text" onclick="enableEdit(${i})">Edit</button><button class="btn-text hover:!text-red-600" onclick="deleteData(${i})">Del</button></div></td></tr>`; } }); tbody.querySelectorAll(".equip-link").forEach(el => el.addEventListener("click", () => { if (!el.dataset.sn) { showToast("오류", "S/N이 없는 설비는 상세페이지를 열 수 없습니다. S/N을 먼저 입력해주세요."); return; } openEquipDetail(el.dataset.sn); })); filterTable(); }
 
-function extractData() {
+async function extractData() {
+    // 작업 이력·설비 이력·메모를 함께 변경하는 가장 중요한 저장 지점이다.
+    // 추출 전에 팀 DB를 반드시 최신 상태로 맞춰, 오래된 로컬 DB 위에 기록하는 일을 막는다.
+    if (!(await ensureFreshTeamDb())) return;
     const text = document.getElementById("mailInput").value; 
     if (!text.trim()) return alert("메일 내용을 입력하세요.");
 
@@ -1771,7 +1774,7 @@ async function linkBoxFile() {
             if (navigator.storage && navigator.storage.persist) { try { await navigator.storage.persist(); } catch(e) {} }
             const btn = document.getElementById("syncBtn");
             if(btn) btn.classList.remove("text-red-500", "font-black");
-            document.getElementById("syncIcon").innerText = "sync"; document.getElementById("syncText").innerText = "Sync";
+            document.getElementById("syncIcon").innerText = "sync"; document.getElementById("syncText").innerText = "강제 최신화";
             // 💡 [v1.1 추가] 연결 직후 곧바로 최초 Pull 실행 (연결만 하고 데이터는 안 불러온 상태 방지)
             await completeInitialConnect();
         } catch (e) { if (e.name !== 'AbortError') alert("연결 실패"); }
@@ -1830,6 +1833,13 @@ async function handleMobileDB(event) {
             boxData.workHistory = uniqueHistory;
             await putIDBHistory(uniqueHistory);
 
+            // 모바일은 파일을 직접 덮어쓸 수 없으므로, 내려받을 병합본에도 revision을 남긴다.
+            const mobileMeta = normalizeTeamMeta(boxData);
+            boxData.schemaVersion = TEAM_SCHEMA_VERSION;
+            boxData.dbRevision = mobileMeta.dbRevision + 1;
+            boxData.lastUpdatedAt = Date.now();
+            boxData.lastUpdatedBy = getTeamEditorName();
+
             let localEq = JSON.parse(localStorage.getItem("equipmentData") || "[]"); let isEditingEq = localEq.some(i => i.isEditing);
             if(boxData.equipment && !isEditingEq) { localStorage.setItem("equipmentData", JSON.stringify(boxData.equipment)); renderTable(); }
             if(boxData.recipient) { localStorage.setItem("recipientData", JSON.stringify(boxData.recipient)); renderRecipientTable(); }
@@ -1856,6 +1866,7 @@ async function handleMobileDB(event) {
             // 💡 [v1.1 추가] 모바일도 최초 동기화 완료로 기록 → 게이트 해제 + 배너 갱신
             localStorage.setItem('hasCompletedInitialSync', 'yes');
             localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
+            rememberTeamMeta(boxData);
             sessionStorage.removeItem('syncGateBypassed');
             hideSyncGate();
             await updateSyncStatusBanner();
@@ -1869,122 +1880,173 @@ async function handleMobileDB(event) {
     reader.readAsText(file);
 }
 
-// 2. [수정] 메인 Box 동기화 함수
-async function syncWithBox(isUserGesture = false, isPushSettings = false, isManualButton = false) {
-    let isSyncingStatus = typeof isSyncing !== 'undefined' ? isSyncing : false;
-    if (isSyncingStatus) { if (isPushSettings && typeof pendingPush !== 'undefined') pendingPush = true; return; }
-    
-    let handle = await getFileHandle('boxBackupFile');
-    if (!handle) { 
-        if (isManualButton) {
-            if (!('showOpenFilePicker' in window)) {
-                linkBoxFile();
-                return;
-            }
-            alert("⚠️ 상단의 [DB 연결] 버튼을 눌러 공용 파일을 연결해 주세요."); 
-        }
-        await updateSyncStatusBanner();
-        return; 
+// 2. Team DB 자동 최신화 + revision 기반 낙관적 동시성 제어
+const TEAM_SCHEMA_VERSION = 2;
+let activeSyncPromise = null;
+
+function normalizeTeamMeta(data) {
+    return {
+        schemaVersion: Math.max(Number(data.schemaVersion) || 1, TEAM_SCHEMA_VERSION),
+        dbRevision: Number(data.dbRevision) || 0,
+        lastUpdatedAt: Number(data.lastUpdatedAt) || 0,
+        lastUpdatedBy: data.lastUpdatedBy || "알 수 없음"
+    };
+}
+function rememberTeamMeta(data) {
+    const meta = normalizeTeamMeta(data);
+    localStorage.setItem('teamDbRevision', String(meta.dbRevision));
+    localStorage.setItem('teamDbLastUpdatedAt', String(meta.lastUpdatedAt));
+    localStorage.setItem('teamDbLastUpdatedBy', meta.lastUpdatedBy);
+    const label = document.getElementById('autoSyncLabel');
+    if (label) {
+        const d = meta.lastUpdatedAt ? new Date(meta.lastUpdatedAt) : new Date();
+        label.textContent = `TEAM DB 최신 확인: ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')} · Rev. ${meta.dbRevision}`;
     }
+}
+function getTeamEditorName() {
+    return (document.getElementById('mailMyName')?.value || localStorage.getItem('storedMyName') || '알 수 없음').trim() || '알 수 없음';
+}
+function mergeHistory(boxHistory, localHistory) {
+    const map = new Map();
+    const legacyId = item => "LEGACY_" + item.date + "_" + item.machine + "_" + (item.content || "").substring(0, 10);
+    [...(boxHistory || []), ...(localHistory || [])].forEach(item => {
+        const copy = { ...item }; if (!copy.id) copy.id = legacyId(copy);
+        const old = map.get(copy.id);
+        if (!old || (copy.updatedAt || 0) >= (old.updatedAt || 0)) map.set(copy.id, copy);
+    });
+    const seen = new Set();
+    return Array.from(map.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).filter(item => {
+        const key = `${(item.machine || '').trim().toUpperCase()}|${(item.date || '').replace(/[^0-9]/g, '')}|${(item.content || '').trim().replace(/\s/g, '')}`;
+        if (seen.has(key)) return false; seen.add(key); return true;
+    });
+}
+function mergeEquipment(boxEquipment, localEquipment) {
+    const map = new Map();
+    const keyOf = e => (e.sn || '').trim() || `${(e.line || '').trim()}|${(e.name || '').trim()}`;
+    (boxEquipment || []).forEach(e => map.set(keyOf(e), { ...e }));
+    // 로컬 변경은 최신 Pull 후의 사용자 변경이므로 같은 설비 충돌 시에만 우선한다.
+    (localEquipment || []).forEach(e => { const copy = { ...e }; delete copy.isEditing; map.set(keyOf(copy), copy); });
+    return Array.from(map.values());
+}
+function mergeNotes(boxNotes, localNotes) {
+    const result = { ...(boxNotes || {}) };
+    Object.entries(localNotes || {}).forEach(([key, value]) => {
+        if (!result[key] || result[key] === value) result[key] = value;
+        else if (value && !result[key].includes(value)) result[key] += `\n\n${value}`;
+    });
+    return result;
+}
+function mergeMaintenance(boxMaint, localMaint) {
+    const result = {};
+    Object.entries(boxMaint || {}).forEach(([key, value]) => result[key] = normalizeMaintShape(value));
+    Object.entries(localMaint || {}).forEach(([key, value]) => result[key] = result[key] ? mergeMaintDataObjects(result[key], value) : normalizeMaintShape(value));
+    return result;
+}
+async function buildMergedTeamData(boxData, includeLocalSettings = true) {
+    const localHistory = await getIDBHistory();
+    const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]');
+    const localRecipient = JSON.parse(localStorage.getItem('recipientData') || '{}');
+    const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
+    const localMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
+    return {
+        ...boxData,
+        workHistory: mergeHistory(boxData.workHistory, localHistory),
+        equipment: includeLocalSettings ? mergeEquipment(boxData.equipment, localEquipment) : (boxData.equipment || []),
+        recipient: includeLocalSettings ? { ...(boxData.recipient || {}), ...localRecipient } : (boxData.recipient || {}),
+        machineNotes: includeLocalSettings ? mergeNotes(boxData.machineNotes, localNotes) : (boxData.machineNotes || {}),
+        equipMaintenance: includeLocalSettings ? mergeMaintenance(boxData.equipMaintenance, localMaint) : (boxData.equipMaintenance || {})
+    };
+}
+async function applyTeamDataToLocal(data) {
+    await putIDBHistory(data.workHistory || []);
+    localStorage.setItem('equipmentData', JSON.stringify(data.equipment || []));
+    localStorage.setItem('recipientData', JSON.stringify(data.recipient || {}));
+    localStorage.setItem('machineNotes', JSON.stringify(data.machineNotes || {}));
+    localStorage.setItem('equipMaintenance', JSON.stringify(data.equipMaintenance || {}));
+    rememberTeamMeta(data);
+    renderTable(); renderRecipientTable(); await updateHistoryBadge();
+    if (document.getElementById('history')?.classList.contains('block')) await renderHistory();
+}
+async function ensureFreshTeamDb() {
+    const ok = await syncWithBox(true, false, false);
+    if (!ok) alert('팀 DB 최신 데이터를 확인할 수 없어 저장을 진행하지 않았습니다. Box 연결과 권한을 확인해주세요.');
+    return ok;
+}
 
-    const hasPerm = await verifyPermission(handle, true, isUserGesture);
-    if (!hasPerm) { if (isManualButton) alert("권한이 필요합니다."); await updateSyncStatusBanner(); return; }
-
-    if(typeof isSyncing !== 'undefined') isSyncing = true;
-    const syncIcon = document.getElementById("syncIcon"); const syncText = document.getElementById("syncText"); const btn = document.getElementById("syncBtn");
-
-    if (btn) btn.classList.remove("text-red-500", "font-black");
-    if (syncIcon) syncIcon.innerText = "sync";
-    if (syncIcon && isManualButton) { syncIcon.classList.add("animate-spin"); syncText.innerText = "Syncing..."; if (btn) btn.style.opacity = "0.7"; }
-
-    try {
-        // 💡 [v1.1 추가] 낙관적 동시성 제어: 읽기~쓰기 사이 다른 팀원이 파일을 먼저 바꿨으면
-        // 그 최신 내용으로 재병합 후 다시 시도한다 (최대 2회). 서로의 저장을 덮어쓰는 사고를 줄여준다.
-        const MAX_RETRY = 2;
-        for (let attempt = 0; ; attempt++) {
-            const file = await handle.getFile(); const text = await file.text();
-            const lastModAtRead = file.lastModified;
-            let boxData = text ? JSON.parse(text) : {};
-
-            let boxHistory = boxData.workHistory || [];
-            let localHistory = await getIDBHistory();
-            let mergedMap = new Map();
-
-            const getLegacyId = (item) => "LEGACY_" + item.date + "_" + item.machine + "_" + (item.content || "").substring(0, 10);
-            boxHistory.forEach(item => { if (!item.id) item.id = getLegacyId(item); mergedMap.set(item.id, item); });
-            localHistory.forEach(item => {
-                if (!item.id) item.id = getLegacyId(item);
-                let existing = mergedMap.get(item.id);
-                if (!existing || (item.updatedAt || 0) >= (existing.updatedAt || 0)) mergedMap.set(item.id, item);
-            });
-
-            let finalMergedHistory = Array.from(mergedMap.values());
-            let uniqueHistory = [];
-            let seenContent = new Set();
-            finalMergedHistory.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-
-            finalMergedHistory.forEach(item => {
-                const cleanDate = (item.date || "미상").replace(/[^0-9]/g, ""); 
-                const cleanMachine = (item.machine || "").trim().toUpperCase();
-                const cleanContent = (item.content || "").trim().replace(/\s/g, "");
-                let uniqueKey = `${cleanMachine}|${cleanDate}|${cleanContent}`;
-                if (!seenContent.has(uniqueKey)) { seenContent.add(uniqueKey); uniqueHistory.push(item); }
-            });
-
-            boxData.workHistory = uniqueHistory;
-            await putIDBHistory(uniqueHistory);
-
-            if (isPushSettings) {
-                let eqToPush = JSON.parse(localStorage.getItem("equipmentData") || "[]").map(e => { let obj = {...e}; delete obj.isEditing; return obj; });
-                boxData.equipment = eqToPush; 
-                boxData.recipient = JSON.parse(localStorage.getItem("recipientData") || "{}"); 
-                boxData.machineNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
-                // 💡 [추가됨] Box 파일로 내보낼 때 소모품 이력 포함
-                boxData.equipMaintenance = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
-            } else {
-                let localEq = JSON.parse(localStorage.getItem("equipmentData") || "[]"); let isEditingEq = localEq.some(i => i.isEditing);
-                if(boxData.equipment && !isEditingEq) { localStorage.setItem("equipmentData", JSON.stringify(boxData.equipment)); renderTable(); }
-                if(boxData.recipient) { localStorage.setItem("recipientData", JSON.stringify(boxData.recipient)); renderRecipientTable(); }
-                if(boxData.machineNotes) localStorage.setItem("machineNotes", JSON.stringify(boxData.machineNotes));
-                // 💡 [추가됨] Box 파일에서 불러올 때 소모품 이력 반영
-                if(boxData.equipMaintenance) applyIncomingMaintenance(boxData.equipMaintenance);
-            }
-
-            // 쓰기 직전 재확인: 그 사이 파일이 바뀌었으면 새로 읽어서 재병합
-            const freshCheck = await handle.getFile();
-            if (freshCheck.lastModified !== lastModAtRead && attempt < MAX_RETRY) {
-                console.warn(`⚠️ 쓰기 직전 파일 변경 감지 — 최신 내용으로 재병합합니다. (재시도 ${attempt + 1}/${MAX_RETRY})`);
-                continue; // 처음부터 다시 읽고 병합
-            }
-
-            const writable = await handle.createWritable();
-            await writable.write(JSON.stringify(boxData, null, 2));
-            await writable.close();
-            break;
+async function syncWithBox(isUserGesture = false, isPushSettings = false, isManualButton = false) {
+    if (activeSyncPromise) { if (isPushSettings) pendingPush = true; return activeSyncPromise; }
+    activeSyncPromise = (async () => {
+        const handle = await getFileHandle('boxBackupFile');
+        if (!handle) {
+            if (isManualButton) alert("⚠️ 상단의 [DB 연결] 버튼을 눌러 공용 파일을 연결해 주세요.");
+            await updateSyncStatusBanner(); return false;
         }
-        
-        await updateHistoryBadge();
-        if(document.getElementById('history') && document.getElementById('history').classList.contains('block')) await renderHistory();
+        const hasPerm = await verifyPermission(handle, true, isUserGesture);
+        if (!hasPerm) { if (isManualButton) alert("권한이 필요합니다."); await updateSyncStatusBanner(); return false; }
 
-        // 💡 [v1.1 추가] 마지막 성공 동기화 시각 기록 → 상태 배너 판단 기준
-        localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
-        await updateSyncStatusBanner();
+        isSyncing = true;
+        const syncIcon = document.getElementById("syncIcon"), syncText = document.getElementById("syncText"), btn = document.getElementById("syncBtn");
+        if (btn) btn.classList.remove("text-red-500", "font-black");
+        if (syncIcon && isManualButton) { syncIcon.classList.add("animate-spin"); syncText.innerText = "Checking..."; if (btn) btn.style.opacity = "0.7"; }
+        try {
+            const MAX_RETRY = 3;
+            for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
+                const file = await handle.getFile();
+                const fileText = await file.text();
+                const boxData = fileText ? JSON.parse(fileText) : {};
+                const boxMeta = normalizeTeamMeta(boxData);
+                const localRevision = Number(localStorage.getItem('teamDbRevision') || 0);
+                const merged = await buildMergedTeamData(boxData, isPushSettings);
 
-        if (isManualButton) setTimeout(() => showToast("동기화 완료", "최신 데이터가 적용되었습니다."), 100);
-    } catch (error) {
-        console.error("동기화 실패:", error);
-        if (isManualButton) alert("동기화 중 오류가 발생했습니다. 파일 연결을 확인해주세요.");
-        await updateSyncStatusBanner();
-    } finally {
-        const finishSync = () => {
-            if(typeof isSyncing !== 'undefined') isSyncing = false;
-            if (typeof pendingPush !== 'undefined' && pendingPush) { pendingPush = false; syncWithBox(true, true, false); }
-        };
-        if (isManualButton) { setTimeout(() => { if (syncIcon) syncIcon.classList.remove("animate-spin"); if (syncText) syncText.innerText = "Sync"; if (btn) btn.style.opacity = "1"; finishSync(); }, 800); } else { finishSync(); }
+                if (!isPushSettings) {
+                    // Pull은 공용 DB의 revision을 유지한다. 로컬 이력은 안전하게 병합한다.
+                    merged.schemaVersion = boxMeta.schemaVersion; merged.dbRevision = boxMeta.dbRevision;
+                    merged.lastUpdatedAt = boxMeta.lastUpdatedAt; merged.lastUpdatedBy = boxMeta.lastUpdatedBy;
+                    await applyTeamDataToLocal(merged);
+                    if (boxMeta.dbRevision > localRevision) showToast('TEAM DB 최신화', `Revision ${boxMeta.dbRevision} 데이터를 반영했습니다.`);
+                    localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
+                    await updateSyncStatusBanner();
+                    if (isManualButton) showToast('최신화 완료', `TEAM DB Revision ${boxMeta.dbRevision}`);
+                    return true;
+                }
+
+                // Push 직전에 읽은 최신 파일을 기준으로 병합한 뒤 새 revision을 만든다.
+                merged.schemaVersion = TEAM_SCHEMA_VERSION;
+                merged.dbRevision = boxMeta.dbRevision + 1;
+                merged.lastUpdatedAt = Date.now();
+                merged.lastUpdatedBy = getTeamEditorName();
+
+                // 마지막 읽기 이후 다른 저장이 발생했으면, 절대 덮어쓰지 않고 최신 파일부터 다시 병합한다.
+                const freshCheck = await handle.getFile();
+                if (freshCheck.lastModified !== file.lastModified) continue;
+                const writable = await handle.createWritable();
+                await writable.write(JSON.stringify(merged, null, 2));
+                await writable.close();
+                await applyTeamDataToLocal(merged);
+                localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
+                await updateSyncStatusBanner();
+                return true;
+            }
+            throw new Error('다른 팀원의 연속 저장으로 재시도 횟수를 초과했습니다.');
+        } catch (error) {
+            console.error('동기화 실패:', error);
+            if (isManualButton) alert('동기화 중 오류가 발생했습니다. 파일 연결을 확인해주세요.');
+            await updateSyncStatusBanner(); return false;
+        } finally {
+            isSyncing = false;
+            if (syncIcon) syncIcon.classList.remove('animate-spin');
+            if (syncText) syncText.innerText = '강제 최신화';
+            if (btn) btn.style.opacity = '1';
+        }
+    })();
+    try { return await activeSyncPromise; }
+    finally {
+        activeSyncPromise = null;
+        if (pendingPush) { pendingPush = false; autoMergeAndSave(); }
     }
 }
 
-// 💡 [v1.1 추가] 연속된 로컬 변경(연속 입력/일괄 등록 등)을 짧게 모아 한 번만 Push하는 디바운스
+// 모든 변경은 0.7초 후 최신 DB를 다시 읽고 병합한 다음 자동 Push한다.
 let _autoSyncDebounceTimer = null;
 function autoMergeAndSave() {
     clearTimeout(_autoSyncDebounceTimer);
@@ -2066,7 +2128,8 @@ window.onload = async function() {
             if (syncBtn && syncBtn.parentNode) syncBtn.parentNode.appendChild(el);
         }
         const d = new Date(ts);
-        el.textContent = '자동 sync: ' + d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+        const revision = localStorage.getItem('teamDbRevision') || '0';
+        el.textContent = `TEAM DB 최신 확인: ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')} · Rev. ${revision}`;
     }
 
     function runAutoSync() {
