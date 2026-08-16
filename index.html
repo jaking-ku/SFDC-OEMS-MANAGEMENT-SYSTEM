@@ -187,14 +187,14 @@
             <span class="material-symbols-outlined text-3xl text-primary">cloud_sync</span>
         </div>
         <div>
-            <h3 class="text-lg font-bold text-text-main" id="syncGateTitle">DB 연결이 필요합니다</h3>
+            <h3 class="text-lg font-bold text-text-main" id="syncGateTitle">Box DB 폴더 연결이 필요합니다</h3>
             <p class="text-xs text-text-muted mt-2 leading-relaxed" id="syncGateDesc">
-                이 브라우저에서는 아직 팀 공용 DB(Box) 파일과 연결된 적이 없습니다.<br>
-                먼저 연결하고 최신 데이터를 불러와야 다른 팀원의 이력이 누락되지 않습니다.
+                이 브라우저에서는 아직 팀 공용 Box DB 폴더(SFDC_DB)와 연결된 적이 없습니다.<br>
+                먼저 폴더를 연결하고 최신 데이터를 불러와야 다른 팀원의 이력이 누락되지 않습니다.
             </p>
         </div>
         <button class="btn-primary w-full py-3 text-xs rounded flex items-center justify-center gap-2" onclick="gateConnect()">
-            <span class="material-symbols-outlined text-base">link</span> 지금 DB 연결하기
+            <span class="material-symbols-outlined text-base">folder_open</span> Box DB 폴더 연결하기
         </button>
         <p class="text-[10px] text-text-muted cursor-pointer hover:text-primary underline" onclick="gateSkip()">연결 없이 계속 진행 (비권장 · 팀 데이터와 어긋날 수 있음)</p>
     </div>
@@ -264,8 +264,8 @@
                 <span class="text-xs uppercase tracking-widest">Dark Mode</span>
             </button>
             <button class="btn-text w-full px-3 py-2.5 rounded hover:bg-background hover:!text-blue-500 justify-start" onclick="linkBoxFile()">
-                <span class="material-symbols-outlined text-base mr-3">link</span>
-                <span class="text-xs uppercase tracking-widest">DB 연결</span>
+                <span class="material-symbols-outlined text-base mr-3">folder_open</span>
+                <span class="text-xs uppercase tracking-widest">DB 폴더 연결</span>
             </button>
             <button class="btn-text w-full px-3 py-2.5 rounded hover:bg-background hover:!text-red-500 justify-start" onclick="disconnectDB()">
                 <span class="material-symbols-outlined text-base mr-3">link_off</span>
@@ -680,44 +680,160 @@ let isSyncing = false;
 let pendingPush = false; 
 
 // ==========================================
-// 🚀 [V8 하이브리드 엔진] IndexedDB 코어 셋업
+// 🚀 [V9 분할 동기화 엔진] IndexedDB 코어 셋업
 // ==========================================
-const DB_N = 'HitachiSfdcDB', ST_N = 'fileHandles', HIST_STORE = 'workHistory';
+const DB_N = 'HitachiSfdcDB', ST_N = 'fileHandles', HIST_STORE = 'workHistory', SYNC_STORE = 'syncState';
 
-// DB 초기화 및 버전 2 업그레이드 (대형 창고 추가)
+// 💡 날짜 문자열에서 YYYY-MM 연월 키 추출
+function getYearMonthFromDate(dateStr, fallbackTimestamp) {
+    if (dateStr) {
+        const clean = String(dateStr).trim().replace(/[^0-9]/g, '');
+        if (clean.length >= 6) {
+            return `${clean.substring(0, 4)}-${clean.substring(4, 6)}`;
+        }
+    }
+    const d = fallbackTimestamp ? new Date(fallbackTimestamp) : new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// DB 초기화 및 버전 3 업그레이드 (파티션 동기화 및 인덱스 지원)
 function initDB() { 
     return new Promise((res, rej) => { 
-        const req = indexedDB.open(DB_N, 2); 
+        const req = indexedDB.open(DB_N, 3); 
         req.onupgradeneeded = e => {
             const db = e.target.result;
             if (!db.objectStoreNames.contains(ST_N)) db.createObjectStore(ST_N);
-            if (!db.objectStoreNames.contains(HIST_STORE)) db.createObjectStore(HIST_STORE, { keyPath: 'id' });
+            
+            let histStore;
+            if (!db.objectStoreNames.contains(HIST_STORE)) {
+                histStore = db.createObjectStore(HIST_STORE, { keyPath: 'id' });
+            } else {
+                histStore = req.transaction.objectStore(HIST_STORE);
+            }
+            if (histStore) {
+                if (!histStore.indexNames.contains('yearMonth')) histStore.createIndex('yearMonth', 'yearMonth', { unique: false });
+                if (!histStore.indexNames.contains('date')) histStore.createIndex('date', 'date', { unique: false });
+                if (!histStore.indexNames.contains('machine')) histStore.createIndex('machine', 'machine', { unique: false });
+                if (!histStore.indexNames.contains('sn')) histStore.createIndex('sn', 'sn', { unique: false });
+                if (!histStore.indexNames.contains('updatedAt')) histStore.createIndex('updatedAt', 'updatedAt', { unique: false });
+            }
+
+            if (!db.objectStoreNames.contains(SYNC_STORE)) {
+                db.createObjectStore(SYNC_STORE, { keyPath: 'key' });
+            }
         };
         req.onsuccess = () => res(req.result); 
         req.onerror = () => rej(req.error); 
     }); 
 }
-async function saveFileHandle(k, h) { const db=await initDB(); return new Promise((res, rej)=>{ const tx=db.transaction(ST_N, 'readwrite'); tx.objectStore(ST_N).put(h, k); tx.oncomplete=res; tx.onerror=()=>rej(tx.error); }); }
-async function getFileHandle(k) { const db=await initDB(); return new Promise((res, rej)=>{ const tx=db.transaction(ST_N, 'readonly'); const r=tx.objectStore(ST_N).get(k); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(tx.error); }); }
 
-// 💡 창고(IndexedDB)에서 히스토리 꺼내기
+async function saveFileHandle(k, h) { 
+    const db = await initDB(); 
+    return new Promise((res, rej) => { 
+        const tx = db.transaction(ST_N, 'readwrite'); 
+        tx.objectStore(ST_N).put(h, k); 
+        tx.oncomplete = res; 
+        tx.onerror = () => rej(tx.error); 
+    }); 
+}
+
+async function getFileHandle(k) { 
+    const db = await initDB(); 
+    return new Promise((res, rej) => { 
+        const tx = db.transaction(ST_N, 'readonly'); 
+        const r = tx.objectStore(ST_N).get(k); 
+        r.onsuccess = () => res(r.result); 
+        r.onerror = () => rej(tx.error); 
+    }); 
+}
+
+async function saveSyncState(key, value) {
+    const db = await initDB();
+    return new Promise((res, rej) => {
+        const tx = db.transaction(SYNC_STORE, 'readwrite');
+        tx.objectStore(SYNC_STORE).put({ key, value, updatedAt: Date.now() });
+        tx.oncomplete = res;
+        tx.onerror = () => rej(tx.error);
+    });
+}
+
+async function getSyncState(key) {
+    const db = await initDB();
+    return new Promise((res, rej) => {
+        const tx = db.transaction(SYNC_STORE, 'readonly');
+        const req = tx.objectStore(SYNC_STORE).get(key);
+        req.onsuccess = () => res(req.result ? req.result.value : null);
+        req.onerror = () => rej(tx.error);
+    });
+}
+
+// 💡 창고(IndexedDB)에서 전체 히스토리 꺼내기
 async function getIDBHistory() {
     const db = await initDB();
     return new Promise((res, rej) => {
         const tx = db.transaction(HIST_STORE, 'readonly');
         const req = tx.objectStore(HIST_STORE).getAll();
-        req.onsuccess = () => res(req.result);
+        req.onsuccess = () => {
+            const list = req.result || [];
+            // yearMonth 누락 시 자동 보정
+            list.forEach(item => {
+                if (!item.yearMonth) item.yearMonth = getYearMonthFromDate(item.date, item.savedAt);
+            });
+            res(list);
+        };
         req.onerror = () => rej(tx.error);
     });
 }
-// 💡 창고(IndexedDB)에 히스토리 덮어쓰기
+
+// 💡 특정 월(yearMonth)의 히스토리만 꺼내기
+async function getIDBHistoryByMonth(yearMonth) {
+    const db = await initDB();
+    return new Promise((res, rej) => {
+        const tx = db.transaction(HIST_STORE, 'readonly');
+        const store = tx.objectStore(HIST_STORE);
+        if (store.indexNames.contains('yearMonth')) {
+            const index = store.index('yearMonth');
+            const req = index.getAll(yearMonth);
+            req.onsuccess = () => res(req.result || []);
+            req.onerror = () => rej(tx.error);
+        } else {
+            const req = store.getAll();
+            req.onsuccess = () => {
+                const filtered = (req.result || []).filter(e => getYearMonthFromDate(e.date, e.savedAt) === yearMonth);
+                res(filtered);
+            };
+            req.onerror = () => rej(tx.error);
+        }
+    });
+}
+
+// 💡 창고(IndexedDB)에 히스토리 통째로 덮어쓰기
 async function putIDBHistory(dataArray) {
     const db = await initDB();
     return new Promise((res, rej) => {
         const tx = db.transaction(HIST_STORE, 'readwrite');
         const store = tx.objectStore(HIST_STORE);
-        store.clear(); // 기존 내용 비우기
-        dataArray.forEach(item => store.put(item)); // 새 배열 통째로 넣기
+        store.clear();
+        dataArray.forEach(item => {
+            if (!item.yearMonth) item.yearMonth = getYearMonthFromDate(item.date, item.savedAt);
+            store.put(item);
+        });
+        tx.oncomplete = () => res();
+        tx.onerror = () => rej(tx.error);
+    });
+}
+
+// 💡 특정 월 또는 개별 항목들만 스마트 병합(Upsert)
+async function upsertIDBHistoryItems(items) {
+    if (!items || items.length === 0) return;
+    const db = await initDB();
+    return new Promise((res, rej) => {
+        const tx = db.transaction(HIST_STORE, 'readwrite');
+        const store = tx.objectStore(HIST_STORE);
+        items.forEach(item => {
+            if (!item.yearMonth) item.yearMonth = getYearMonthFromDate(item.date, item.savedAt);
+            store.put(item);
+        });
         tx.oncomplete = () => res();
         tx.onerror = () => rej(tx.error);
     });
@@ -732,7 +848,7 @@ async function migrateToIndexedDB() {
             await putIDBHistory(local);
             console.log("✅ 데이터가 IndexedDB로 성공적으로 이사 완료되었습니다.");
         }
-        localStorage.removeItem("workHistory"); // 이사 후 옛날 서랍 비우기
+        localStorage.removeItem("workHistory");
     }
 }
 
@@ -767,8 +883,10 @@ window.onload = async function() {
 
     await autoLocalBackup();
 
-    let handle = await getFileHandle('boxBackupFile');
-    if (handle && !(await verifyPermission(handle, true, false))) {
+    let dirHandle = await getFileHandle('boxDirectoryHandle');
+    let fileHandle = await getFileHandle('boxBackupFile');
+    let activeHandle = dirHandle || fileHandle;
+    if (activeHandle && !(await verifyPermission(activeHandle, true, false))) {
         const btn = document.getElementById("syncBtn");
         if(btn) { btn.classList.add("text-red-500", "font-black"); document.getElementById("syncIcon").innerText = "error"; document.getElementById("syncText").innerText = "연결 끊김(클릭)"; }
     }
@@ -808,7 +926,7 @@ async function updateHistoryBadge() {
     const b = document.getElementById("historyBadge"); 
     if (h.length > 0) { b.textContent = h.length; b.classList.remove("hidden"); } else b.classList.add("hidden"); 
 }
-function saveMachineNote(m, t) { let ns = JSON.parse(localStorage.getItem("machineNotes") || "{}"); ns[m] = t.trim(); localStorage.setItem("machineNotes", JSON.stringify(ns)); showToast("메모 저장", `[${m}] 특이사항 저장됨.`); autoMergeAndSave(); }
+function saveMachineNote(m, t) { let ns = JSON.parse(localStorage.getItem("machineNotes") || "{}"); ns[m] = t.trim(); localStorage.setItem("machineNotes", JSON.stringify(ns)); showToast("메모 저장", `[${m}] 특이사항 저장됨.`); autoMergeAndSave({ scope: 'notes' }); }
 
 let selectedChip = null;
 // 💡 [변경] 렌더링이 대형 창고에서 데이터를 가져오는 비동기 방식으로 변경됨
@@ -993,7 +1111,7 @@ function saveMaintData(key, data) {
     const all = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
     all[key] = data;
     localStorage.setItem("equipMaintenance", JSON.stringify(all));
-    if (typeof autoMergeAndSave === "function") autoMergeAndSave();
+    if (typeof autoMergeAndSave === "function") autoMergeAndSave({ scope: 'maintenance' });
 }
 
 // ── 설비 식별키(S/N) 변경 시 유지보수 이력 병합/이관 ──
@@ -1060,7 +1178,7 @@ async function migrateEquipmentSN(oldSN, newSN) {
     if (!oldSN || !newSN || oldSN === newSN) return;
     migrateEquipmentMaintenanceKey(oldSN, newSN);
     await migrateEquipmentHistoryKey(oldSN, newSN);
-    autoMergeAndSave();
+    autoMergeAndSave({ scope: 'all' });
     showToast("S/N 변경 반영", `이력이 새 S/N(${newSN})으로 이전되었습니다.`);
 }
 
@@ -1540,11 +1658,12 @@ function applyExtractedMaintenance(machine, category, mailDate) {
 }
 
 
-// 💡 [변경] DB에 저장하고 즉시 병합
+// 💡 [V9 분할 엔진] DB에 저장하고 해당 월 파티션만 즉시 분할 Push
 async function saveHistoryEntry(entry) { 
     let history = await getIDBHistory();
     entry.id = Date.now() + "_" + Math.floor(Math.random() * 1000); 
     entry.updatedAt = Date.now();
+    entry.yearMonth = getYearMonthFromDate(entry.date, entry.savedAt);
     // 💡 설비 목록에서 이름이 일치하는 S/N을 찾아 함께 저장 (호기명 변경에도 이력이 끊기지 않도록)
     if (!entry.sn) {
         const eqList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
@@ -1555,7 +1674,7 @@ async function saveHistoryEntry(entry) {
     history.push(entry); 
     await putIDBHistory(history);
     await updateHistoryBadge(); 
-    autoMergeAndSave(); 
+    autoMergeAndSave({ scope: 'history', yearMonths: [entry.yearMonth] }); 
 }
 
 function copyRow() { const t = `${document.getElementById("resDate").innerText}\t${document.getElementById("resMachine").innerText}\t${document.getElementById("resLine").innerText}\t${document.getElementById("resContent").innerText}\t${document.getElementById("resWorker").innerText}`; navigator.clipboard.writeText(t).then(()=>showToast("복사", "데이터가 복사되었습니다.")); }
@@ -1566,15 +1685,15 @@ function copyRecipient(l) {
     const rawData = d[l] || ""; // 숨겨진 태그까지 포함된 원본 데이터
     navigator.clipboard.writeText(rawData).then(() => showToast("복사 완료", `[${l}] 수신처 복사됨`)); 
 }
-function editRecipient(l) { const d = JSON.parse(localStorage.getItem("recipientData")||"{}"); const n = prompt(`[${l}] 수정:`, d[l]); if(n!==null && n.trim()){ d[l]=n.trim(); localStorage.setItem("recipientData", JSON.stringify(d)); renderRecipientTable(); autoMergeAndSave(); } }
-function addRecipient() { const l=document.getElementById("newRecipLine").value.trim().toUpperCase(), e=document.getElementById("newRecipEmails").value.trim(); if(!l||!e) return alert("항목 부족"); const d=JSON.parse(localStorage.getItem("recipientData")||"{}"); d[l]=e; localStorage.setItem("recipientData", JSON.stringify(d)); renderRecipientTable(); autoMergeAndSave(); }
-function deleteRecipient(l) { if(confirm("삭제하시겠습니까?")){ const d=JSON.parse(localStorage.getItem("recipientData")||"{}"); delete d[l]; localStorage.setItem("recipientData", JSON.stringify(d)); renderRecipientTable(); autoMergeAndSave(); } }
+function editRecipient(l) { const d = JSON.parse(localStorage.getItem("recipientData")||"{}"); const n = prompt(`[${l}] 수정:`, d[l]); if(n!==null && n.trim()){ d[l]=n.trim(); localStorage.setItem("recipientData", JSON.stringify(d)); renderRecipientTable(); autoMergeAndSave({ scope: 'recipient' }); } }
+function addRecipient() { const l=document.getElementById("newRecipLine").value.trim().toUpperCase(), e=document.getElementById("newRecipEmails").value.trim(); if(!l||!e) return alert("항목 부족"); const d=JSON.parse(localStorage.getItem("recipientData")||"{}"); d[l]=e; localStorage.setItem("recipientData", JSON.stringify(d)); renderRecipientTable(); autoMergeAndSave({ scope: 'recipient' }); }
+function deleteRecipient(l) { if(confirm("삭제하시겠습니까?")){ const d=JSON.parse(localStorage.getItem("recipientData")||"{}"); delete d[l]; localStorage.setItem("recipientData", JSON.stringify(d)); renderRecipientTable(); autoMergeAndSave({ scope: 'recipient' }); } }
 
 function enableEdit(i) { const d = JSON.parse(localStorage.getItem("equipmentData") || "[]"); d[i].isEditing = true; localStorage.setItem("equipmentData", JSON.stringify(d)); renderTable(); }
-function saveEdit(i) { const d = JSON.parse(localStorage.getItem("equipmentData") || "[]"); const oldSN = d[i].sn; const newSN = document.getElementById(`editSN_${i}`).value.trim(); d[i] = { line: document.getElementById(`editLine_${i}`).value.trim(), model: document.getElementById(`editModel_${i}`).value.trim(), name: document.getElementById(`editName_${i}`).value.trim(), sn: newSN, location: document.getElementById(`editLoc_${i}`).value.trim(), isEditing: false }; localStorage.setItem("equipmentData", JSON.stringify(d)); renderTable(); autoMergeAndSave(); if (oldSN && newSN && oldSN !== newSN) migrateEquipmentSN(oldSN, newSN); }
-function importFromExcel() { const v = document.getElementById("excelInput").value.trim(); if(!v)return; const d = JSON.parse(localStorage.getItem("equipmentData")||"[]"); let a=0; v.split('\n').forEach(r=>{ const c=r.split('\t'); if(c.length>=3){ d.push({line:c[0]?.trim()||"",model:c[1]?.trim()||"",name:c[2]?.trim()||"",sn:c[3]?.trim()||"",location:c[4]?.trim()||""}); a++; } }); if(a>0){ localStorage.setItem("equipmentData",JSON.stringify(d)); renderTable(); document.getElementById("excelInput").value=""; showToast("등록",`${a}개 설비 추가 완료`); autoMergeAndSave(); } }
-function addNewData() { const n=document.getElementById("newName").value.trim(); if(!n)return alert("호기 필수"); const d=JSON.parse(localStorage.getItem("equipmentData")||"[]"); d.push({line:document.getElementById("newLine").value, model:document.getElementById("newModel").value, name:n, sn:document.getElementById("newSN").value, location:document.getElementById("newLocation").value}); localStorage.setItem("equipmentData",JSON.stringify(d)); renderTable(); autoMergeAndSave(); }
-function deleteData(i) { if(confirm("삭제하시겠습니까?")){ const d=JSON.parse(localStorage.getItem("equipmentData")||"[]"); d.splice(i,1); localStorage.setItem("equipmentData",JSON.stringify(d)); renderTable(); autoMergeAndSave(); } }
+function saveEdit(i) { const d = JSON.parse(localStorage.getItem("equipmentData") || "[]"); const oldSN = d[i].sn; const newSN = document.getElementById(`editSN_${i}`).value.trim(); d[i] = { line: document.getElementById(`editLine_${i}`).value.trim(), model: document.getElementById(`editModel_${i}`).value.trim(), name: document.getElementById(`editName_${i}`).value.trim(), sn: newSN, location: document.getElementById(`editLoc_${i}`).value.trim(), isEditing: false }; localStorage.setItem("equipmentData", JSON.stringify(d)); renderTable(); autoMergeAndSave({ scope: 'equipment' }); if (oldSN && newSN && oldSN !== newSN) migrateEquipmentSN(oldSN, newSN); }
+function importFromExcel() { const v = document.getElementById("excelInput").value.trim(); if(!v)return; const d = JSON.parse(localStorage.getItem("equipmentData")||"[]"); let a=0; v.split('\n').forEach(r=>{ const c=r.split('\t'); if(c.length>=3){ d.push({line:c[0]?.trim()||"",model:c[1]?.trim()||"",name:c[2]?.trim()||"",sn:c[3]?.trim()||"",location:c[4]?.trim()||""}); a++; } }); if(a>0){ localStorage.setItem("equipmentData",JSON.stringify(d)); renderTable(); document.getElementById("excelInput").value=""; showToast("등록",`${a}개 설비 추가 완료`); autoMergeAndSave({ scope: 'equipment' }); } }
+function addNewData() { const n=document.getElementById("newName").value.trim(); if(!n)return alert("호기 필수"); const d=JSON.parse(localStorage.getItem("equipmentData")||"[]"); d.push({line:document.getElementById("newLine").value, model:document.getElementById("newModel").value, name:n, sn:document.getElementById("newSN").value, location:document.getElementById("newLocation").value}); localStorage.setItem("equipmentData",JSON.stringify(d)); renderTable(); autoMergeAndSave({ scope: 'equipment' }); }
+function deleteData(i) { if(confirm("삭제하시겠습니까?")){ const d=JSON.parse(localStorage.getItem("equipmentData")||"[]"); d.splice(i,1); localStorage.setItem("equipmentData",JSON.stringify(d)); renderTable(); autoMergeAndSave({ scope: 'equipment' }); } }
 function filterTable() { const v=document.getElementById("searchInput").value.toLowerCase(); const r=document.getElementById("dataTableBody").getElementsByTagName("tr"); for(let x of r) x.style.display=x.innerText.toLowerCase().includes(v)?"":"none"; }
 
 // ── 🔎 SFDC(Salesforce) 검색 ──
@@ -1623,17 +1742,31 @@ function searchSalesforce() {
 async function deleteEquipHistory(m) { 
     if(!confirm(`[${m}] 기록 삭제?`))return; 
     let h = await getIDBHistory();
-    h.forEach(e => { if(e.machine === m) { e.isDeleted = true; e.updatedAt = Date.now(); } });
+    const affectedMonths = new Set();
+    h.forEach(e => { 
+        if(e.machine === m) { 
+            e.isDeleted = true; 
+            e.updatedAt = Date.now(); 
+            affectedMonths.add(e.yearMonth || getYearMonthFromDate(e.date, e.savedAt));
+        } 
+    });
     await putIDBHistory(h); 
-    selectedChip=null; await updateHistoryBadge(); await renderHistory(); autoMergeAndSave(); 
+    selectedChip=null; await updateHistoryBadge(); await renderHistory(); 
+    autoMergeAndSave({ scope: 'history', yearMonths: Array.from(affectedMonths) }); 
 }
 async function deleteSingleHistory(id) { 
     if(!confirm("삭제?"))return; 
     let h = await getIDBHistory(); 
     let item = h.find(e => e.id === id);
-    if(item) { item.isDeleted = true; item.updatedAt = Date.now(); }
+    let ym = null;
+    if(item) { 
+        item.isDeleted = true; 
+        item.updatedAt = Date.now(); 
+        ym = item.yearMonth || getYearMonthFromDate(item.date, item.savedAt);
+    }
     await putIDBHistory(h); 
-    await updateHistoryBadge(); await renderHistory(); autoMergeAndSave(); 
+    await updateHistoryBadge(); await renderHistory(); 
+    autoMergeAndSave({ scope: 'history', yearMonths: ym ? [ym] : [] }); 
 }
 
 // 비밀번호 4437 일괄삭제 기능
@@ -1644,7 +1777,8 @@ async function clearAllHistory() {
     let h = await getIDBHistory();
     h.forEach(e => { e.isDeleted = true; e.updatedAt = Date.now(); });
     await putIDBHistory(h);
-    selectedChip=null; await updateHistoryBadge(); await renderHistory(); autoMergeAndSave(); 
+    selectedChip=null; await updateHistoryBadge(); await renderHistory(); 
+    autoMergeAndSave({ scope: 'history' }); 
 }
 function loadToMailGen(m, c) { document.getElementById('mailWorkEquipSearch').value=m; document.getElementById('mailJobDetail').value=c; document.getElementById('mailJobTitle').value=c.substring(0,20)+(c.length>20?"...":""); switchTab('email-gen', document.querySelectorAll('nav a')[1]); showToast("데이터 로드", "메일 탭으로 전환되었습니다."); }
 
@@ -1682,15 +1816,15 @@ function generateFullMail() {
 }
 
 // ==========================================
-// 💡 [V8 하이브리드 동기화 엔진] Box 파일과 IndexedDB 병합
+// 💡 [V9 분할 동기화 엔진] Box 공용 폴더 분할 동기화 코어
 // ==========================================
 // ==========================================
-// 4. [v1.1 추가] 동기화 안전장치 (연결 게이트 · 상태 배너 · 영속성)
+// 4. 동기화 안전장치 (연결 게이트 · 상태 배너 · 영속성)
 // ==========================================
 
 // 4-1. 최초 연결 게이트: 이 브라우저가 한 번도 Box와 동기화된 적 없으면 노출
 function checkSyncGateOnLoad() {
-    if (sessionStorage.getItem('syncGateBypassed') === 'yes') return; // 이번 세션엔 이미 "건너뛰기" 확인함
+    if (sessionStorage.getItem('syncGateBypassed') === 'yes') return;
     if (!localStorage.getItem('hasCompletedInitialSync')) showSyncGate();
 }
 function showSyncGate() { const o = document.getElementById('syncGateOverlay'); if (o) o.classList.remove('hidden'); }
@@ -1701,16 +1835,16 @@ async function gateConnect() { await linkBoxFile(); }
 function gateSkip() {
     if (!confirm("⚠️ 연결 없이 계속하면 팀원들의 최신 작업 이력이 보이지 않고, 지금부터 작성하는 내용도 Box에 반영되지 않습니다.\n정말 계속하시겠습니까?")) return;
     hideSyncGate();
-    sessionStorage.setItem('syncGateBypassed', 'yes'); // hasCompletedInitialSync는 세팅하지 않음 → 다음 접속 시 다시 안내
+    sessionStorage.setItem('syncGateBypassed', 'yes');
     updateSyncStatusBanner();
 }
 
 // 최초 연결 성공 직후: Pull 1회 실행 + 플래그 기록 + 게이트 닫기
 async function completeInitialConnect() {
-    showToast("연결 완료", "최신 데이터를 불러오는 중입니다...");
-    const ok = await syncWithBox(true, false, true); // isPushSettings=false → 우선 Box 내용을 로컬로 Pull
+    showToast("연결 완료", "최신 팀 데이터를 불러오는 중입니다...");
+    const ok = await syncWithBox(true, false, true);
     if (!ok) {
-        showToast("연결 실패", "팀 DB를 불러오지 못했습니다. 연결과 권한을 다시 확인해주세요.");
+        showToast("연결 실패", "팀 DB 폴더를 불러오지 못했습니다. 연결과 권한을 다시 확인해주세요.");
         await updateSyncStatusBanner();
         return;
     }
@@ -1718,10 +1852,10 @@ async function completeInitialConnect() {
     sessionStorage.removeItem('syncGateBypassed');
     hideSyncGate();
     await updateSyncStatusBanner();
-    alert("✅ Box 파일이 연결되고 팀 최신 데이터를 불러왔습니다!");
+    alert("✅ Box DB 폴더가 연결되고 팀 최신 데이터를 성공적으로 불러왔습니다!");
 }
 
-// 4-2. 상태 배너: 미연결 / 권한 끊김 / 오래된 동기화만 눈에 띄게 경고, 정상일 땐 조용히 숨김
+// 4-2. 상태 배너: 미연결 / 권한 끊김 / 오래된 동기화 경고
 const SYNC_STALE_MS = 30 * 60 * 1000; // 30분 이상 미동기화 시 경고
 async function updateSyncStatusBanner() {
     const banner = document.getElementById('syncStatusBanner');
@@ -1732,16 +1866,18 @@ async function updateSyncStatusBanner() {
     const DANGER = "mb-6 px-4 py-3 rounded-md border flex items-center justify-between gap-3 text-xs border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400";
     const WARN   = "mb-6 px-4 py-3 rounded-md border flex items-center justify-between gap-3 text-xs border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-400";
 
-    const isDesktop = 'showOpenFilePicker' in window;
-    const handle = await getFileHandle('boxBackupFile');
+    const isDesktop = 'showDirectoryPicker' in window || 'showOpenFilePicker' in window;
+    const dirHandle = await getFileHandle('boxDirectoryHandle');
+    const fileHandle = await getFileHandle('boxBackupFile');
+    const activeHandle = dirHandle || fileHandle;
 
-    if (isDesktop && !handle) {
-        banner.className = DANGER; icon.innerText = "link_off";
-        text.innerText = "Box DB 파일이 연결되어 있지 않습니다. 팀원과 데이터가 어긋날 수 있습니다.";
+    if (isDesktop && !activeHandle) {
+        banner.className = DANGER; icon.innerText = "folder_off";
+        text.innerText = "Box DB 폴더가 연결되어 있지 않습니다. 팀원과 데이터가 어긋날 수 있습니다.";
         banner.classList.remove('hidden'); return;
     }
-    if (handle) {
-        const hasPerm = await verifyPermission(handle, true, false);
+    if (activeHandle) {
+        const hasPerm = await verifyPermission(activeHandle, true, false);
         if (!hasPerm) {
             banner.className = DANGER; icon.innerText = "error";
             text.innerText = "Box 연결 권한이 끊어졌습니다. [지금 동기화]를 눌러 재연결해주세요.";
@@ -1761,36 +1897,169 @@ async function updateSyncStatusBanner() {
 }
 
 async function verifyPermission(h, rw, isUserGesture = false) { 
+    if (!h) return false;
     const o = { mode: rw ? 'readwrite' : 'read' }; 
-    if ((await h.queryPermission(o)) === 'granted') return true;
-    if (isUserGesture) { try { return (await h.requestPermission(o)) === 'granted'; } catch(e) { return false; } }
+    try {
+        if ((await h.queryPermission(o)) === 'granted') return true;
+        if (isUserGesture) { return (await h.requestPermission(o)) === 'granted'; }
+    } catch(e) { return false; }
     return false;
 }
 
+// ----------------------------------------------------
+// 📁 File System Access API 헬퍼 함수
+// ----------------------------------------------------
+async function readJsonFromDir(dirHandle, filename, defaultVal = null) {
+    try {
+        const fileHandle = await dirHandle.getFileHandle(filename);
+        const file = await fileHandle.getFile();
+        const text = await file.text();
+        return text ? JSON.parse(text) : defaultVal;
+    } catch (e) {
+        return defaultVal;
+    }
+}
+
+async function writeJsonToDir(dirHandle, filename, data) {
+    const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(data, null, 2));
+    await writable.close();
+}
+
+async function getOrCreateSubdir(dirHandle, dirname) {
+    return await dirHandle.getDirectoryHandle(dirname, { create: true });
+}
+
+// ----------------------------------------------------
+// 💡 [자동 마이그레이션] 레거시 단일 DB.txt를 폴더 분할 구조로 변환
+// ----------------------------------------------------
+async function autoMigrateLegacyDbTxt(dirHandle) {
+    try {
+        const existingMeta = await readJsonFromDir(dirHandle, 'meta.json', null);
+        if (existingMeta) return; // 이미 분할 구조가 존재함
+
+        let legacyData = null;
+        for (const fname of ['DB.txt', 'SFDC_DB.txt', 'Hitachi_DB.txt']) {
+            legacyData = await readJsonFromDir(dirHandle, fname, null);
+            if (legacyData) break;
+        }
+
+        // 폴더가 완전 비어있고 로컬에 데이터가 있는 경우 로컬 데이터로 초기 분할 구조 생성
+        if (!legacyData) {
+            const localHist = await getIDBHistory();
+            const localEq = JSON.parse(localStorage.getItem('equipmentData') || '[]');
+            const localRecip = JSON.parse(localStorage.getItem('recipientData') || '{}');
+            const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
+            const localMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
+            legacyData = {
+                workHistory: localHist,
+                equipment: localEq,
+                recipient: localRecip,
+                machineNotes: localNotes,
+                equipMaintenance: localMaint,
+                schemaVersion: 2,
+                dbRevision: 1,
+                lastUpdatedAt: Date.now(),
+                lastUpdatedBy: getTeamEditorName()
+            };
+        }
+
+        console.log("🚀 [마이그레이션] 레거시 DB 데이터를 분할 폴더 구조로 전환합니다...");
+
+        // 1) 마스터 설정 분할
+        await writeJsonToDir(dirHandle, 'master_config.json', {
+            equipment: legacyData.equipment || [],
+            recipient: legacyData.recipient || {}
+        });
+
+        // 2) 메모 및 소모품 유지보수 분할
+        await writeJsonToDir(dirHandle, 'notes.json', {
+            machineNotes: legacyData.machineNotes || {}
+        });
+        await writeJsonToDir(dirHandle, 'maintenance.json', {
+            equipMaintenance: legacyData.equipMaintenance || {}
+        });
+
+        // 3) 작업 이력 월별 분할
+        const historySubdir = await getOrCreateSubdir(dirHandle, 'history');
+        const historyByMonth = {};
+        (legacyData.workHistory || []).forEach(item => {
+            const ym = getYearMonthFromDate(item.date, item.savedAt);
+            if (!historyByMonth[ym]) historyByMonth[ym] = [];
+            historyByMonth[ym].push(item);
+        });
+
+        const historyPartitions = {};
+        for (const ym of Object.keys(historyByMonth)) {
+            await writeJsonToDir(historySubdir, `${ym}.json`, historyByMonth[ym]);
+            historyPartitions[ym] = {
+                revision: 1,
+                updatedAt: Date.now(),
+                updatedBy: legacyData.lastUpdatedBy || "초기생성",
+                count: historyByMonth[ym].length
+            };
+        }
+
+        // 4) meta.json 생성
+        const meta = {
+            schemaVersion: 3,
+            dbRevision: Number(legacyData.dbRevision) || 1,
+            lastUpdatedAt: Number(legacyData.lastUpdatedAt) || Date.now(),
+            lastUpdatedBy: legacyData.lastUpdatedBy || getTeamEditorName(),
+            partitions: {
+                master_config: { revision: 1, updatedAt: Date.now(), updatedBy: legacyData.lastUpdatedBy || "초기생성" },
+                notes: { revision: 1, updatedAt: Date.now(), updatedBy: legacyData.lastUpdatedBy || "초기생성" },
+                maintenance: { revision: 1, updatedAt: Date.now(), updatedBy: legacyData.lastUpdatedBy || "초기생성" },
+                history: historyPartitions
+            }
+        };
+        await writeJsonToDir(dirHandle, 'meta.json', meta);
+        await saveSyncState('teamMeta', meta);
+        console.log("✅ [마이그레이션 완료] 폴더 분할 구조가 성공적으로 구축되었습니다.");
+    } catch (e) {
+        console.error("자동 마이그레이션 중 오류:", e);
+    }
+}
+
+// ----------------------------------------------------
+// 🔗 Box DB 폴더 연결 (PC: Directory Picker / 모바일: File Input)
+// ----------------------------------------------------
 async function linkBoxFile() {
-    if ('showOpenFilePicker' in window) {
-        // [PC 환경]
+    if ('showDirectoryPicker' in window) {
         try {
-            const copyPath = prompt("👇 [최초 1회 설정] 아래 Box 폴더 경로를 복사하여 공용 파일을 선택하세요.", typeof BOX_PATH !== 'undefined' ? BOX_PATH : "");
+            const copyPath = prompt("👇 [최초 1회 설정] 사내 Box의 공용 DB 폴더(SFDC_DB)를 선택해주세요.", typeof BOX_PATH !== 'undefined' ? BOX_PATH : "");
             if (copyPath === null) return;
-            const [h] = await window.showOpenFilePicker({ types: [{ description: 'Text Files', accept: {'text/plain': ['.txt']} }] });
-            await saveFileHandle('boxBackupFile', h); 
-            // 💡 [v1.1 추가] 이 사이트가 저장한 파일 핸들/로컬 DB가 브라우저 저장공간 정리 대상에서 제외되도록 영속 저장 요청
-            if (navigator.storage && navigator.storage.persist) { try { await navigator.storage.persist(); } catch(e) {} }
+            const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+            await saveFileHandle('boxDirectoryHandle', dirHandle);
+            
+            if (navigator.storage && navigator.storage.persist) { 
+                try { await navigator.storage.persist(); } catch(e) {} 
+            }
+
+            // 폴더 내 기존 구조 점검 및 필요 시 레거시 DB.txt 마이그레이션
+            await autoMigrateLegacyDbTxt(dirHandle);
+
             const btn = document.getElementById("syncBtn");
             if(btn) btn.classList.remove("text-red-500", "font-black");
-            document.getElementById("syncIcon").innerText = "sync"; document.getElementById("syncText").innerText = "강제 최신화";
-            // 💡 [v1.1 추가] 연결 직후 곧바로 최초 Pull 실행 (연결만 하고 데이터는 안 불러온 상태 방지)
+            document.getElementById("syncIcon").innerText = "sync"; 
+            document.getElementById("syncText").innerText = "강제 최신화";
+
             await completeInitialConnect();
-        } catch (e) { if (e.name !== 'AbortError') alert("연결 실패"); }
+        } catch (e) { 
+            if (e.name !== 'AbortError') {
+                console.error(e);
+                alert("폴더 연결에 실패했습니다.");
+            }
+        }
     } else {
-        // 💡 [모바일/아이폰 전용] HTML 수정 없이 투명한 파일 선택창을 생성하여 실행
+        // [모바일/아이폰 전용 폴백]
         let fileInput = document.getElementById('mobile-db-upload');
         if (!fileInput) {
             fileInput = document.createElement('input');
             fileInput.type = 'file';
             fileInput.id = 'mobile-db-upload';
-            fileInput.accept = '.txt';
+            fileInput.accept = '.txt,.json';
             fileInput.style.display = 'none';
             fileInput.onchange = handleMobileDB;
             document.body.appendChild(fileInput);
@@ -1799,7 +2068,9 @@ async function linkBoxFile() {
     }
 }
 
-// 1. [수정] 모바일/아이폰 전용 DB 병합 함수
+// ----------------------------------------------------
+// 📱 모바일/아이폰 전용 DB 업로드 및 다운로드 병합 함수
+// ----------------------------------------------------
 async function handleMobileDB(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -1809,7 +2080,6 @@ async function handleMobileDB(event) {
         const text = e.target.result;
         try {
             let boxData = text ? JSON.parse(text) : {};
-            
             let boxHistory = boxData.workHistory || [];
             let localHistory = await getIDBHistory();
             let mergedMap = new Map();
@@ -1832,24 +2102,27 @@ async function handleMobileDB(event) {
                 const cleanMachine = (item.machine || "").trim().toUpperCase();
                 const cleanContent = (item.content || "").trim().replace(/\s/g, "");
                 let uniqueKey = `${cleanMachine}|${cleanDate}|${cleanContent}`;
-                if (!seenContent.has(uniqueKey)) { seenContent.add(uniqueKey); uniqueHistory.push(item); }
+                if (!seenContent.has(uniqueKey)) { 
+                    seenContent.add(uniqueKey); 
+                    item.yearMonth = getYearMonthFromDate(item.date, item.savedAt);
+                    uniqueHistory.push(item); 
+                }
             });
 
             boxData.workHistory = uniqueHistory;
             await putIDBHistory(uniqueHistory);
 
-            // 모바일은 파일을 직접 덮어쓸 수 없으므로, 내려받을 병합본에도 revision을 남긴다.
             const mobileMeta = normalizeTeamMeta(boxData);
             boxData.schemaVersion = TEAM_SCHEMA_VERSION;
             boxData.dbRevision = mobileMeta.dbRevision + 1;
             boxData.lastUpdatedAt = Date.now();
             boxData.lastUpdatedBy = getTeamEditorName();
 
-            let localEq = JSON.parse(localStorage.getItem("equipmentData") || "[]"); let isEditingEq = localEq.some(i => i.isEditing);
+            let localEq = JSON.parse(localStorage.getItem("equipmentData") || "[]"); 
+            let isEditingEq = localEq.some(i => i.isEditing);
             if(boxData.equipment && !isEditingEq) { localStorage.setItem("equipmentData", JSON.stringify(boxData.equipment)); renderTable(); }
             if(boxData.recipient) { localStorage.setItem("recipientData", JSON.stringify(boxData.recipient)); renderRecipientTable(); }
             if(boxData.machineNotes) localStorage.setItem("machineNotes", JSON.stringify(boxData.machineNotes));
-            // 💡 [추가됨] 소모품(Laser, Scale Head) 이력 병합
             if(boxData.equipMaintenance) applyIncomingMaintenance(boxData.equipMaintenance); 
 
             await updateHistoryBadge();
@@ -1868,7 +2141,6 @@ async function handleMobileDB(event) {
                 document.body.removeChild(a);
             }
 
-            // 💡 [v1.1 추가] 모바일도 최초 동기화 완료로 기록 → 게이트 해제 + 배너 갱신
             localStorage.setItem('hasCompletedInitialSync', 'yes');
             localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
             rememberTeamMeta(boxData);
@@ -1885,18 +2157,28 @@ async function handleMobileDB(event) {
     reader.readAsText(file);
 }
 
-// 2. Team DB 자동 최신화 + revision 기반 낙관적 동시성 제어
-const TEAM_SCHEMA_VERSION = 2;
+// ----------------------------------------------------
+// 2. Team DB 동기화 코어 (차등 분할 PULL & PUSH)
+// ----------------------------------------------------
+const TEAM_SCHEMA_VERSION = 3;
 let activeSyncPromise = null;
 
 function normalizeTeamMeta(data) {
+    if (!data) data = {};
     return {
         schemaVersion: Math.max(Number(data.schemaVersion) || 1, TEAM_SCHEMA_VERSION),
         dbRevision: Number(data.dbRevision) || 0,
         lastUpdatedAt: Number(data.lastUpdatedAt) || 0,
-        lastUpdatedBy: data.lastUpdatedBy || "알 수 없음"
+        lastUpdatedBy: data.lastUpdatedBy || "알 수 없음",
+        partitions: data.partitions || {
+            master_config: { revision: 0, updatedAt: 0 },
+            notes: { revision: 0, updatedAt: 0 },
+            maintenance: { revision: 0, updatedAt: 0 },
+            history: {}
+        }
     };
 }
+
 function rememberTeamMeta(data) {
     const meta = normalizeTeamMeta(data);
     localStorage.setItem('teamDbRevision', String(meta.dbRevision));
@@ -1908,31 +2190,38 @@ function rememberTeamMeta(data) {
         label.textContent = `TEAM DB 최신 확인: ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')} · Rev. ${meta.dbRevision}`;
     }
 }
+
 function getTeamEditorName() {
     return (document.getElementById('mailMyName')?.value || localStorage.getItem('storedMyName') || '알 수 없음').trim() || '알 수 없음';
 }
+
 function mergeHistory(boxHistory, localHistory) {
     const map = new Map();
     const legacyId = item => "LEGACY_" + item.date + "_" + item.machine + "_" + (item.content || "").substring(0, 10);
     [...(boxHistory || []), ...(localHistory || [])].forEach(item => {
-        const copy = { ...item }; if (!copy.id) copy.id = legacyId(copy);
+        const copy = { ...item }; 
+        if (!copy.id) copy.id = legacyId(copy);
+        if (!copy.yearMonth) copy.yearMonth = getYearMonthFromDate(copy.date, copy.savedAt);
         const old = map.get(copy.id);
         if (!old || (copy.updatedAt || 0) >= (old.updatedAt || 0)) map.set(copy.id, copy);
     });
     const seen = new Set();
     return Array.from(map.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).filter(item => {
         const key = `${(item.machine || '').trim().toUpperCase()}|${(item.date || '').replace(/[^0-9]/g, '')}|${(item.content || '').trim().replace(/\s/g, '')}`;
-        if (seen.has(key)) return false; seen.add(key); return true;
+        if (seen.has(key)) return false; 
+        seen.add(key); 
+        return true;
     });
 }
+
 function mergeEquipment(boxEquipment, localEquipment) {
     const map = new Map();
     const keyOf = e => (e.sn || '').trim() || `${(e.line || '').trim()}|${(e.name || '').trim()}`;
     (boxEquipment || []).forEach(e => map.set(keyOf(e), { ...e }));
-    // 로컬 변경은 최신 Pull 후의 사용자 변경이므로 같은 설비 충돌 시에만 우선한다.
     (localEquipment || []).forEach(e => { const copy = { ...e }; delete copy.isEditing; map.set(keyOf(copy), copy); });
     return Array.from(map.values());
 }
+
 function mergeNotes(boxNotes, localNotes) {
     const result = { ...(boxNotes || {}) };
     Object.entries(localNotes || {}).forEach(([key, value]) => {
@@ -1941,106 +2230,346 @@ function mergeNotes(boxNotes, localNotes) {
     });
     return result;
 }
+
 function mergeMaintenance(boxMaint, localMaint) {
     const result = {};
     Object.entries(boxMaint || {}).forEach(([key, value]) => result[key] = normalizeMaintShape(value));
     Object.entries(localMaint || {}).forEach(([key, value]) => result[key] = result[key] ? mergeMaintDataObjects(result[key], value) : normalizeMaintShape(value));
     return result;
 }
-async function buildMergedTeamData(boxData, includeLocalSettings = true) {
-    const localHistory = await getIDBHistory();
-    const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]');
-    const localRecipient = JSON.parse(localStorage.getItem('recipientData') || '{}');
-    const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
-    const localMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
-    return {
-        ...boxData,
-        workHistory: mergeHistory(boxData.workHistory, localHistory),
-        equipment: includeLocalSettings ? mergeEquipment(boxData.equipment, localEquipment) : (boxData.equipment || []),
-        recipient: includeLocalSettings ? { ...(boxData.recipient || {}), ...localRecipient } : (boxData.recipient || {}),
-        machineNotes: includeLocalSettings ? mergeNotes(boxData.machineNotes, localNotes) : (boxData.machineNotes || {}),
-        equipMaintenance: includeLocalSettings ? mergeMaintenance(boxData.equipMaintenance, localMaint) : (boxData.equipMaintenance || {})
-    };
-}
-async function applyTeamDataToLocal(data) {
-    await putIDBHistory(data.workHistory || []);
-    // 인라인 설비 편집 중에는 Pull 렌더링이 입력 중인 행을 덮어쓰지 않도록 보존한다.
-    const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]');
-    const isEditingEquipment = localEquipment.some(item => item.isEditing);
-    if (!isEditingEquipment) localStorage.setItem('equipmentData', JSON.stringify(data.equipment || []));
-    localStorage.setItem('recipientData', JSON.stringify(data.recipient || {}));
-    localStorage.setItem('machineNotes', JSON.stringify(data.machineNotes || {}));
-    localStorage.setItem('equipMaintenance', JSON.stringify(data.equipMaintenance || {}));
-    rememberTeamMeta(data);
-    if (!isEditingEquipment) renderTable();
-    renderRecipientTable(); await updateHistoryBadge();
+
+// ----------------------------------------------------
+// 📥 차등 분할 PULL (변경된 파티션 파일만 선택적 로드)
+// ----------------------------------------------------
+async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManualButton = false) {
+    let meta = await readJsonFromDir(dirHandle, 'meta.json', null);
+    if (!meta) {
+        await autoMigrateLegacyDbTxt(dirHandle);
+        meta = await readJsonFromDir(dirHandle, 'meta.json', null);
+    }
+    if (!meta) return false;
+
+    const normalizedMeta = normalizeTeamMeta(meta);
+    const localMeta = (await getSyncState('teamMeta')) || {};
+    const localParts = localMeta.partitions || {};
+    const remoteParts = normalizedMeta.partitions;
+
+    let hasMasterUpdated = false;
+    let hasNotesUpdated = false;
+    let hasMaintUpdated = false;
+    let updatedHistoryMonths = [];
+
+    // 1) 마스터 설정 (설비, 수신처) 파티션 점검
+    const remoteMasterRev = remoteParts.master_config?.revision || 0;
+    const localMasterRev = localParts.master_config?.revision || 0;
+    if (remoteMasterRev > localMasterRev || !localMeta.dbRevision) {
+        const masterData = await readJsonFromDir(dirHandle, 'master_config.json', null);
+        if (masterData) {
+            const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]');
+            const isEditingEquipment = localEquipment.some(item => item.isEditing);
+            const mergedEq = mergeEquipment(masterData.equipment || [], localEquipment);
+            if (!isEditingEquipment) {
+                localStorage.setItem('equipmentData', JSON.stringify(mergedEq));
+                renderTable();
+            }
+            const localRecip = JSON.parse(localStorage.getItem('recipientData') || '{}');
+            const mergedRecip = { ...(masterData.recipient || {}), ...localRecip };
+            localStorage.setItem('recipientData', JSON.stringify(mergedRecip));
+            renderRecipientTable();
+            hasMasterUpdated = true;
+        }
+    }
+
+    // 2) 메모 파티션 점검
+    const remoteNotesRev = remoteParts.notes?.revision || 0;
+    const localNotesRev = localParts.notes?.revision || 0;
+    if (remoteNotesRev > localNotesRev || !localMeta.dbRevision) {
+        const notesData = await readJsonFromDir(dirHandle, 'notes.json', null);
+        if (notesData && notesData.machineNotes) {
+            const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
+            const mergedNotes = mergeNotes(notesData.machineNotes, localNotes);
+            localStorage.setItem('machineNotes', JSON.stringify(mergedNotes));
+            hasNotesUpdated = true;
+        }
+    }
+
+    // 3) 유지보수 / 소모품 파티션 점검
+    const remoteMaintRev = remoteParts.maintenance?.revision || 0;
+    const localMaintRev = localParts.maintenance?.revision || 0;
+    if (remoteMaintRev > localMaintRev || !localMeta.dbRevision) {
+        const maintData = await readJsonFromDir(dirHandle, 'maintenance.json', null);
+        if (maintData && maintData.equipMaintenance) {
+            applyIncomingMaintenance(maintData.equipMaintenance);
+            hasMaintUpdated = true;
+        }
+    }
+
+    // 4) 작업 이력 월별 파티션 점검 (변경된 월 파일만 선택적 로드)
+    const remoteHistoryParts = remoteParts.history || {};
+    const localHistoryParts = localParts.history || {};
+    const historySubdir = await getOrCreateSubdir(dirHandle, 'history');
+
+    for (const ym of Object.keys(remoteHistoryParts)) {
+        const rRev = remoteHistoryParts[ym]?.revision || 0;
+        const lRev = localHistoryParts[ym]?.revision || 0;
+        if (rRev > lRev || !localMeta.dbRevision) {
+            const monthData = await readJsonFromDir(historySubdir, `${ym}.json`, []);
+            if (monthData && monthData.length > 0) {
+                const localMonthHistory = await getIDBHistoryByMonth(ym);
+                const mergedMonthHistory = mergeHistory(monthData, localMonthHistory);
+                await upsertIDBHistoryItems(mergedMonthHistory);
+                updatedHistoryMonths.push(ym);
+            }
+        }
+    }
+
+    // 동기화 상태 갱신
+    await saveSyncState('teamMeta', normalizedMeta);
+    rememberTeamMeta(normalizedMeta);
+    localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
+
+    await updateHistoryBadge();
     if (document.getElementById('history')?.classList.contains('block')) await renderHistory();
-}
-async function ensureFreshTeamDb() {
-    const ok = await syncWithBox(true, false, false);
-    if (!ok) alert('팀 DB 최신 데이터를 확인할 수 없어 저장을 진행하지 않았습니다. Box 연결과 권한을 확인해주세요.');
-    return ok;
+    await updateSyncStatusBanner();
+
+    if (isManualButton) {
+        showToast('최신화 완료', `TEAM DB Revision ${normalizedMeta.dbRevision} (분할 동기화)`);
+    } else if (normalizedMeta.dbRevision > Number(localStorage.getItem('teamDbRevision') || 0)) {
+        showToast('TEAM DB 최신화', `Revision ${normalizedMeta.dbRevision} 최신 변경사항을 반영했습니다.`);
+    }
+
+    return true;
 }
 
-async function syncWithBox(isUserGesture = false, isPushSettings = false, isManualButton = false) {
-    if (activeSyncPromise) { if (isPushSettings) pendingPush = true; return activeSyncPromise; }
-    activeSyncPromise = (async () => {
-        const handle = await getFileHandle('boxBackupFile');
-        if (!handle) {
-            if (isManualButton) alert("⚠️ 상단의 [DB 연결] 버튼을 눌러 공용 파일을 연결해 주세요.");
-            await updateSyncStatusBanner(); return false;
+// ----------------------------------------------------
+// 📤 차등 분할 PUSH (수정된 파티션 파일만 선택적 업로드)
+// ----------------------------------------------------
+async function pushPartitionedTeamData(dirHandle, pushScope = {}) {
+    // 1) 최신 meta.json 확인 및 선행 병합 (낙관적 락 체크)
+    let meta = await readJsonFromDir(dirHandle, 'meta.json', null);
+    if (!meta) {
+        await autoMigrateLegacyDbTxt(dirHandle);
+        meta = await readJsonFromDir(dirHandle, 'meta.json', null);
+    }
+    const currentMeta = normalizeTeamMeta(meta);
+
+    const historySubdir = await getOrCreateSubdir(dirHandle, 'history');
+    const editorName = getTeamEditorName();
+    const now = Date.now();
+
+    const scope = pushScope.scope || 'all';
+    const targetMonths = new Set(pushScope.yearMonths || []);
+
+    // 2) 마스터 설정 (설비, 수신처) PUSH
+    if (scope === 'all' || scope === 'master' || scope === 'equipment' || scope === 'recipient') {
+        const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]').map(e => {
+            const copy = { ...e }; delete copy.isEditing; return copy;
+        });
+        const localRecipient = JSON.parse(localStorage.getItem('recipientData') || '{}');
+        const remoteMaster = await readJsonFromDir(dirHandle, 'master_config.json', { equipment: [], recipient: {} });
+        const mergedEq = mergeEquipment(remoteMaster.equipment, localEquipment);
+        const mergedRecip = { ...(remoteMaster.recipient || {}), ...localRecipient };
+
+        await writeJsonToDir(dirHandle, 'master_config.json', {
+            equipment: mergedEq,
+            recipient: mergedRecip
+        });
+
+        currentMeta.partitions.master_config = {
+            revision: (currentMeta.partitions.master_config?.revision || 0) + 1,
+            updatedAt: now,
+            updatedBy: editorName
+        };
+    }
+
+    // 3) 메모 PUSH
+    if (scope === 'all' || scope === 'notes') {
+        const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
+        const remoteNotes = await readJsonFromDir(dirHandle, 'notes.json', { machineNotes: {} });
+        const mergedNotes = mergeNotes(remoteNotes.machineNotes, localNotes);
+
+        await writeJsonToDir(dirHandle, 'notes.json', { machineNotes: mergedNotes });
+
+        currentMeta.partitions.notes = {
+            revision: (currentMeta.partitions.notes?.revision || 0) + 1,
+            updatedAt: now,
+            updatedBy: editorName
+        };
+    }
+
+    // 4) 유지보수 / 소모품 PUSH
+    if (scope === 'all' || scope === 'maintenance') {
+        const localMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
+        const remoteMaint = await readJsonFromDir(dirHandle, 'maintenance.json', { equipMaintenance: {} });
+        const mergedMaint = mergeMaintenance(remoteMaint.equipMaintenance, localMaint);
+
+        await writeJsonToDir(dirHandle, 'maintenance.json', { equipMaintenance: mergedMaint });
+
+        currentMeta.partitions.maintenance = {
+            revision: (currentMeta.partitions.maintenance?.revision || 0) + 1,
+            updatedAt: now,
+            updatedBy: editorName
+        };
+    }
+
+    // 5) 작업 이력 월별 PUSH
+    if (scope === 'all' || scope === 'history') {
+        const allHistory = await getIDBHistory();
+        const historyByMonth = {};
+        allHistory.forEach(item => {
+            const ym = item.yearMonth || getYearMonthFromDate(item.date, item.savedAt);
+            if (!historyByMonth[ym]) historyByMonth[ym] = [];
+            historyByMonth[ym].push(item);
+        });
+
+        const monthsToPush = targetMonths.size > 0 ? Array.from(targetMonths) : Object.keys(historyByMonth);
+
+        for (const ym of monthsToPush) {
+            const localMonthItems = historyByMonth[ym] || [];
+            const remoteMonthItems = await readJsonFromDir(historySubdir, `${ym}.json`, []);
+            const mergedMonthItems = mergeHistory(remoteMonthItems, localMonthItems);
+
+            await writeJsonToDir(historySubdir, `${ym}.json`, mergedMonthItems);
+
+            if (!currentMeta.partitions.history) currentMeta.partitions.history = {};
+            currentMeta.partitions.history[ym] = {
+                revision: (currentMeta.partitions.history[ym]?.revision || 0) + 1,
+                updatedAt: now,
+                updatedBy: editorName,
+                count: mergedMonthItems.length
+            };
         }
+    }
+
+    // 6) meta.json 총괄 갱신
+    currentMeta.dbRevision = (currentMeta.dbRevision || 0) + 1;
+    currentMeta.lastUpdatedAt = now;
+    currentMeta.lastUpdatedBy = editorName;
+
+    await writeJsonToDir(dirHandle, 'meta.json', currentMeta);
+    await saveSyncState('teamMeta', currentMeta);
+    rememberTeamMeta(currentMeta);
+    localStorage.setItem('lastSyncSuccessAt', now.toString());
+    await updateSyncStatusBanner();
+
+    return true;
+}
+
+// ----------------------------------------------------
+// 🚀 통합 동기화 디스패처 (폴더 분할 엔진 및 레거시 단일파일 폴백)
+// ----------------------------------------------------
+async function syncWithBox(isUserGesture = false, isPushSettings = false, isManualButton = false, pushScope = { scope: 'all' }) {
+    if (activeSyncPromise) { 
+        if (isPushSettings) pendingPush = true; 
+        return activeSyncPromise; 
+    }
+
+    activeSyncPromise = (async () => {
+        const dirHandle = await getFileHandle('boxDirectoryHandle');
+        const legacyFileHandle = await getFileHandle('boxBackupFile');
+
+        if (!dirHandle && !legacyFileHandle) {
+            if (isManualButton) alert("⚠️ 상단의 [DB 폴더 연결] 버튼을 눌러 Box 공용 폴더를 연결해 주세요.");
+            await updateSyncStatusBanner(); 
+            return false;
+        }
+
+        const handle = dirHandle || legacyFileHandle;
         const hasPerm = await verifyPermission(handle, true, isUserGesture);
-        if (!hasPerm) { if (isManualButton) alert("권한이 필요합니다."); await updateSyncStatusBanner(); return false; }
+        if (!hasPerm) { 
+            if (isManualButton) alert("Box 폴더 접근 권한이 필요합니다."); 
+            await updateSyncStatusBanner(); 
+            return false; 
+        }
 
         isSyncing = true;
         const syncIcon = document.getElementById("syncIcon"), syncText = document.getElementById("syncText"), btn = document.getElementById("syncBtn");
         if (btn) btn.classList.remove("text-red-500", "font-black");
-        if (syncIcon && isManualButton) { syncIcon.classList.add("animate-spin"); syncText.innerText = "Checking..."; if (btn) btn.style.opacity = "0.7"; }
+        if (syncIcon && isManualButton) { 
+            syncIcon.classList.add("animate-spin"); 
+            syncText.innerText = "Checking..."; 
+            if (btn) btn.style.opacity = "0.7"; 
+        }
+
         try {
-            const MAX_RETRY = 3;
-            for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
-                const file = await handle.getFile();
+            if (dirHandle) {
+                // 📂 신규: 디렉터리 기반 분할 동기화
+                if (isPushSettings) {
+                    return await pushPartitionedTeamData(dirHandle, pushScope);
+                } else {
+                    return await pullPartitionedTeamData(dirHandle, isUserGesture, isManualButton);
+                }
+            } else {
+                // 📄 레거시: 단일 파일 동기화 폴백 (호환 모드)
+                const file = await legacyFileHandle.getFile();
                 const fileText = await file.text();
                 const boxData = fileText ? JSON.parse(fileText) : {};
                 const boxMeta = normalizeTeamMeta(boxData);
                 const localRevision = Number(localStorage.getItem('teamDbRevision') || 0);
-                const merged = await buildMergedTeamData(boxData, isPushSettings);
 
                 if (!isPushSettings) {
-                    // Pull은 공용 DB의 revision을 유지한다. 로컬 이력은 안전하게 병합한다.
-                    merged.schemaVersion = boxMeta.schemaVersion; merged.dbRevision = boxMeta.dbRevision;
-                    merged.lastUpdatedAt = boxMeta.lastUpdatedAt; merged.lastUpdatedBy = boxMeta.lastUpdatedBy;
-                    await applyTeamDataToLocal(merged);
-                    if (boxMeta.dbRevision > localRevision) showToast('TEAM DB 최신화', `Revision ${boxMeta.dbRevision} 데이터를 반영했습니다.`);
+                    const localHistory = await getIDBHistory();
+                    const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]');
+                    const localRecipient = JSON.parse(localStorage.getItem('recipientData') || '{}');
+                    const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
+                    const localMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
+                    
+                    const merged = {
+                        ...boxData,
+                        workHistory: mergeHistory(boxData.workHistory, localHistory),
+                        equipment: mergeEquipment(boxData.equipment, localEquipment),
+                        recipient: { ...(boxData.recipient || {}), ...localRecipient },
+                        machineNotes: mergeNotes(boxData.machineNotes, localNotes),
+                        equipMaintenance: mergeMaintenance(boxData.equipMaintenance, localMaint),
+                        dbRevision: boxMeta.dbRevision,
+                        lastUpdatedAt: boxMeta.lastUpdatedAt,
+                        lastUpdatedBy: boxMeta.lastUpdatedBy
+                    };
+                    await putIDBHistory(merged.workHistory || []);
+                    localStorage.setItem('equipmentData', JSON.stringify(merged.equipment || []));
+                    localStorage.setItem('recipientData', JSON.stringify(merged.recipient || {}));
+                    localStorage.setItem('machineNotes', JSON.stringify(merged.machineNotes || {}));
+                    localStorage.setItem('equipMaintenance', JSON.stringify(merged.equipMaintenance || {}));
+                    rememberTeamMeta(merged);
+                    renderTable();
+                    renderRecipientTable();
+                    await updateHistoryBadge();
+                    if (document.getElementById('history')?.classList.contains('block')) await renderHistory();
                     localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
                     await updateSyncStatusBanner();
                     if (isManualButton) showToast('최신화 완료', `TEAM DB Revision ${boxMeta.dbRevision}`);
                     return true;
+                } else {
+                    const allHist = await getIDBHistory();
+                    const allEq = JSON.parse(localStorage.getItem('equipmentData') || '[]');
+                    const allRecip = JSON.parse(localStorage.getItem('recipientData') || '{}');
+                    const allNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
+                    const allMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
+                    const merged = {
+                        schemaVersion: TEAM_SCHEMA_VERSION,
+                        dbRevision: boxMeta.dbRevision + 1,
+                        lastUpdatedAt: Date.now(),
+                        lastUpdatedBy: getTeamEditorName(),
+                        workHistory: mergeHistory(boxData.workHistory, allHist),
+                        equipment: mergeEquipment(boxData.equipment, allEq),
+                        recipient: { ...(boxData.recipient || {}), ...allRecip },
+                        machineNotes: mergeNotes(boxData.machineNotes, allNotes),
+                        equipMaintenance: mergeMaintenance(boxData.equipMaintenance, allMaint)
+                    };
+                    const writable = await legacyFileHandle.createWritable();
+                    await writable.write(JSON.stringify(merged, null, 2));
+                    await writable.close();
+                    rememberTeamMeta(merged);
+                    localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
+                    await updateSyncStatusBanner();
+                    return true;
                 }
-
-                // Push 직전에 읽은 최신 파일을 기준으로 병합한 뒤 새 revision을 만든다.
-                merged.schemaVersion = TEAM_SCHEMA_VERSION;
-                merged.dbRevision = boxMeta.dbRevision + 1;
-                merged.lastUpdatedAt = Date.now();
-                merged.lastUpdatedBy = getTeamEditorName();
-
-                // 마지막 읽기 이후 다른 저장이 발생했으면, 절대 덮어쓰지 않고 최신 파일부터 다시 병합한다.
-                const freshCheck = await handle.getFile();
-                if (freshCheck.lastModified !== file.lastModified) continue;
-                const writable = await handle.createWritable();
-                await writable.write(JSON.stringify(merged, null, 2));
-                await writable.close();
-                await applyTeamDataToLocal(merged);
-                localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
-                await updateSyncStatusBanner();
-                return true;
             }
-            throw new Error('다른 팀원의 연속 저장으로 재시도 횟수를 초과했습니다.');
         } catch (error) {
             console.error('동기화 실패:', error);
-            if (isManualButton) alert('동기화 중 오류가 발생했습니다. 파일 연결을 확인해주세요.');
-            await updateSyncStatusBanner(); return false;
+            if (isManualButton) alert('동기화 중 오류가 발생했습니다. Box 폴더 연결 상태를 확인해주세요.');
+            await updateSyncStatusBanner(); 
+            return false;
         } finally {
             isSyncing = false;
             if (syncIcon) syncIcon.classList.remove('animate-spin');
@@ -2048,27 +2577,46 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
             if (btn) btn.style.opacity = '1';
         }
     })();
+
     try { return await activeSyncPromise; }
     finally {
         activeSyncPromise = null;
-        if (pendingPush) { pendingPush = false; autoMergeAndSave(); }
+        if (pendingPush) { 
+            pendingPush = false; 
+            autoMergeAndSave(pushScope); 
+        }
     }
 }
 
-// 모든 변경은 0.7초 후 최신 DB를 다시 읽고 병합한 다음 자동 Push한다.
+// ----------------------------------------------------
+// ⏱️ 디바운스 자동 PUSH & 수동 동기화
+// ----------------------------------------------------
 let _autoSyncDebounceTimer = null;
-function autoMergeAndSave() {
+let _pendingPushScope = { scope: 'all' };
+
+function autoMergeAndSave(scope = { scope: 'all' }) {
     clearTimeout(_autoSyncDebounceTimer);
-    _autoSyncDebounceTimer = setTimeout(() => { syncWithBox(true, true, false); }, 700);
-}
-function manualSync() { syncWithBox(true, false, true); }
-async function disconnectDB() {
-    if(!confirm("⚠️ 현재 연결된 Box 파일 설정을 해제하시겠습니까? (로컬 데이터도 초기화됩니다)")) return;
-    indexedDB.deleteDatabase('HitachiSfdcDB'); localStorage.clear();
-    alert("✅ 연결이 해제되었습니다. 처음 상태로 돌아갑니다."); location.reload();
+    _pendingPushScope = scope;
+    _autoSyncDebounceTimer = setTimeout(() => { 
+        syncWithBox(true, true, false, _pendingPushScope); 
+    }, 700);
 }
 
-// 3. [수정] 1주일 단위 PC 자동 백업 함수
+function manualSync() { 
+    syncWithBox(true, false, true); 
+}
+
+async function disconnectDB() {
+    if(!confirm("⚠️ 현재 연결된 Box 폴더 설정을 해제하시겠습니까? (로컬 데이터도 초기화됩니다)")) return;
+    indexedDB.deleteDatabase('HitachiSfdcDB'); 
+    localStorage.clear();
+    alert("✅ 연결이 해제되었습니다. 초기 상태로 돌아갑니다."); 
+    location.reload();
+}
+
+// ----------------------------------------------------
+// 💾 정기 PC 로컬 자동 백업 (1주일 단위)
+// ----------------------------------------------------
 async function autoLocalBackup() {
     const lastBackup = localStorage.getItem('lastBackupDate');
     const now = Date.now();
@@ -2080,7 +2628,6 @@ async function autoLocalBackup() {
             let equipment = JSON.parse(localStorage.getItem("equipmentData") || "[]").map(e => { let obj = {...e}; delete obj.isEditing; return obj; });
             let recipient = JSON.parse(localStorage.getItem("recipientData") || "{}");
             let machineNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
-            // 💡 [추가됨] 백업 생성 시 소모품 데이터 긁어오기
             let equipMaintenance = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
 
             let backupData = {
@@ -2088,7 +2635,7 @@ async function autoLocalBackup() {
                 equipment: equipment,
                 recipient: recipient,
                 machineNotes: machineNotes,
-                equipMaintenance: equipMaintenance, // 💡 [추가됨] 백업 파일에 기록
+                equipMaintenance: equipMaintenance,
                 backupDate: new Date().toISOString()
             };
 
@@ -2108,9 +2655,7 @@ async function autoLocalBackup() {
             URL.revokeObjectURL(url);
 
             localStorage.setItem('lastBackupDate', now.toString());
-            
             setTimeout(() => showToast("정기 자동 백업", "PC 다운로드 폴더에 백업 파일이 저장되었습니다."), 1500);
-
         } catch (error) {
             console.error("자동 백업 실패:", error);
         }
@@ -2118,13 +2663,12 @@ async function autoLocalBackup() {
 }
     
 // ==========================================
-// ⏱️ 자동 Sync (1시간 간격)
+// ⏱️ 자동 Sync (1시간 간격 주기적 PULL)
 // ==========================================
 const originalOnload = window.onload;
 window.onload = async function() {
     if(originalOnload) await originalOnload();
 
-    // ── 자동 Sync: 1시간마다 백그라운드 동기화 ──
     const AUTO_SYNC_INTERVAL = 60 * 60 * 1000;
 
     function updateAutoSyncLabel(ts) {
