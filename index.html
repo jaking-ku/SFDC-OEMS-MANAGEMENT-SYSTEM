@@ -1304,93 +1304,146 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
 
 /**
  * 📤 차등 분할 PUSH: 변경된 파티션 파일만 선택적으로 업로드
+ * 🔒 낙관적 동시성 제어(Optimistic Concurrency Control):
+ *    쓰기 직전 meta.json의 lastModified 및 dbRevision을 재확인하여 다른 팀원의 동시 저장을 감지하고 자동 재시도합니다.
  */
 async function pushPartitionedTeamData(dirHandle, pushScope = {}) {
-    let meta = await readJsonFromDir(dirHandle, 'meta.json', null);
-    if (!meta) {
-        await autoMigrateLegacyDbTxt(dirHandle);
-        meta = await readJsonFromDir(dirHandle, 'meta.json', null);
-    }
-    const currentMeta = normalizeTeamMeta(meta);
-
+    const MAX_RETRY = 3;
     const historySubdir = await getOrCreateSubdir(dirHandle, 'history');
     const editorName = getTeamEditorName();
-    const now = Date.now();
-
     const scope = pushScope.scope || 'all';
     const targetMonths = new Set(pushScope.yearMonths || []);
 
-    // 1) 마스터 설정 PUSH
-    if (scope === 'all' || scope === 'master' || scope === 'equipment' || scope === 'recipient') {
-        const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]').map(e => {
-            const copy = { ...e }; 
-            delete copy.isEditing; 
-            return copy;
-        });
-        const localRecipient = JSON.parse(localStorage.getItem('recipientData') || '{}');
-        const remoteMaster = await readJsonFromDir(dirHandle, 'master_config.json', { equipment: [], recipient: {} });
-        const mergedEq = mergeEquipment(remoteMaster.equipment, localEquipment);
-        const mergedRecip = { ...(remoteMaster.recipient || {}), ...localRecipient };
+    for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
+        // 1) meta.json 파일 핸들 및 최초 스냅샷 확인
+        let metaHandle;
+        try {
+            metaHandle = await dirHandle.getFileHandle('meta.json', { create: false });
+        } catch (e) {
+            await autoMigrateLegacyDbTxt(dirHandle);
+            try {
+                metaHandle = await dirHandle.getFileHandle('meta.json', { create: false });
+            } catch (err) {
+                metaHandle = null;
+            }
+        }
 
-        await writeJsonToDir(dirHandle, 'master_config.json', {
-            equipment: mergedEq,
-            recipient: mergedRecip
-        });
+        let initialMetaFile = null;
+        let initialMeta = null;
+        if (metaHandle) {
+            initialMetaFile = await metaHandle.getFile();
+            const text = await initialMetaFile.text();
+            initialMeta = text ? JSON.parse(text) : null;
+        }
+        const currentMeta = normalizeTeamMeta(initialMeta);
+        const now = Date.now();
 
-        currentMeta.partitions.master_config = {
-            revision: (currentMeta.partitions.master_config?.revision || 0) + 1,
-            updatedAt: now,
-            updatedBy: editorName
-        };
-    }
+        // 2) [쓰기 직전 재검증: 낙관적 잠금 (Optimistic Concurrency Check)]
+        if (metaHandle && initialMetaFile) {
+            const freshMetaFile = await metaHandle.getFile();
+            if (freshMetaFile.lastModified !== initialMetaFile.lastModified) {
+                console.warn(`[낙관적 잠금] 원격 meta.json 변경(다른 팀원 저장)이 감지되어 최신 데이터를 다시 읽고 병합을 재시도합니다. (시도 ${attempt + 1}/${MAX_RETRY})`);
+                continue;
+            }
+        }
 
-    // 2) 메모 PUSH
-    if (scope === 'all' || scope === 'notes') {
-        const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
-        const remoteNotes = await readJsonFromDir(dirHandle, 'notes.json', { machineNotes: {} });
-        const mergedNotes = mergeNotes(remoteNotes.machineNotes, localNotes);
+        // 3) 스코프별 데이터 읽기 및 병합
+        // (1) 마스터 설정 (설비, 수신처)
+        let masterToSave = null;
+        if (scope === 'all' || scope === 'master' || scope === 'equipment' || scope === 'recipient') {
+            const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]').map(e => {
+                const copy = { ...e }; 
+                delete copy.isEditing; 
+                return copy;
+            });
+            const localRecipient = JSON.parse(localStorage.getItem('recipientData') || '{}');
+            const remoteMaster = await readJsonFromDir(dirHandle, 'master_config.json', { equipment: [], recipient: {} });
+            const mergedEq = mergeEquipment(remoteMaster.equipment, localEquipment);
+            const mergedRecip = { ...(remoteMaster.recipient || {}), ...localRecipient };
 
-        await writeJsonToDir(dirHandle, 'notes.json', { machineNotes: mergedNotes });
+            masterToSave = { equipment: mergedEq, recipient: mergedRecip };
+        }
 
-        currentMeta.partitions.notes = {
-            revision: (currentMeta.partitions.notes?.revision || 0) + 1,
-            updatedAt: now,
-            updatedBy: editorName
-        };
-    }
+        // (2) 메모
+        let notesToSave = null;
+        if (scope === 'all' || scope === 'notes') {
+            const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
+            const remoteNotes = await readJsonFromDir(dirHandle, 'notes.json', { machineNotes: {} });
+            const mergedNotes = mergeNotes(remoteNotes.machineNotes, localNotes);
 
-    // 3) 유지보수 / 소모품 PUSH
-    if (scope === 'all' || scope === 'maintenance') {
-        const localMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
-        const remoteMaint = await readJsonFromDir(dirHandle, 'maintenance.json', { equipMaintenance: {} });
-        const mergedMaint = mergeMaintenance(remoteMaint.equipMaintenance, localMaint);
+            notesToSave = { machineNotes: mergedNotes };
+        }
 
-        await writeJsonToDir(dirHandle, 'maintenance.json', { equipMaintenance: mergedMaint });
+        // (3) 유지보수 / 소모품
+        let maintToSave = null;
+        if (scope === 'all' || scope === 'maintenance') {
+            const localMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
+            const remoteMaint = await readJsonFromDir(dirHandle, 'maintenance.json', { equipMaintenance: {} });
+            const mergedMaint = mergeMaintenance(remoteMaint.equipMaintenance, localMaint);
 
-        currentMeta.partitions.maintenance = {
-            revision: (currentMeta.partitions.maintenance?.revision || 0) + 1,
-            updatedAt: now,
-            updatedBy: editorName
-        };
-    }
+            maintToSave = { equipMaintenance: mergedMaint };
+        }
 
-    // 4) 작업 이력 월별 PUSH
-    if (scope === 'all' || scope === 'history') {
-        const allHistory = await getIDBHistory();
-        const historyByMonth = {};
-        allHistory.forEach(item => {
-            const ym = item.yearMonth || getYearMonthFromDate(item.date, item.savedAt);
-            if (!historyByMonth[ym]) historyByMonth[ym] = [];
-            historyByMonth[ym].push(item);
-        });
+        // (4) 작업 이력 월별 파티션
+        let historyToSaveByMonth = {};
+        if (scope === 'all' || scope === 'history') {
+            const allHistory = await getIDBHistory();
+            const historyByMonth = {};
+            allHistory.forEach(item => {
+                const ym = item.yearMonth || getYearMonthFromDate(item.date, item.savedAt);
+                if (!historyByMonth[ym]) historyByMonth[ym] = [];
+                historyByMonth[ym].push(item);
+            });
 
-        const monthsToPush = targetMonths.size > 0 ? Array.from(targetMonths) : Object.keys(historyByMonth);
+            const monthsToPush = targetMonths.size > 0 ? Array.from(targetMonths) : Object.keys(historyByMonth);
 
-        for (const ym of monthsToPush) {
-            const localMonthItems = historyByMonth[ym] || [];
-            const remoteMonthItems = await readJsonFromDir(historySubdir, `${ym}.json`, []);
-            const mergedMonthItems = mergeHistory(remoteMonthItems, localMonthItems);
+            for (const ym of monthsToPush) {
+                const localMonthItems = historyByMonth[ym] || [];
+                const remoteMonthItems = await readJsonFromDir(historySubdir, `${ym}.json`, []);
+                const mergedMonthItems = mergeHistory(remoteMonthItems, localMonthItems);
+                historyToSaveByMonth[ym] = mergedMonthItems;
+            }
+        }
 
+        // 4) [최종 쓰기 직전 2차 재검증: 쓰기 충돌 방지]
+        if (metaHandle && initialMetaFile) {
+            const freshMetaFile = await metaHandle.getFile();
+            if (freshMetaFile.lastModified !== initialMetaFile.lastModified) {
+                console.warn(`[낙관적 잠금] 파일 저장 직전 다른 팀원의 저장이 감지되어 재시도합니다. (시도 ${attempt + 1}/${MAX_RETRY})`);
+                continue;
+            }
+        }
+
+        // 5) 실제 파일 쓰기 수행
+        if (masterToSave) {
+            await writeJsonToDir(dirHandle, 'master_config.json', masterToSave);
+            currentMeta.partitions.master_config = {
+                revision: (currentMeta.partitions.master_config?.revision || 0) + 1,
+                updatedAt: now,
+                updatedBy: editorName
+            };
+        }
+
+        if (notesToSave) {
+            await writeJsonToDir(dirHandle, 'notes.json', notesToSave);
+            currentMeta.partitions.notes = {
+                revision: (currentMeta.partitions.notes?.revision || 0) + 1,
+                updatedAt: now,
+                updatedBy: editorName
+            };
+        }
+
+        if (maintToSave) {
+            await writeJsonToDir(dirHandle, 'maintenance.json', maintToSave);
+            currentMeta.partitions.maintenance = {
+                revision: (currentMeta.partitions.maintenance?.revision || 0) + 1,
+                updatedAt: now,
+                updatedBy: editorName
+            };
+        }
+
+        for (const ym of Object.keys(historyToSaveByMonth)) {
+            const mergedMonthItems = historyToSaveByMonth[ym];
             await writeJsonToDir(historySubdir, `${ym}.json`, mergedMonthItems);
 
             if (!currentMeta.partitions.history) currentMeta.partitions.history = {};
@@ -1401,20 +1454,22 @@ async function pushPartitionedTeamData(dirHandle, pushScope = {}) {
                 count: mergedMonthItems.length
             };
         }
+
+        // 6) meta.json 총괄 Revision 증가 및 저장
+        currentMeta.dbRevision = (currentMeta.dbRevision || 0) + 1;
+        currentMeta.lastUpdatedAt = now;
+        currentMeta.lastUpdatedBy = editorName;
+
+        await writeJsonToDir(dirHandle, 'meta.json', currentMeta);
+        await saveSyncState('teamMeta', currentMeta);
+        rememberTeamMeta(currentMeta);
+        localStorage.setItem('lastSyncSuccessAt', now.toString());
+        await updateSyncStatusBanner();
+
+        return true;
     }
 
-    // 5) meta.json 총괄 Revision 갱신
-    currentMeta.dbRevision = (currentMeta.dbRevision || 0) + 1;
-    currentMeta.lastUpdatedAt = now;
-    currentMeta.lastUpdatedBy = editorName;
-
-    await writeJsonToDir(dirHandle, 'meta.json', currentMeta);
-    await saveSyncState('teamMeta', currentMeta);
-    rememberTeamMeta(currentMeta);
-    localStorage.setItem('lastSyncSuccessAt', now.toString());
-    await updateSyncStatusBanner();
-
-    return true;
+    throw new Error('다른 팀원의 연속 동시 저장으로 인해 재시도 횟수를 초과했습니다.');
 }
 
 /**
@@ -1465,70 +1520,82 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
                     return await pullPartitionedTeamData(dirHandle, isUserGesture, isManualButton);
                 }
             } else {
-                // 📄 레거시 단일 파일 동기화 폴백
-                const file = await legacyFileHandle.getFile();
-                const fileText = await file.text();
-                const boxData = fileText ? JSON.parse(fileText) : {};
-                const boxMeta = normalizeTeamMeta(boxData);
+                // 📄 레거시 단일 파일 동기화 폴백 (낙관적 잠금 재시도 루프 적용)
+                const MAX_RETRY = 3;
+                for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
+                    const file = await legacyFileHandle.getFile();
+                    const fileText = await file.text();
+                    const boxData = fileText ? JSON.parse(fileText) : {};
+                    const boxMeta = normalizeTeamMeta(boxData);
 
-                if (!isPushSettings) {
-                    const localHistory = await getIDBHistory();
-                    const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]');
-                    const localRecipient = JSON.parse(localStorage.getItem('recipientData') || '{}');
-                    const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
-                    const localMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
-                    
-                    const merged = {
-                        ...boxData,
-                        workHistory: mergeHistory(boxData.workHistory, localHistory),
-                        equipment: mergeEquipment(boxData.equipment, localEquipment),
-                        recipient: { ...(boxData.recipient || {}), ...localRecipient },
-                        machineNotes: mergeNotes(boxData.machineNotes, localNotes),
-                        equipMaintenance: mergeMaintenance(boxData.equipMaintenance, localMaint),
-                        dbRevision: boxMeta.dbRevision,
-                        lastUpdatedAt: boxMeta.lastUpdatedAt,
-                        lastUpdatedBy: boxMeta.lastUpdatedBy
-                    };
-                    await putIDBHistory(merged.workHistory || []);
-                    localStorage.setItem('equipmentData', JSON.stringify(merged.equipment || []));
-                    localStorage.setItem('recipientData', JSON.stringify(merged.recipient || {}));
-                    localStorage.setItem('machineNotes', JSON.stringify(merged.machineNotes || {}));
-                    localStorage.setItem('equipMaintenance', JSON.stringify(merged.equipMaintenance || {}));
-                    rememberTeamMeta(merged);
-                    renderTable();
-                    renderRecipientTable();
-                    await updateHistoryBadge();
-                    if (document.getElementById('history')?.classList.contains('block')) await renderHistory();
-                    localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
-                    await updateSyncStatusBanner();
-                    if (isManualButton) showToast('최신화 완료', `TEAM DB Revision ${boxMeta.dbRevision}`);
-                    return true;
-                } else {
-                    const allHist = await getIDBHistory();
-                    const allEq = JSON.parse(localStorage.getItem('equipmentData') || '[]');
-                    const allRecip = JSON.parse(localStorage.getItem('recipientData') || '{}');
-                    const allNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
-                    const allMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
-                    
-                    const merged = {
-                        schemaVersion: TEAM_SCHEMA_VERSION,
-                        dbRevision: boxMeta.dbRevision + 1,
-                        lastUpdatedAt: Date.now(),
-                        lastUpdatedBy: getTeamEditorName(),
-                        workHistory: mergeHistory(boxData.workHistory, allHist),
-                        equipment: mergeEquipment(boxData.equipment, allEq),
-                        recipient: { ...(boxData.recipient || {}), ...allRecip },
-                        machineNotes: mergeNotes(boxData.machineNotes, allNotes),
-                        equipMaintenance: mergeMaintenance(boxData.equipMaintenance, allMaint)
-                    };
-                    const writable = await legacyFileHandle.createWritable();
-                    await writable.write(JSON.stringify(merged, null, 2));
-                    await writable.close();
-                    rememberTeamMeta(merged);
-                    localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
-                    await updateSyncStatusBanner();
-                    return true;
+                    if (!isPushSettings) {
+                        const localHistory = await getIDBHistory();
+                        const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]');
+                        const localRecipient = JSON.parse(localStorage.getItem('recipientData') || '{}');
+                        const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
+                        const localMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
+                        
+                        const merged = {
+                            ...boxData,
+                            workHistory: mergeHistory(boxData.workHistory, localHistory),
+                            equipment: mergeEquipment(boxData.equipment, localEquipment),
+                            recipient: { ...(boxData.recipient || {}), ...localRecipient },
+                            machineNotes: mergeNotes(boxData.machineNotes, localNotes),
+                            equipMaintenance: mergeMaintenance(boxData.equipMaintenance, localMaint),
+                            dbRevision: boxMeta.dbRevision,
+                            lastUpdatedAt: boxMeta.lastUpdatedAt,
+                            lastUpdatedBy: boxMeta.lastUpdatedBy
+                        };
+                        await putIDBHistory(merged.workHistory || []);
+                        localStorage.setItem('equipmentData', JSON.stringify(merged.equipment || []));
+                        localStorage.setItem('recipientData', JSON.stringify(merged.recipient || {}));
+                        localStorage.setItem('machineNotes', JSON.stringify(merged.machineNotes || {}));
+                        localStorage.setItem('equipMaintenance', JSON.stringify(merged.equipMaintenance || {}));
+                        rememberTeamMeta(merged);
+                        renderTable();
+                        renderRecipientTable();
+                        await updateHistoryBadge();
+                        if (document.getElementById('history')?.classList.contains('block')) await renderHistory();
+                        localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
+                        await updateSyncStatusBanner();
+                        if (isManualButton) showToast('최신화 완료', `TEAM DB Revision ${boxMeta.dbRevision}`);
+                        return true;
+                    } else {
+                        const allHist = await getIDBHistory();
+                        const allEq = JSON.parse(localStorage.getItem('equipmentData') || '[]');
+                        const allRecip = JSON.parse(localStorage.getItem('recipientData') || '{}');
+                        const allNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
+                        const allMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
+                        
+                        const merged = {
+                            schemaVersion: TEAM_SCHEMA_VERSION,
+                            dbRevision: boxMeta.dbRevision + 1,
+                            lastUpdatedAt: Date.now(),
+                            lastUpdatedBy: getTeamEditorName(),
+                            workHistory: mergeHistory(boxData.workHistory, allHist),
+                            equipment: mergeEquipment(boxData.equipment, allEq),
+                            recipient: { ...(boxData.recipient || {}), ...allRecip },
+                            machineNotes: mergeNotes(boxData.machineNotes, allNotes),
+                            equipMaintenance: mergeMaintenance(boxData.equipMaintenance, allMaint)
+                        };
+
+                        // [낙관적 잠금: 쓰기 직전 원본 파일 수정시간 재확인]
+                        const freshCheck = await legacyFileHandle.getFile();
+                        if (freshCheck.lastModified !== file.lastModified) {
+                            console.warn(`[낙관적 잠금] 파일 동시 수정 감지: 재시도 ${attempt + 1}/${MAX_RETRY}`);
+                            continue;
+                        }
+
+                        const writable = await legacyFileHandle.createWritable();
+                        await writable.write(JSON.stringify(merged, null, 2));
+                        await writable.close();
+                        rememberTeamMeta(merged);
+                        localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
+                        await updateSyncStatusBanner();
+                        return true;
+                    }
                 }
+                throw new Error('다른 팀원의 연속 저장으로 재시도 횟수를 초과했습니다.');
             }
         } catch (error) {
             console.error('동기화 실패:', error);
