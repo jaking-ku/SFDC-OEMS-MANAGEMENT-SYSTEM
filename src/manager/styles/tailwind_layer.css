@@ -1,0 +1,11 @@
+@layer components {
+            .card-base { @apply bg-surface border border-border transition-colors; }
+            .label-base { @apply block text-[10px] font-bold text-text-muted uppercase tracking-widest; }
+            .input-base { @apply w-full bg-surface text-text-main border border-border text-sm focus:border-primary focus:ring-0 transition-colors; }
+            .btn-primary { @apply bg-primary hover:bg-primary-hover text-white font-bold uppercase tracking-widest transition-all inline-flex items-center justify-center gap-1; }
+            /* 💡 수정됨: flex를 inline-flex로 변경하여 버튼이 세로로 꽉 차는 현상 방지 */
+            .btn-text { @apply text-[10px] font-bold text-text-muted hover:text-primary uppercase tracking-widest transition-colors inline-flex items-center gap-1; }
+            .th-base { @apply px-4 py-3 text-[10px] font-bold text-text-muted uppercase; }
+            .td-base { @apply px-4 py-3 text-sm text-text-main border-b border-border; }
+            .nav-item { @apply flex items-center w-full text-sm uppercase tracking-wider transition-colors cursor-pointer; }
+        }

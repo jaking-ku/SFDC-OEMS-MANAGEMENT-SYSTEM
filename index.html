@@ -31,7 +31,7 @@
         }
     </script>
     <style type="text/tailwindcss">
-        @layer components {
+@layer components {
             .card-base { @apply bg-surface border border-border transition-colors; }
             .label-base { @apply block text-[10px] font-bold text-text-muted uppercase tracking-widest; }
             .input-base { @apply w-full bg-surface text-text-main border border-border text-sm focus:border-primary focus:ring-0 transition-colors; }
@@ -44,7 +44,7 @@
         }
     </style>
     <style>
-        :root {
+:root {
             --bg-surface: #ffffff;
             --bg-body: #f8f9fa;
             --border-color: #e5e7eb;
@@ -77,12 +77,16 @@
         @keyframes timelineIn { to { opacity: 1; transform: translateY(0); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .save-badge { display: inline-flex; align-items: center; gap: 4px; background: #b7000c; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .08em; padding: 2px 8px; text-transform: uppercase; }
+        .sync_progress_pulse { animation: syncPulse 1.5s ease-in-out infinite; }
+        @keyframes syncPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+
 
         /* =============================================
            📱 모바일 전용 최적화 (사이드바 레이아웃)
            max-width: 767px 이하에서만 적용됨
            ============================================= */
-        @media (max-width: 767px) {
+
+@media (max-width: 767px){
 
             /* ── 사이드바 숨김 / 상단 topbar 전환 ── */
             #sidebar {
@@ -180,23 +184,95 @@
 </head>
 <body class="min-h-screen">
 
-<!-- 🔒 [v1.1 추가] 최초 DB 연결 게이트 — 팀 데이터 정합성 보호 -->
+<!-- 🔒 최초 DB 연결 게이트 — 팀 데이터 정합성 보호 및 실시간 진행상황 안내 -->
 <div class="hidden fixed inset-0 z-[200] flex items-center justify-center p-6" id="syncGateOverlay" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(2px);">
-    <div class="card-base bg-surface rounded-lg shadow-2xl max-w-md w-full p-8 text-center space-y-5">
-        <div class="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
-            <span class="material-symbols-outlined text-3xl text-primary">cloud_sync</span>
+    <div class="card-base bg-surface rounded-xl shadow-2xl max-w-md w-full p-8 text-center transition-all duration-300">
+        
+        <!-- 1. 초기 연결 대기 뷰 -->
+        <div id="syncGateViewInitial" class="space-y-5">
+            <div class="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+                <span class="material-symbols-outlined text-3xl text-primary animate-pulse">cloud_sync</span>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold text-text-main" id="syncGateTitle">Box DB 폴더 연결이 필요합니다</h3>
+                <p class="text-xs text-text-muted mt-2 leading-relaxed" id="syncGateDesc">
+                    이 브라우저에서는 아직 팀 공용 Box DB 폴더(SFDC_DB)와 연결된 적이 없습니다.<br>
+                    먼저 폴더를 연결하고 최신 데이터를 불러와야 다른 팀원의 이력이 누락되지 않습니다.
+                </p>
+            </div>
+            <button id="syncGateConnectBtn" class="btn-primary w-full py-3 text-xs rounded-lg flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all" onclick="gateConnect()">
+                <span class="material-symbols-outlined text-base">folder_open</span> Box DB 폴더 연결하기
+            </button>
+            <p class="text-[10px] text-text-muted cursor-pointer hover:text-primary underline transition-colors" onclick="gateSkip()">연결 없이 계속 진행 (비권장 · 팀 데이터와 어긋날 수 있음)</p>
         </div>
-        <div>
-            <h3 class="text-lg font-bold text-text-main" id="syncGateTitle">Box DB 폴더 연결이 필요합니다</h3>
-            <p class="text-xs text-text-muted mt-2 leading-relaxed" id="syncGateDesc">
-                이 브라우저에서는 아직 팀 공용 Box DB 폴더(SFDC_DB)와 연결된 적이 없습니다.<br>
-                먼저 폴더를 연결하고 최신 데이터를 불러와야 다른 팀원의 이력이 누락되지 않습니다.
+
+        <!-- 2. 실시간 동기화 진행 뷰 -->
+        <div id="syncGateViewProgress" class="hidden space-y-5">
+            <div class="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto relative">
+                <span class="material-symbols-outlined text-3xl text-primary animate-spin" id="syncGateSpinIcon">sync</span>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold text-text-main" id="syncGateProgressTitle">Box DB 데이터를 동기화하고 있습니다</h3>
+                <p class="text-xs text-text-muted mt-1 leading-relaxed" id="syncGateProgressDesc">
+                    클라우드에서 최신 팀 데이터를 안전하게 불러오는 중입니다.
+                </p>
+            </div>
+
+            <!-- 퍼센트 게이지 영역 -->
+            <div class="space-y-2 text-left bg-body/50 p-4 rounded-lg border border-border">
+                <div class="flex items-center justify-between text-xs font-semibold">
+                    <span class="text-text-main flex items-center gap-1.5" id="syncGateStepLabel">
+                        <span class="w-2 h-2 rounded-full bg-primary animate-ping"></span>
+                        연결 준비 중...
+                    </span>
+                    <span class="text-primary font-bold text-sm" id="syncGatePercentLabel">0%</span>
+                </div>
+                <div class="w-full h-3 bg-border rounded-full overflow-hidden p-0.5 relative">
+                    <div id="syncGateProgressBar" class="h-full bg-gradient-to-r from-primary to-primary-hover rounded-full transition-all duration-300 ease-out" style="width: 0%;"></div>
+                </div>
+                <div class="flex items-center justify-between text-[11px] text-text-muted pt-1">
+                    <span class="truncate max-w-[280px]" id="syncGateDetailText">Box 폴더 구조를 탐색하는 중...</span>
+                    <span class="shrink-0 text-[10px] opacity-75" id="syncGateItemCounter">0 / 0</span>
+                </div>
+            </div>
+
+            <p class="text-[11px] text-text-muted leading-relaxed">
+                💡 데이터 양과 네트워크 속도에 따라 약 10초 ~ 30초 소요될 수 있습니다.<br>창을 닫지 마시고 잠시만 기다려주세요.
             </p>
         </div>
-        <button class="btn-primary w-full py-3 text-xs rounded flex items-center justify-center gap-2" onclick="gateConnect()">
-            <span class="material-symbols-outlined text-base">folder_open</span> Box DB 폴더 연결하기
-        </button>
-        <p class="text-[10px] text-text-muted cursor-pointer hover:text-primary underline" onclick="gateSkip()">연결 없이 계속 진행 (비권장 · 팀 데이터와 어긋날 수 있음)</p>
+
+        <!-- 3. 동기화 성공 뷰 -->
+        <div id="syncGateViewSuccess" class="hidden space-y-4">
+            <div class="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto text-emerald-600 dark:text-emerald-400">
+                <span class="material-symbols-outlined text-4xl">check_circle</span>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold text-text-main">동기화 완료!</h3>
+                <p class="text-xs text-text-muted mt-1 leading-relaxed" id="syncGateSuccessDesc">
+                    최신 팀 데이터가 성공적으로 반영되었습니다.
+                </p>
+            </div>
+        </div>
+
+        <!-- 4. 동기화 오류 뷰 -->
+        <div id="syncGateViewError" class="hidden space-y-4">
+            <div class="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto text-red-600 dark:text-red-400">
+                <span class="material-symbols-outlined text-4xl">error_outline</span>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold text-text-main">동기화 실패</h3>
+                <p class="text-xs text-red-500 mt-1 leading-relaxed" id="syncGateErrorMsg">
+                    팀 DB 폴더를 불러오지 못했습니다.
+                </p>
+            </div>
+            <div class="space-y-2 pt-2">
+                <button class="btn-primary w-full py-2.5 text-xs rounded-lg flex items-center justify-center gap-2" onclick="gateRetry()">
+                    <span class="material-symbols-outlined text-base">refresh</span> 다시 시도하기
+                </button>
+                <p class="text-[10px] text-text-muted cursor-pointer hover:text-primary underline" onclick="gateSkip()">연결 없이 계속 진행</p>
+            </div>
+        </div>
+
     </div>
 </div>
 
@@ -227,7 +303,7 @@
         <div class="px-6 py-5 border-b border-border shrink-0">
             <div class="flex items-center gap-2 mb-1">
                 <span class="text-2xl font-black tracking-tighter text-black">HITACHI</span>
-                <span class="text-[9px] font-bold text-primary border border-primary/40 rounded px-1.5 py-0.5 leading-none">v1.0</span>
+                <span class="text-[9px] font-bold text-primary border border-primary/40 rounded px-1.5 py-0.5 leading-none">v1.1</span>
             </div>
             <span class="text-[10px] font-bold uppercase tracking-widest text-text-muted">평가4부 Management System</span>
         </div>
@@ -673,25 +749,7 @@
 </div>
 <input type="file" id="mobile-db-upload" accept=".txt" style="display: none;" onchange="handleMobileDB(event)">
 <script>
-/**
- * ==============================================================================
- * Hitachi SFDC / OEMS Management System (Local Secure Architecture)
- * ==============================================================================
- * 사내 보안 규정 준수형 로컬 및 Box Cloud 분할 동기화 웹 애플리케이션 코어 스크립트
- * 
- * [목차 - 8대 논리 계층 (Table of Contents)]
- * 1. [Constants & Global State] 상수 및 전역 런타임 상태 관리
- * 2. [Storage Layer] IndexedDB v3 및 LocalStorage 데이터 접근 계층
- * 3. [Sync Engine] Box 공용 폴더 분할 차등 동기화(Partitioned Sync) 엔진
- * 4. [Business: Extraction & Email] 작업 메일 분석/추출 및 이메일 양식 생성
- * 5. [Business: Maintenance] 설비 소모품(Laser, Scale Head, Mirror 등) 유지보수 이력
- * 6. [Business: Management] 설비 마스터 데이터, 수신처 목록 및 SFDC 검색 연동
- * 7. [UI & View Renderers] 화면 전환, 렌더링, 타임라인, 다크모드 및 유틸리티
- * 8. [Lifecycle & Initialization] 애플리케이션 시작 및 주기적 백그라운드 태스크
- * ==============================================================================
- */
-
-// ==============================================================================
+// [Module: state.js]
 // 1. [Constants & Global State] 상수 및 전역 런타임 상태 관리
 // ==============================================================================
 
@@ -730,6 +788,8 @@ let selectedChip = null;                    // 작업 히스토리에서 현재 
 
 
 // ==============================================================================
+
+// [Module: storage_box.js]
 // 2. [Storage Layer] IndexedDB v3 및 LocalStorage 데이터 접근 계층
 // ==============================================================================
 
@@ -1207,16 +1267,19 @@ async function autoMigrateLegacyDbTxt(dirHandle) {
 }
 
 /**
- * 📥 차등 분할 PULL: 변경된 파티션 파일만 선택적으로 다운로드 및 병합
+ * 📥 차등 분할 PULL: 변경된 파티션 파일만 선택적으로 다운로드 및 병합 (실시간 진행률 콜백 지원)
  */
-async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManualButton = false) {
+async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManualButton = false, progressCb = null) {
+    if (progressCb) progressCb(5, '메타데이터 조회', 'Box 폴더의 meta.json 파일을 읽고 있습니다.', '');
     let meta = await readJsonFromDir(dirHandle, 'meta.json', null);
     if (!meta) {
+        if (progressCb) progressCb(8, '레거시 데이터 변환', '이전 버전 데이터를 신규 분할 구조로 변환 중...', '');
         await autoMigrateLegacyDbTxt(dirHandle);
         meta = await readJsonFromDir(dirHandle, 'meta.json', null);
     }
     if (!meta) return false;
 
+    if (progressCb) progressCb(12, '메타데이터 분석', '팀 DB 파티션 및 리비전을 검사하고 있습니다.', '');
     const normalizedMeta = normalizeTeamMeta(meta);
     const localMeta = (await getSyncState('teamMeta')) || {};
     const localParts = localMeta.partitions || {};
@@ -1226,6 +1289,7 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
     const remoteMasterRev = remoteParts.master_config?.revision || 0;
     const localMasterRev = localParts.master_config?.revision || 0;
     if (remoteMasterRev > localMasterRev || !localMeta.dbRevision) {
+        if (progressCb) progressCb(18, '마스터 설정 동기화', '설비 목록 및 메일 수신처 데이터를 동기화 중입니다.', 'master_config.json');
         const masterData = await readJsonFromDir(dirHandle, 'master_config.json', null);
         if (masterData) {
             const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]');
@@ -1246,6 +1310,7 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
     const remoteNotesRev = remoteParts.notes?.revision || 0;
     const localNotesRev = localParts.notes?.revision || 0;
     if (remoteNotesRev > localNotesRev || !localMeta.dbRevision) {
+        if (progressCb) progressCb(24, '설비 메모 동기화', '설비별 특이사항 및 메모를 동기화 중입니다.', 'notes.json');
         const notesData = await readJsonFromDir(dirHandle, 'notes.json', null);
         if (notesData && notesData.machineNotes) {
             const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
@@ -1258,6 +1323,7 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
     const remoteMaintRev = remoteParts.maintenance?.revision || 0;
     const localMaintRev = localParts.maintenance?.revision || 0;
     if (remoteMaintRev > localMaintRev || !localMeta.dbRevision) {
+        if (progressCb) progressCb(30, '유지보수 데이터 동기화', '설비별 소모품 및 유지보수 이력을 동기화 중입니다.', 'maintenance.json');
         const maintData = await readJsonFromDir(dirHandle, 'maintenance.json', null);
         if (maintData && maintData.equipMaintenance) {
             applyIncomingMaintenance(maintData.equipMaintenance);
@@ -1268,30 +1334,48 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
     const remoteHistoryParts = remoteParts.history || {};
     const localHistoryParts = localParts.history || {};
     const historySubdir = await getOrCreateSubdir(dirHandle, 'history');
+    const ymKeys = Object.keys(remoteHistoryParts);
+    const totalYm = ymKeys.length;
 
-    for (const ym of Object.keys(remoteHistoryParts)) {
-        const rRev = remoteHistoryParts[ym]?.revision || 0;
-        const lRev = localHistoryParts[ym]?.revision || 0;
-        if (rRev > lRev || !localMeta.dbRevision) {
-            const monthData = await readJsonFromDir(historySubdir, `${ym}.json`, []);
-            if (monthData && monthData.length > 0) {
-                const localMonthHistory = await getIDBHistoryByMonth(ym);
-                const mergedMonthHistory = mergeHistory(monthData, localMonthHistory);
-                await upsertIDBHistoryItems(mergedMonthHistory);
+    if (totalYm === 0) {
+        if (progressCb) progressCb(80, '작업 이력 점검', '등록된 작업 이력 파티션이 없습니다.', '');
+    } else {
+        for (let i = 0; i < totalYm; i++) {
+            const ym = ymKeys[i];
+            const rRev = remoteHistoryParts[ym]?.revision || 0;
+            const lRev = localHistoryParts[ym]?.revision || 0;
+            const pct = 30 + Math.round(((i + 1) / totalYm) * 55);
+            
+            if (progressCb) {
+                progressCb(pct, '작업 이력 동기화', `월별 데이터 로드 중: ${ym}.json`, `${i + 1} / ${totalYm}`);
+                await new Promise(r => setTimeout(r, 5));
+            }
+
+            if (rRev > lRev || !localMeta.dbRevision) {
+                const monthData = await readJsonFromDir(historySubdir, `${ym}.json`, []);
+                if (monthData && monthData.length > 0) {
+                    const localMonthHistory = await getIDBHistoryByMonth(ym);
+                    const mergedMonthHistory = mergeHistory(monthData, localMonthHistory);
+                    await upsertIDBHistoryItems(mergedMonthHistory);
+                }
             }
         }
     }
 
     // 동기화 상태 로컬 영속화 및 UI 최신화
+    if (progressCb) progressCb(88, '데이터 영속화', 'IndexedDB 데이터베이스 및 동기화 상태 저장 중...', '');
     await saveSyncState('teamMeta', normalizedMeta);
     rememberTeamMeta(normalizedMeta);
     localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
 
+    if (progressCb) progressCb(94, '화면 UI 갱신', '작업 이력 뱃지 및 테이블 렌더링 중...', '');
     await updateHistoryBadge();
     if (document.getElementById('history')?.classList.contains('block')) {
         await renderHistory();
     }
     await updateSyncStatusBanner();
+
+    if (progressCb) progressCb(100, '동기화 완료', '모든 팀 데이터가 최신 상태로 반영되었습니다.', '');
 
     if (isManualButton) {
         showToast('최신화 완료', `TEAM DB Revision ${normalizedMeta.dbRevision} (분할 동기화)`);
@@ -1475,7 +1559,7 @@ async function pushPartitionedTeamData(dirHandle, pushScope = {}) {
 /**
  * 🚀 통합 동기화 디스패처 (폴더 분할 엔진 및 레거시 파일 호환 지원)
  */
-async function syncWithBox(isUserGesture = false, isPushSettings = false, isManualButton = false, pushScope = { scope: 'all' }) {
+async function syncWithBox(isUserGesture = false, isPushSettings = false, isManualButton = false, pushScope = { scope: 'all' }, progressCb = null) {
     if (activeSyncPromise) { 
         if (isPushSettings) pendingPush = true; 
         return activeSyncPromise; 
@@ -1517,7 +1601,7 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
                 if (isPushSettings) {
                     return await pushPartitionedTeamData(dirHandle, pushScope);
                 } else {
-                    return await pullPartitionedTeamData(dirHandle, isUserGesture, isManualButton);
+                    return await pullPartitionedTeamData(dirHandle, isUserGesture, isManualButton, progressCb);
                 }
             } else {
                 // 📄 레거시 단일 파일 동기화 폴백 (낙관적 잠금 재시도 루프 적용)
@@ -1671,32 +1755,101 @@ async function disconnectDB() {
 }
 
 /**
+ * 🔒 최초 연결 게이트 화면 상태 전환 ('initial' | 'progress' | 'success' | 'error')
+ */
+function setSyncGateState(state, info = '') {
+    const vInitial = document.getElementById('syncGateViewInitial');
+    const vProgress = document.getElementById('syncGateViewProgress');
+    const vSuccess = document.getElementById('syncGateViewSuccess');
+    const vError = document.getElementById('syncGateViewError');
+    if (!vInitial || !vProgress || !vSuccess || !vError) return;
+
+    vInitial.classList.add('hidden');
+    vProgress.classList.add('hidden');
+    vSuccess.classList.add('hidden');
+    vError.classList.add('hidden');
+
+    if (state === 'initial') {
+        vInitial.classList.remove('hidden');
+    } else if (state === 'progress') {
+        vProgress.classList.remove('hidden');
+    } else if (state === 'success') {
+        vSuccess.classList.remove('hidden');
+    } else if (state === 'error') {
+        vError.classList.remove('hidden');
+        const errElem = document.getElementById('syncGateErrorMsg');
+        if (errElem) errElem.innerText = info || '동기화 중 오류가 발생했습니다.';
+    }
+}
+
+/**
+ * 📊 게이트 모달 프로그레스 바 및 텍스트 실시간 갱신
+ */
+function updateSyncGateProgress(percent, stepText, detailText, counterText = '') {
+    const bar = document.getElementById('syncGateProgressBar');
+    const pctLabel = document.getElementById('syncGatePercentLabel');
+    const stepLabel = document.getElementById('syncGateStepLabel');
+    const detailLabel = document.getElementById('syncGateDetailText');
+    const counterLabel = document.getElementById('syncGateItemCounter');
+
+    const safePercent = Math.min(100, Math.max(0, Math.round(percent)));
+
+    if (bar) bar.style.width = safePercent + '%';
+    if (pctLabel) pctLabel.innerText = safePercent + '%';
+    if (stepLabel && stepText) {
+        stepLabel.innerHTML = `<span class="w-2 h-2 rounded-full bg-primary animate-ping"></span> ${stepText}`;
+    }
+    if (detailLabel && detailText) detailLabel.innerText = detailText;
+    if (counterLabel) counterLabel.innerText = counterText || '';
+}
+
+/** 게이트 동기화 재시도 */
+function gateRetry() {
+    setSyncGateState('initial');
+    gateConnect();
+}
+
+/**
  * 🔗 Box 공용 DB 폴더 연결 (PC) 또는 파일 업로드 (모바일)
  */
 async function linkBoxFile() {
     if ('showDirectoryPicker' in window) {
         try {
             const copyPath = prompt("👇 [최초 1회 설정] 사내 Box의 공용 DB 폴더(SFDC_DB)를 선택해주세요.", typeof BOX_PATH !== 'undefined' ? BOX_PATH : "");
-            if (copyPath === null) return;
+            if (copyPath === null) {
+                setSyncGateState('initial');
+                return;
+            }
+
             const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+
+            // 폴더 선택 완료 즉시 진행 모드로 전환
+            setSyncGateState('progress');
+            updateSyncGateProgress(5, '폴더 연결 확인', 'Box 폴더 핸들을 저장하고 권한을 검증합니다...', '');
+
             await saveFileHandle('boxDirectoryHandle', dirHandle);
             
             if (navigator.storage && navigator.storage.persist) { 
                 try { await navigator.storage.persist(); } catch (e) {} 
             }
 
+            updateSyncGateProgress(10, '레거시 호환 점검', '폴더 구조를 점검하고 있습니다...', '');
             await autoMigrateLegacyDbTxt(dirHandle);
 
             const btn = document.getElementById("syncBtn");
             if (btn) btn.classList.remove("text-red-500", "font-black");
-            document.getElementById("syncIcon").innerText = "sync"; 
-            document.getElementById("syncText").innerText = "강제 최신화";
+            const syncIconElem = document.getElementById("syncIcon");
+            if (syncIconElem) syncIconElem.innerText = "sync"; 
+            const syncTextElem = document.getElementById("syncText");
+            if (syncTextElem) syncTextElem.innerText = "강제 최신화";
 
             await completeInitialConnect();
         } catch (e) { 
             if (e.name !== 'AbortError') {
                 console.error(e);
-                alert("폴더 연결에 실패했습니다.");
+                setSyncGateState('error', '폴더 연결에 실패했습니다: ' + (e.message || '접근 권한이 부족합니다.'));
+            } else {
+                setSyncGateState('initial');
             }
         }
     } else {
@@ -1716,21 +1869,34 @@ async function linkBoxFile() {
 }
 
 /**
- * 최초 연결 완료 후 Pull 실행 및 게이트 닫기
+ * 최초 연결 완료 후 Pull 실행 및 게이트 닫기 (실시간 진행률 피드백)
  */
 async function completeInitialConnect() {
-    showToast("연결 완료", "최신 팀 데이터를 불러오는 중입니다...");
-    const ok = await syncWithBox(true, false, true);
+    setSyncGateState('progress');
+    updateSyncGateProgress(12, '최신 데이터 수신', '팀 공용 Box DB에서 최신 데이터를 불러옵니다...', '');
+    
+    const onProg = (percent, step, detail, counter) => {
+        updateSyncGateProgress(percent, step, detail, counter);
+    };
+
+    const ok = await syncWithBox(true, false, false, { scope: 'all' }, onProg);
     if (!ok) {
-        showToast("연결 실패", "팀 DB 폴더를 불러오지 못했습니다. 연결과 권한을 다시 확인해주세요.");
+        setSyncGateState('error', '팀 DB 폴더를 불러오지 못했습니다. 연결 상태와 권한을 다시 확인해주세요.');
         await updateSyncStatusBanner();
         return;
     }
+
     localStorage.setItem('hasCompletedInitialSync', 'yes');
     sessionStorage.removeItem('syncGateBypassed');
-    hideSyncGate();
+    setSyncGateState('success');
+    updateSyncGateProgress(100, '동기화 완료', '모든 팀 데이터를 성공적으로 불러왔습니다.', '');
     await updateSyncStatusBanner();
-    alert("✅ Box DB 폴더가 연결되고 팀 최신 데이터를 성공적으로 불러왔습니다!");
+
+    // 0.8초 후 게이트 부드럽게 닫기
+    setTimeout(() => {
+        hideSyncGate();
+        showToast('연결 완료', 'Box DB 폴더가 연결되어 최신 팀 데이터가 동기화되었습니다.');
+    }, 800);
 }
 
 /** 최초 연결 게이트 확인 */
@@ -1738,8 +1904,15 @@ function checkSyncGateOnLoad() {
     if (sessionStorage.getItem('syncGateBypassed') === 'yes') return;
     if (!localStorage.getItem('hasCompletedInitialSync')) showSyncGate();
 }
-function showSyncGate() { const o = document.getElementById('syncGateOverlay'); if (o) o.classList.remove('hidden'); }
-function hideSyncGate() { const o = document.getElementById('syncGateOverlay'); if (o) o.classList.add('hidden'); }
+function showSyncGate() { 
+    setSyncGateState('initial');
+    const o = document.getElementById('syncGateOverlay'); 
+    if (o) o.classList.remove('hidden'); 
+}
+function hideSyncGate() { 
+    const o = document.getElementById('syncGateOverlay'); 
+    if (o) o.classList.add('hidden'); 
+}
 async function gateConnect() { await linkBoxFile(); }
 function gateSkip() {
     if (!confirm("⚠️ 연결 없이 계속하면 팀원들의 최신 작업 이력이 보이지 않고, 지금부터 작성하는 내용도 Box에 반영되지 않습니다.\n정말 계속하시겠습니까?")) return;
@@ -1957,6 +2130,8 @@ async function autoLocalBackup() {
 
 
 // ==============================================================================
+
+// [Module: extraction_email.js]
 // 4. [Business: Extraction & Email] 작업 메일 분석/추출 및 이메일 양식 생성
 // ==============================================================================
 
@@ -2400,6 +2575,8 @@ function loadToMailGen(m, c) {
 
 
 // ==============================================================================
+
+// [Module: maintenance.js]
 // 5. [Business: Maintenance] 설비 소모품(Laser, Scale Head, Mirror) 유지보수
 // ==============================================================================
 
@@ -2877,6 +3054,8 @@ function deleteConsumableEntry(name, id) {
 
 
 // ==============================================================================
+
+// [Module: database.js]
 // 6. [Business: Management] 설비 마스터 데이터, 수신처 목록 및 SFDC 검색 연동
 // ==============================================================================
 
@@ -3208,6 +3387,8 @@ function searchSalesforce() {
 
 
 // ==============================================================================
+
+// [Module: ui.js]
 // 7. [UI & View Renderers] 화면 전환, 렌더링, 타임라인, 다크모드 및 유틸리티
 // ==============================================================================
 
@@ -3594,6 +3775,8 @@ async function resetAllData() {
 
 
 // ==============================================================================
+
+// [Module: app.js]
 // 8. [Lifecycle & Initialization] 애플리케이션 시작 및 주기적 백그라운드 태스크
 // ==============================================================================
 
@@ -3679,7 +3862,6 @@ window.addEventListener('load', () => {
         openEquipDetail(sn);
     }
 });
-
 </script>
 </body>
 </html>

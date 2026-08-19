@@ -1,0 +1,3867 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Hitachi SFDC / OEMS Manager (Local Secure)</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#b7000c", 
+                        "primary-hover": "#e60012",
+                        "surface": "var(--bg-surface)",
+                        "background": "var(--bg-body)",
+                        "border": "var(--border-color)",
+                        "text-main": "var(--text-main)",
+                        "text-muted": "var(--text-muted)"
+                    },
+                    fontFamily: {
+                        "headline": ["Inter", "Malgun Gothic", "sans-serif"],
+                        "body": ["Inter", "Malgun Gothic", "sans-serif"],
+                        "label": ["Inter", "Malgun Gothic", "sans-serif"]
+                    },
+                },
+            },
+        }
+    </script>
+    <style type="text/tailwindcss">
+@layer components {
+            .card-base { @apply bg-surface border border-border transition-colors; }
+            .label-base { @apply block text-[10px] font-bold text-text-muted uppercase tracking-widest; }
+            .input-base { @apply w-full bg-surface text-text-main border border-border text-sm focus:border-primary focus:ring-0 transition-colors; }
+            .btn-primary { @apply bg-primary hover:bg-primary-hover text-white font-bold uppercase tracking-widest transition-all inline-flex items-center justify-center gap-1; }
+            /* 💡 수정됨: flex를 inline-flex로 변경하여 버튼이 세로로 꽉 차는 현상 방지 */
+            .btn-text { @apply text-[10px] font-bold text-text-muted hover:text-primary uppercase tracking-widest transition-colors inline-flex items-center gap-1; }
+            .th-base { @apply px-4 py-3 text-[10px] font-bold text-text-muted uppercase; }
+            .td-base { @apply px-4 py-3 text-sm text-text-main border-b border-border; }
+            .nav-item { @apply flex items-center w-full text-sm uppercase tracking-wider transition-colors cursor-pointer; }
+        }
+    </style>
+    <style>
+:root {
+            --bg-surface: #ffffff;
+            --bg-body: #f8f9fa;
+            --border-color: #e5e7eb;
+            --text-main: #1b1c1c;
+            --text-muted: #6b7280;
+        }
+        html.dark {
+            --bg-surface: #1e293b;
+            --bg-body: #0f172a;
+            --border-color: #334155;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+        #topbar { display: none; }
+        #sidebar-overlay { display: none; }
+        body { font-family: 'Inter', 'Malgun Gothic', sans-serif; background-color: var(--bg-body); color: var(--text-main); transition: background-color 0.3s, color 0.3s; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .nav-active { border-left: 3px solid #b7000c; color: #b7000c !important; font-weight: 700; background: rgba(183,0,12,0.06); }
+        .accordion-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
+        .accordion-open .accordion-content { max-height: 800px; transition: max-height 0.5s ease-in; overflow-y: auto;}
+        .accordion-rotate { transition: transform 0.3s ease; }
+        .accordion-open .accordion-rotate { transform: rotate(180deg); }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-body); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+        .timeline-line { position: absolute; left: 15px; top: 24px; bottom: 0; width: 2px; background: var(--border-color); }
+        .timeline-dot { width: 10px; height: 10px; background: #b7000c; border: 2px solid var(--bg-surface); box-shadow: 0 0 0 2px #b7000c; border-radius: 50%; flex-shrink: 0; margin-top: 3px; z-index: 10; }
+        .timeline-item { opacity: 0; transform: translateY(8px); animation: timelineIn 0.3s ease forwards; }
+        @keyframes timelineIn { to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .save-badge { display: inline-flex; align-items: center; gap: 4px; background: #b7000c; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .08em; padding: 2px 8px; text-transform: uppercase; }
+        .sync_progress_pulse { animation: syncPulse 1.5s ease-in-out infinite; }
+        @keyframes syncPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+
+        /* =============================================
+           📱 모바일 전용 최적화 (사이드바 레이아웃)
+           max-width: 767px 이하에서만 적용됨
+           ============================================= */
+
+@media (max-width: 767px){
+
+            /* ── 사이드바 숨김 / 상단 topbar 전환 ── */
+            #sidebar {
+                position: fixed !important;
+                left: -240px !important;
+                top: 0 !important;
+                bottom: 0 !important;
+                z-index: 50 !important;
+                transition: left 0.3s ease !important;
+                width: 240px !important;
+            }
+            #sidebar.open { left: 0 !important; }
+            #topbar { display: flex !important; }
+            #sidebar-overlay { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 49; }
+
+            /* ── 메인 영역 ── */
+            #app-body { margin-left: 0 !important; }
+            footer { margin-left: 0 !important; }
+            main { padding: 16px !important; padding-top: 72px !important; }
+
+            /* ── 섹션 공통 ── */
+            .tab-content { gap: 16px !important; }
+            .tab-content > .border-b { padding-bottom: 12px !important; }
+            .tab-content h2 { font-size: 1.1rem !important; }
+            .tab-content > p { font-size: 12px !important; }
+
+            /* ── 추출(Extraction) 섹션 ── */
+            #extraction .card-base { padding: 16px !important; }
+            #extraction textarea#mailInput { height: 120px !important; }
+            #extraction .flex.justify-end { justify-content: stretch !important; }
+            #extraction .flex.justify-end button { width: 100% !important; padding: 12px !important; }
+            /* 결과 테이블 헤더/툴바 */
+            #extractResult .flex.justify-between { flex-direction: column !important; gap: 8px !important; align-items: flex-start !important; }
+            /* 결과 테이블 - 카드 형태로 전환 */
+            #extractResult table { display: block !important; }
+            #extractResult thead { display: none !important; }
+            #extractResult tbody { display: block !important; }
+            #extractResult tbody tr { display: flex !important; flex-direction: column !important; padding: 12px 16px !important; gap: 6px !important; }
+            #extractResult tbody td { padding: 2px 0 !important; border: none !important; font-size: 13px !important; text-align: left !important; }
+            #extractResult tbody td#resWorker::before { content: "작업자: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+            #extractResult tbody td#resLine::before { content: "라인: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+            #extractResult tbody td#resMachine::before { content: "설비호기: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+            #extractResult tbody td#resDate::before { content: "작업일자: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+            #extractResult tbody td#resContent { text-align: left !important; }
+            #extractResult tbody td#resContent::before { content: "작업내용: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+
+            /* ── 메일 작성(Email Gen) 섹션 ── */
+            #email-gen > .border-b { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
+            #email-gen > .border-b > div.flex { width: 100% !important; }
+            #email-gen > .border-b button { flex: 1 !important; font-size: 9px !important; padding: 8px 4px !important; }
+            /* 12컬럼 그리드 → 1컬럼 */
+            #email-gen .grid.grid-cols-1.xl\\:grid-cols-12 { grid-template-columns: 1fr !important; gap: 16px !important; }
+            #email-gen .xl\\:col-span-4 { padding: 16px !important; }
+            #email-gen .xl\\:col-span-8 { padding: 0 !important; }
+            #email-gen .xl\\:col-span-8 > div:last-child { padding: 16px !important; }
+            /* 2컬럼 입력 그리드 → 1컬럼 */
+            #email-gen .grid.grid-cols-2 { grid-template-columns: 1fr !important; }
+            #email-gen #area-ship-only .grid.grid-cols-2 { grid-template-columns: 1fr !important; }
+
+            /* ── 관리(Database) 섹션 ── */
+            #database .card-base { overflow: hidden; }
+            /* 수신처 추가 폼 */
+            #database .flex.gap-4.items-end { flex-direction: column !important; gap: 8px !important; }
+            #database .flex.gap-4.items-end .flex-1,
+            #database .flex.gap-4.items-end .flex-\\[3\\] { width: 100% !important; }
+            #database .flex.gap-4.items-end button { width: 100% !important; }
+            /* 설비 등록 그리드 */
+            #database .grid.grid-cols-2.md\\:grid-cols-5 { grid-template-columns: 1fr 1fr !important; }
+            /* 마스터 테이블 - 가로 스크롤 허용 */
+            #database .overflow-x-auto.h-\\[600px\\] { height: 400px !important; }
+            /* 검색창 영역 */
+            #database .p-4.bg-background.flex.flex-col { flex-direction: column !important; gap: 8px !important; }
+            #database .relative.w-full.md\\:w-96 { width: 100% !important; }
+            /* 수신처 테이블 - 가로 스크롤 */
+            #database .overflow-x-auto { -webkit-overflow-scrolling: touch; }
+
+            /* ── 작업 히스토리 섹션 ── */
+            #history > .flex.items-end { flex-direction: column !important; align-items: flex-start !important; gap: 10px !important; }
+            #history > .flex.items-end > div:last-child { flex-direction: column !important; align-items: stretch !important; width: 100% !important; gap: 8px !important; }
+            #history #historySearch { width: 100% !important; }
+            #history #historySortOrder { width: 100% !important; }
+            #history > .flex.items-end button { width: 100% !important; justify-content: center; }
+            /* 칩 선택 영역 */
+            #history .card-base .p-4.flex.flex-wrap { padding: 12px !important; gap: 6px !important; }
+
+            /* ── 푸터 ── */
+            footer { padding: 24px 16px !important; margin-top: 32px !important; }
+            footer .max-w-7xl { flex-direction: column !important; text-align: center !important; gap: 12px !important; }
+            footer .flex.flex-col.items-center { align-items: center !important; }
+
+            /* ── 토스트 알림 ── */
+            #toast { right: 12px !important; bottom: 12px !important; left: 12px !important; right: 12px !important; padding: 16px !important; }
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+
+<!-- 🔒 최초 DB 연결 게이트 — 팀 데이터 정합성 보호 및 실시간 진행상황 안내 -->
+<div class="hidden fixed inset-0 z-[200] flex items-center justify-center p-6" id="syncGateOverlay" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(2px);">
+    <div class="card-base bg-surface rounded-xl shadow-2xl max-w-md w-full p-8 text-center transition-all duration-300">
+        
+        <!-- 1. 초기 연결 대기 뷰 -->
+        <div id="syncGateViewInitial" class="space-y-5">
+            <div class="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+                <span class="material-symbols-outlined text-3xl text-primary animate-pulse">cloud_sync</span>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold text-text-main" id="syncGateTitle">Box DB 폴더 연결이 필요합니다</h3>
+                <p class="text-xs text-text-muted mt-2 leading-relaxed" id="syncGateDesc">
+                    이 브라우저에서는 아직 팀 공용 Box DB 폴더(SFDC_DB)와 연결된 적이 없습니다.<br>
+                    먼저 폴더를 연결하고 최신 데이터를 불러와야 다른 팀원의 이력이 누락되지 않습니다.
+                </p>
+            </div>
+            <button id="syncGateConnectBtn" class="btn-primary w-full py-3 text-xs rounded-lg flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all" onclick="gateConnect()">
+                <span class="material-symbols-outlined text-base">folder_open</span> Box DB 폴더 연결하기
+            </button>
+            <p class="text-[10px] text-text-muted cursor-pointer hover:text-primary underline transition-colors" onclick="gateSkip()">연결 없이 계속 진행 (비권장 · 팀 데이터와 어긋날 수 있음)</p>
+        </div>
+
+        <!-- 2. 실시간 동기화 진행 뷰 -->
+        <div id="syncGateViewProgress" class="hidden space-y-5">
+            <div class="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto relative">
+                <span class="material-symbols-outlined text-3xl text-primary animate-spin" id="syncGateSpinIcon">sync</span>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold text-text-main" id="syncGateProgressTitle">Box DB 데이터를 동기화하고 있습니다</h3>
+                <p class="text-xs text-text-muted mt-1 leading-relaxed" id="syncGateProgressDesc">
+                    클라우드에서 최신 팀 데이터를 안전하게 불러오는 중입니다.
+                </p>
+            </div>
+
+            <!-- 퍼센트 게이지 영역 -->
+            <div class="space-y-2 text-left bg-body/50 p-4 rounded-lg border border-border">
+                <div class="flex items-center justify-between text-xs font-semibold">
+                    <span class="text-text-main flex items-center gap-1.5" id="syncGateStepLabel">
+                        <span class="w-2 h-2 rounded-full bg-primary animate-ping"></span>
+                        연결 준비 중...
+                    </span>
+                    <span class="text-primary font-bold text-sm" id="syncGatePercentLabel">0%</span>
+                </div>
+                <div class="w-full h-3 bg-border rounded-full overflow-hidden p-0.5 relative">
+                    <div id="syncGateProgressBar" class="h-full bg-gradient-to-r from-primary to-primary-hover rounded-full transition-all duration-300 ease-out" style="width: 0%;"></div>
+                </div>
+                <div class="flex items-center justify-between text-[11px] text-text-muted pt-1">
+                    <span class="truncate max-w-[280px]" id="syncGateDetailText">Box 폴더 구조를 탐색하는 중...</span>
+                    <span class="shrink-0 text-[10px] opacity-75" id="syncGateItemCounter">0 / 0</span>
+                </div>
+            </div>
+
+            <p class="text-[11px] text-text-muted leading-relaxed">
+                💡 데이터 양과 네트워크 속도에 따라 약 10초 ~ 30초 소요될 수 있습니다.<br>창을 닫지 마시고 잠시만 기다려주세요.
+            </p>
+        </div>
+
+        <!-- 3. 동기화 성공 뷰 -->
+        <div id="syncGateViewSuccess" class="hidden space-y-4">
+            <div class="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto text-emerald-600 dark:text-emerald-400">
+                <span class="material-symbols-outlined text-4xl">check_circle</span>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold text-text-main">동기화 완료!</h3>
+                <p class="text-xs text-text-muted mt-1 leading-relaxed" id="syncGateSuccessDesc">
+                    최신 팀 데이터가 성공적으로 반영되었습니다.
+                </p>
+            </div>
+        </div>
+
+        <!-- 4. 동기화 오류 뷰 -->
+        <div id="syncGateViewError" class="hidden space-y-4">
+            <div class="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto text-red-600 dark:text-red-400">
+                <span class="material-symbols-outlined text-4xl">error_outline</span>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold text-text-main">동기화 실패</h3>
+                <p class="text-xs text-red-500 mt-1 leading-relaxed" id="syncGateErrorMsg">
+                    팀 DB 폴더를 불러오지 못했습니다.
+                </p>
+            </div>
+            <div class="space-y-2 pt-2">
+                <button class="btn-primary w-full py-2.5 text-xs rounded-lg flex items-center justify-center gap-2" onclick="gateRetry()">
+                    <span class="material-symbols-outlined text-base">refresh</span> 다시 시도하기
+                </button>
+                <p class="text-[10px] text-text-muted cursor-pointer hover:text-primary underline" onclick="gateSkip()">연결 없이 계속 진행</p>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- 모바일 오버레이 (사이드바 열렸을 때 배경 dimming) -->
+<div id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+<!-- 모바일 상단 Topbar -->
+<header id="topbar" class="fixed top-0 left-0 right-0 z-40 bg-surface border-b border-border h-14 items-center justify-between px-4 transition-colors">
+    <button onclick="openSidebar()" class="text-text-muted hover:text-primary transition-colors flex items-center">
+        <span class="material-symbols-outlined">menu</span>
+    </button>
+    <div class="flex items-center gap-2">
+        <span class="text-lg font-black tracking-tighter text-primary">HITACHI</span>
+        <span class="text-[10px] font-bold uppercase tracking-widest text-text-muted">SFDC/OEMS</span>
+    </div>
+    <button onclick="toggleDarkMode()" class="text-text-muted hover:text-primary transition-colors flex items-center">
+        <span class="material-symbols-outlined text-xl" id="darkModeIconMobile">dark_mode</span>
+    </button>
+</header>
+
+<!-- 전체 앱 래퍼 -->
+<div id="app-body" class="flex min-h-screen" style="margin-left: 240px;">
+
+    <!-- ── 좌측 사이드바 (LNB) ── -->
+    <aside id="sidebar" class="fixed top-0 left-0 bottom-0 w-[240px] z-40 bg-surface border-r border-border flex flex-col transition-colors overflow-y-auto">
+
+        <!-- 로고 영역 -->
+        <div class="px-6 py-5 border-b border-border shrink-0">
+            <div class="flex items-center gap-2 mb-1">
+                <span class="text-2xl font-black tracking-tighter text-black">HITACHI</span>
+                <span class="text-[9px] font-bold text-primary border border-primary/40 rounded px-1.5 py-0.5 leading-none">v1.1</span>
+            </div>
+            <span class="text-[10px] font-bold uppercase tracking-widest text-text-muted">평가4부 Management System</span>
+        </div>
+
+        <!-- 내비게이션 메뉴 -->
+        <nav class="flex flex-col py-4 flex-1 gap-1 px-3">
+            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('extraction', this)">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">data_exploration</span>
+                Information Extraction
+            </a>
+            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('email-gen', this)">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">mail</span>
+                Email Generation
+            </a>
+            <a class="nav-item nav-active text-text-main text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('database', this)">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">database</span>
+                Management
+            </a>
+            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('history', this)">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">history</span>
+                Work History
+                <span id="historyBadge" class="ml-auto bg-primary text-white text-[9px] font-black px-1.5 py-0.5 hidden rounded-sm">0</span>
+            </a>
+            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="window.open('https://jaking-ku.github.io/Team_schedule/', '_blank')" style="cursor:pointer;">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">calendar_month</span>
+                Schedule
+            </a>
+        </nav>
+
+        <!-- 하단 시스템 제어 버튼 -->
+        <div class="border-t border-border shrink-0 p-3 space-y-1">
+            <button onclick="toggleDarkMode()" class="btn-text w-full px-3 py-2.5 rounded hover:bg-background justify-start">
+                <span class="material-symbols-outlined text-base mr-3" id="darkModeIcon">dark_mode</span>
+                <span class="text-xs uppercase tracking-widest">Dark Mode</span>
+            </button>
+            <button class="btn-text w-full px-3 py-2.5 rounded hover:bg-background hover:!text-blue-500 justify-start" onclick="linkBoxFile()">
+                <span class="material-symbols-outlined text-base mr-3">folder_open</span>
+                <span class="text-xs uppercase tracking-widest">DB 폴더 연결</span>
+            </button>
+            <button class="btn-text w-full px-3 py-2.5 rounded hover:bg-background hover:!text-red-500 justify-start" onclick="disconnectDB()">
+                <span class="material-symbols-outlined text-base mr-3">link_off</span>
+                <span class="text-xs uppercase tracking-widest">연결 끊기</span>
+            </button>
+            <button id="syncBtn" class="btn-text w-full px-3 py-2.5 rounded hover:bg-background hover:!text-green-500 justify-start transition-all duration-300" onclick="manualSync()">
+                <span id="syncIcon" class="material-symbols-outlined text-base mr-3">sync</span>
+                <span id="syncText" class="text-xs uppercase tracking-widest">강제 최신화</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- ── 오른쪽 콘텐츠 영역 ── -->
+    <div class="flex flex-col flex-1 min-w-0">
+
+<main class="flex-1 w-full max-w-7xl mx-auto p-8 relative">
+
+    <!-- ⚠️ [v1.1 추가] 동기화 상태 배너 — 미연결/권한끊김/오래된 동기화 시에만 노출 -->
+    <div class="hidden mb-6 px-4 py-3 rounded-md border flex items-center justify-between gap-3 text-xs" id="syncStatusBanner">
+        <div class="flex items-center gap-2 min-w-0">
+            <span class="material-symbols-outlined text-base shrink-0" id="syncStatusIcon">warning</span>
+            <span id="syncStatusText" class="truncate"></span>
+        </div>
+        <button class="btn-primary px-3 py-1.5 text-[10px] rounded shrink-0" onclick="manualSync()">지금 동기화</button>
+    </div>
+
+
+    <section id="extraction" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+        <div class="border-b border-border pb-4">
+            <h2 class="text-2xl font-bold text-text-main">메일 정보 추출</h2>
+            <p class="text-sm text-text-muted mt-1">작업 메일 텍스트 분석 및 엑셀 데이터화 · 추출 시 원본 내용이 PC 로컬 히스토리에 안전하게 저장됩니다</p>
+        </div>
+        <div class="card-base p-8 rounded-md">
+            <label class="label-base mb-4">작업 메일 텍스트 붙여넣기</label>
+<textarea class="input-base bg-background h-32 p-4 mb-6 font-mono rounded" id="mailInput" placeholder="작성한 메일을 통째로 붙여넣으십시오..."></textarea>
+
+<label class="label-base mb-4">특이사항 / 부품교체 (선택)</label>
+<select class="input-base bg-background h-10 px-3 mb-3 rounded" id="extraNoteCategory" onchange="onExtraCategoryChange()">
+    <option value="">— 항목 선택 (없으면 비워두세요) —</option>
+    <option value="Laser 교체">Laser 교체</option>
+    <option value="Scale Head">Scale Head</option>
+    <option value="기타 소모품">기타 소모품</option>
+</select>
+
+<!-- Laser 교체 입력폼 -->
+<div id="extraLaserFields" class="hidden border border-border rounded p-4 mb-3 space-y-3 bg-background/40">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div><label class="label-base mb-1 text-[10px]">교체 일시</label><input type="datetime-local" class="input-base h-9 px-2 rounded text-xs" id="extraLaserDate"></div>
+        <div><label class="label-base mb-1 text-[10px]">Head S/N</label><input class="input-base h-9 px-2 rounded text-xs" id="extraLaserHead" placeholder="Head S/N"></div>
+        <div><label class="label-base mb-1 text-[10px]">P/S S/N</label><input class="input-base h-9 px-2 rounded text-xs" id="extraLaserPs" placeholder="P/S S/N"></div>
+        <div><label class="label-base mb-1 text-[10px]">Diode S/N</label><input class="input-base h-9 px-2 rounded text-xs" id="extraLaserDiode" placeholder="Diode S/N"></div>
+    </div>
+    <p class="text-[10px] text-text-muted">💡 교체 일시를 비워두면 메일에서 추출된 작업일자가 자동 적용됩니다.</p>
+</div>
+
+<!-- Scale Head 입력폼 (5축, 날짜 입력된 축만 반영) -->
+<div id="extraScaleFields" class="hidden border border-border rounded p-4 mb-3 space-y-2 bg-background/40">
+    <div class="grid grid-cols-3 gap-2 text-[10px] text-text-muted font-bold px-1"><span>축</span><span>교체일</span><span>S/N</span></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">X</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_X"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_X" placeholder="S/N"></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">Y1 (YL)</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_Y1"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_Y1" placeholder="S/N"></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">Y2 (YR)</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_Y2"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_Y2" placeholder="S/N"></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">Z1 (ZL)</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_Z1"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_Z1" placeholder="S/N"></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">Z2 (ZR)</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_Z2"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_Z2" placeholder="S/N"></div>
+    <p class="text-[10px] text-text-muted">💡 교체일이 입력된 축만 반영됩니다. (여러 축 동시 입력 가능)</p>
+</div>
+
+<!-- 기타 소모품 입력폼 -->
+<div id="extraConsumFields" class="hidden border border-border rounded p-4 mb-3 bg-background/40">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div><label class="label-base mb-1 text-[10px]">부품명</label><input class="input-base h-9 px-2 rounded text-xs" id="extraConsumName" placeholder="예: Mirror"></div>
+        <div><label class="label-base mb-1 text-[10px]">교체일</label><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraConsumDate"></div>
+        <div><label class="label-base mb-1 text-[10px]">메모</label><input class="input-base h-9 px-2 rounded text-xs" id="extraConsumNote" placeholder="선택 입력"></div>
+    </div>
+    <p class="text-[10px] text-text-muted mt-2">💡 교체일을 비워두면 메일에서 추출된 작업일자가 자동 적용됩니다.</p>
+</div>
+
+<textarea class="input-base bg-background h-20 p-4 mb-6 font-mono rounded" id="extraNoteInput" placeholder="특이사항이나 부품교체 내역이 있다면 입력하세요..."></textarea>
+<div class="flex justify-end">
+    <button class="btn-primary px-10 py-3 text-sm rounded" onclick="extractData()">
+        <span class="material-symbols-outlined">data_exploration</span> 데이터 추출 실행
+    </button>
+</div>
+        </div>
+
+        <div id="extractResult" class="card-base overflow-hidden rounded-md" style="display:none;">
+            <div class="bg-background px-6 py-3 border-b border-border flex justify-between items-center transition-colors">
+                <div class="flex items-center gap-3">
+                    <span class="label-base !mb-0">분석 결과 확인</span>
+                    <span id="autoSavedBadge" class="save-badge hidden rounded-sm"><span class="material-symbols-outlined text-xs">save</span> 로컬 자동 저장됨</span>
+                </div>
+                <div class="flex gap-4">
+                    <a href="https://hitachigroup.sharepoint.com/:x:/s/ISDI315/IQCHG_kQLwrYQLwjM1Hjie_8AbOJ3qU0JAaF31fNxUyFYI0?e=JeqecE" target="_blank" class="btn-text text-text-main">
+                        <span class="material-symbols-outlined text-sm">open_in_new</span> 관리 시트 열기
+                    </a>
+                    <button class="btn-text text-primary" onclick="copyRow()">
+                        <span class="material-symbols-outlined text-sm">content_copy</span> 양식 데이터 복사
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead>
+                        <tr class="bg-surface border-b border-border">
+                            <th class="th-base px-6">작업자</th><th class="th-base px-6">라인</th><th class="th-base px-6">설비호기명</th><th class="th-base px-6">작업 일자</th><th class="th-base px-6 text-right">작업 내용</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-border">
+                        <tr class="hover:bg-background transition-colors">
+                            <td class="td-base px-6 font-bold text-primary" id="resWorker"></td>
+                            <td class="td-base px-6 font-medium" id="resLine"></td>
+                            <td class="td-base px-6 text-text-muted" id="resMachine"></td>
+                            <td class="td-base px-6 text-text-muted font-mono" id="resDate"></td>
+                            <td class="td-base px-6 text-right" id="resContent"></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section id="email-gen" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+        <div class="border-b border-border pb-4 flex justify-between items-center">
+            <h2 class="text-2xl font-bold text-text-main">메일 작성</h2>
+            <div class="flex bg-surface border border-border rounded overflow-hidden">
+                <button id="btn-tpl-work" class="px-6 py-2 text-[10px] font-bold uppercase tracking-widest bg-primary text-white transition-all" onclick="setTemplate('work')">일반 작업 보고</button>
+                <button id="btn-tpl-ship" class="px-6 py-2 text-[10px] font-bold uppercase tracking-widest bg-surface text-text-muted hover:text-primary transition-all" onclick="setTemplate('ship')">반출 배차 요청</button>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-8">
+            <div class="xl:col-span-4 card-base p-8 space-y-6 rounded-md">
+                <div>
+                    <label class="label-base mb-3">작업자 (발신자명)</label>
+                    <input class="input-base bg-background h-10 px-4 rounded" id="mailMyName" placeholder="예: 구자원" type="text"/>
+                </div>
+
+                <div id="area-work-only" class="space-y-6 block">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="label-base mb-3">설비호기 (검색)</label>
+                            <input class="input-base bg-background h-10 px-4 rounded" id="mailWorkEquipSearch" placeholder="예: MDIXXXX" type="text"/>
+                        </div>
+                        <div>
+                            <label class="label-base mb-3">현업 담당자 (고객)</label>
+                            <input class="input-base bg-background h-10 px-4 rounded" id="mailCustName" placeholder="예: 구자원" type="text"/>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="label-base mb-3">작업일자</label>
+                        <input class="input-base bg-background h-10 px-4 rounded" id="mailDate" type="date"/>
+                    </div>
+                    <div>
+                        <label class="label-base mb-3">작업 개요 (제목용)</label>
+                        <input class="input-base bg-background h-10 px-4 rounded" id="mailJobTitle" placeholder="간략한 작업 내용" type="text"/>
+                    </div>
+                    <div>
+                        <label class="label-base mb-3">세부 작업 내용</label>
+                        <textarea class="input-base bg-background h-24 p-4 rounded" id="mailJobDetail"></textarea>
+                    </div>
+                </div>
+
+                <div id="area-ship-only" class="space-y-6 hidden">
+                    <div class="flex justify-between items-end border-b border-border pb-2">
+                        <label class="label-base text-primary !mb-0">🚚 반출 배차 리스트</label>
+                        <button class="btn-text px-3 py-1 bg-background border border-border rounded" onclick="addShipBlock()">
+                            <span class="material-symbols-outlined text-xs">add</span> 다른 호기 추가
+                        </button>
+                    </div>
+                    <div id="ship-blocks-container" class="space-y-6"></div>
+                </div>
+
+                <div>
+                    <label class="label-base mb-3">특이사항 (Inform)</label>
+                    <textarea class="input-base bg-background h-16 p-4 rounded" id="mailInform" placeholder="인폼사항 입력"></textarea>
+                </div>
+                
+                <button class="btn-primary w-full py-4 text-sm mt-4 rounded" onclick="generateFullMail()">메일 수신처 및 본문 생성</button>
+            </div>
+            
+            <div class="xl:col-span-8 card-base overflow-hidden rounded-md" id="fullMailOutputArea" style="display:none;">
+                <div class="p-4 bg-background border-b border-border flex justify-between items-center">
+                    <span class="label-base !mb-0">Email Preview</span>
+                </div>
+                <div class="p-8 space-y-8">
+                    <div class="space-y-2">
+                        <div class="flex justify-between items-center">
+                            <label class="label-base !mb-0">Recipients [수신처]</label>
+                            <button class="btn-text" onclick="copyToClipboard('resRecipientsOut', '수신처')"><span class="material-symbols-outlined text-xs">content_copy</span> 복사</button>
+                        </div>
+                        <div class="p-4 bg-background border border-border text-sm font-medium break-all rounded" id="resRecipientsOut"></div>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="flex justify-between items-center">
+                            <label class="label-base !mb-0">Subject [제목]</label>
+                            <button class="btn-text" onclick="copyToClipboard('email-subject', '제목')"><span class="material-symbols-outlined text-xs">content_copy</span> 복사</button>
+                        </div>
+                        <div class="p-4 bg-background border border-border font-bold text-primary rounded" id="email-subject"></div>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="flex justify-between items-center">
+                            <label class="label-base !mb-0">Message [본문]</label>
+                            <button class="btn-primary px-3 py-1 text-[10px] rounded" onclick="copyToClipboard('email-body', '본문 전체')"><span class="material-symbols-outlined text-xs">content_copy</span> 본문 복사</button>
+                        </div>
+                        <div class="p-6 bg-background border border-border text-sm leading-relaxed min-h-[180px] whitespace-pre-wrap rounded" id="email-body"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="database" class="tab-content block space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+        <div class="border-b border-border pb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <h2 class="text-2xl font-bold text-text-main">설비 & 수신처 관리</h2>
+            <!-- 🔎 SFDC(Salesforce) 검색창 -->
+            <div class="flex w-full md:w-96">
+                <input type="text" id="sfSearchInput" class="input-base h-10 px-4 rounded-l-md rounded-r-none border-r-0 flex-1" placeholder="SFDC 검색 창" onkeypress="if(event.key==='Enter')searchSalesforce()">
+                <button class="h-10 px-5 bg-[#0070d2] hover:bg-[#005fb2] text-white text-xs font-bold rounded-r-md transition-colors flex items-center gap-1" onclick="searchSalesforce()">
+                    <span class="material-symbols-outlined text-sm">search</span> 검색
+                </button>
+            </div>
+        </div>
+
+        <!-- 💡 accordion-open 클래스 삭제됨 -->
+        <div class="card-base overflow-hidden rounded-md">
+            <button class="w-full px-6 py-4 bg-background border-b border-border flex justify-between items-center hover:opacity-80 transition-opacity text-left" onclick="this.parentElement.classList.toggle('accordion-open')">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">mail</span> 👥 라인별 메일 수신처 관리</span>
+                <span class="material-symbols-outlined accordion-rotate text-text-main">expand_more</span>
+            </button>
+            <div class="accordion-content">
+                <div class="p-6 space-y-6">
+                    <div class="flex gap-4 items-end bg-background p-4 border border-border flex-wrap md:flex-nowrap rounded">
+                        <div class="flex-1">
+                            <label class="label-base mb-2">Line Name</label>
+                            <input id="newRecipLine" class="input-base h-10 px-3 rounded" placeholder="예: POO" type="text"/>
+                        </div>
+                        <div class="flex-[3]">
+                            <label class="label-base mb-2">Recipient (Emails)</label>
+                            <input id="newRecipEmails" class="input-base h-10 px-3 rounded" placeholder="예: 홍길동 <gildong.hong@XXXX.com>; 구자원 <...>" type="text"/>
+                        </div>
+                        <button class="btn-primary h-10 px-6 text-[10px] rounded" onclick="addRecipient()">수신처 추가/수정</button>
+                    </div>
+                    <div class="overflow-x-auto border border-border rounded">
+                        <table class="w-full text-left text-sm">
+                            <thead class="bg-background border-b border-border">
+                                <tr>
+                                    <th class="th-base w-1/5 px-6">라인명</th><th class="th-base px-6">수신처(이메일)</th><th class="th-base text-right w-[20%] px-6">관리</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-border" id="recipientTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card-base overflow-hidden rounded-md">
+            <button class="w-full px-6 py-4 bg-background border-b border-border flex justify-between items-center hover:opacity-80 transition-opacity text-left" onclick="this.parentElement.classList.toggle('accordion-open')">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">add_box</span> ➕ 신규 설비 등록 및 엑셀 일괄 추가</span>
+                <span class="material-symbols-outlined accordion-rotate text-text-main">expand_more</span>
+            </button>
+            <div class="accordion-content">
+                <div class="p-6 space-y-6">
+                    <div class="space-y-4">
+                        <label class="label-base border-b border-border pb-2">개별 설비 등록</label>
+                        <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+                            <input id="newLine" class="input-base h-10 px-3 rounded" placeholder="라인명" type="text"/>
+                            <input id="newModel" class="input-base h-10 px-3 rounded" placeholder="모델명" type="text"/>
+                            <input id="newName" class="input-base h-10 px-3 !border-primary rounded" placeholder="설비호기 (필수)" type="text"/>
+                            <input id="newSN" class="input-base h-10 px-3 rounded" placeholder="S/N" type="text"/>
+                            <input id="newLocation" class="input-base h-10 px-3 rounded" placeholder="위치" type="text"/>
+                        </div>
+                        <button class="btn-primary w-full h-10 text-[10px] rounded" onclick="addNewData()">개별 설비 데이터 추가</button>
+                    </div>
+                    <div class="space-y-4 pt-4 border-t border-border">
+                        <label class="label-base border-b border-border pb-2">엑셀 데이터 일괄 추가 [라인 / 모델 / 호기 / S/N / 위치]</label>
+                        <textarea id="excelInput" class="input-base h-24 p-4 font-mono rounded" placeholder="엑셀 범위를 복사하여 붙여넣으십시오..."></textarea>
+                        <button class="btn-primary w-full h-10 text-[10px] rounded" onclick="importFromExcel()">엑셀 데이터 일괄 처리</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="p-4 bg-background flex flex-col md:flex-row gap-4 justify-between items-center border-b border-border">
+                <div class="relative w-full md:w-96">
+                    <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-muted">search</span>
+                    <input id="searchInput" class="input-base pl-10 pr-4 py-2 rounded" placeholder="호기 번호나 모델명을 검색하십시오..." type="text" onkeyup="filterTable()"/>
+                </div>
+            </div>
+            <div class="overflow-x-auto h-[600px] overflow-y-auto">
+                <table class="w-full text-left relative" id="master-table">
+                    <thead class="sticky top-0 z-10 bg-background border-b border-border">
+                        <tr>
+                            <th class="th-base px-6">라인명</th><th class="th-base px-6">모델명</th><th class="th-base px-6">설비호기</th><th class="th-base px-6">S/N</th><th class="th-base px-6">위치</th><th class="th-base px-6 text-right">관리</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-border" id="dataTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+<section id="equipDetail" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+        <div class="border-b border-border pb-4">
+            <button class="btn-text mb-3 flex items-center gap-1" onclick="closeEquipDetail()">
+                <span class="material-symbols-outlined text-sm">arrow_back</span> 설비 목록으로
+            </button>
+            <h2 class="text-2xl font-bold text-text-main" id="detailTitle">-</h2>
+            <p class="text-sm text-text-muted mt-1" id="detailSubtitle">-</p>
+        </div>
+
+        <div class="card-base p-6 rounded-md grid grid-cols-2 md:grid-cols-4 gap-6" id="detailInfoGrid"></div>
+
+        <!-- 1. Laser 사용시간 (위로 올림) -->
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="px-6 py-4 bg-background border-b border-border">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">bolt</span> Laser 사용시간</span>
+            </div>
+            <div id="detailLaserWrap" class="p-6"></div>
+        </div>
+
+        <!-- 2. Scale Head 교체 상태 (위로 올림) -->
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="px-6 py-4 bg-background border-b border-border">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">straighten</span> Scale Head 교체 상태</span>
+            </div>
+            <div id="detailScaleHeadWrap" class="p-6"></div>
+        </div>
+
+        <!-- 3. 소모품 교환 이력 (위로 올림) -->
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="px-6 py-4 bg-background border-b border-border">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">build</span> 소모품 교환 이력</span>
+            </div>
+            <div id="detailConsumablesWrap" class="p-6"></div>
+        </div>
+
+        <!-- 4. 작업 이력 (맨 아래로 내림) -->
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="px-6 py-4 bg-background border-b border-border">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">history</span> 작업 이력</span>
+            </div>
+            <div id="detailHistoryWrap" class="p-6"></div>
+        </div>
+    </section>
+
+
+    <section id="history" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+        <div class="flex items-end justify-between border-b border-border pb-4 flex-wrap gap-4">
+            <div>
+                <h2 class="text-2xl font-bold text-text-main">작업 히스토리 타임라인 (Local)</h2>
+                <p class="text-sm text-text-muted mt-1">작업 내용을 클릭하면 복사된 원본 메일 내용을 확인할 수 있습니다.</p>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="relative">
+                    <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-base">search</span>
+                    <input id="historySearch" class="input-base pl-9 pr-4 py-2 w-64 h-9 rounded" placeholder="설비호기 / 작업내용 검색..." type="text" onkeyup="renderHistory()"/>
+                </div>
+                <select id="historySortOrder" class="input-base w-32 h-9 px-3 rounded" onchange="renderHistory()">
+                    <option value="desc">최신순</option><option value="asc">오래된순</option>
+                </select>
+                <button class="btn-text h-9 px-4 border border-border hover:border-red-400 hover:text-red-600 rounded" onclick="clearAllHistory()">
+                    <span class="material-symbols-outlined text-sm">delete_sweep</span> 기록 일괄 삭제
+                </button>
+            </div>
+        </div>
+
+        <div class="card-base rounded-md">
+            <div class="px-6 py-3 bg-background border-b border-border rounded-t-md">
+                <span class="label-base !mb-0">설비 선택</span>
+            </div>
+            <div class="p-4 flex flex-wrap gap-2" id="historyEquipChips"></div>
+        </div>
+
+        <div id="historyTimelineWrap" class="space-y-0"></div>
+
+        <div id="historyEmpty" class="hidden card-base p-16 text-center rounded-md">
+            <span class="material-symbols-outlined text-5xl text-text-muted block mb-4">history</span>
+            <p class="label-base">작업 기록 없음</p>
+        </div>
+    </section>
+</main>
+
+    </div><!-- end content area -->
+</div><!-- end app-body -->
+
+<footer class="bg-[#1b1c1c] text-white py-12 px-8 mt-20 transition-none" style="margin-left: 240px;">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
+        <div class="flex items-center gap-6">
+            <span class="text-2xl font-black tracking-tighter text-white">HITACHI</span>
+            <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest border-l border-gray-800 pl-6">평가4부 Management System</span>
+        </div>
+        <div class="flex flex-col items-center md:items-end gap-2">
+            <div class="text-[10px] text-gray-400 font-medium">문의사항: <a href="mailto:jawon.ku.lf@hitachi-hightech.com" class="text-gray-400 hover:text-white underline decoration-gray-600 hover:decoration-white underline-offset-4 transition-colors">jawon.ku.lf@hitachi-hightech.com</a></div>
+            <div class="text-[10px] text-gray-500 font-medium text-center md:text-right leading-relaxed">© 2026 Hitachi High-Tech Korea Metrology Systems Service 4Dept.<br class="block md:hidden"> built by <span class="text-gray-400 font-bold">[Ku Jawon]</span>.</div>
+        </div>
+    </div>
+</footer>
+
+<div class="fixed bottom-10 right-10 bg-surface border border-border p-6 shadow-2xl flex items-center gap-4 z-[60] transform translate-y-32 opacity-0 transition-all duration-300 rounded-lg" id="toast">
+    <div class="h-10 w-10 bg-primary flex items-center justify-center text-white rounded"><span class="material-symbols-outlined">check</span></div>
+    <div>
+        <p class="label-base text-text-main !mb-0" id="toast-title">Complete</p>
+        <p class="text-xs text-text-muted" id="toast-msg">Success.</p>
+    </div>
+</div>
+<input type="file" id="mobile-db-upload" accept=".txt" style="display: none;" onchange="handleMobileDB(event)">
+<script>
+// [Module: state.js]
+// 1. [Constants & Global State] 상수 및 전역 런타임 상태 관리
+// ==============================================================================
+
+/** 사내 Box 기본 동기화 폴더 경로 안내 텍스트 */
+const BOX_PATH = "Box\\@Int_Metrology Systems Service Div (2026)\\1. 統括1部 (2026)\\4. 評価4部 (2026)\\0. 評価4部共通\\002_광학 설비\\02-05_가동리스트(IS_DI_LS)\\SFDC OEMS Manage Program\\";
+
+/** IndexedDB 설정 상수 */
+const DB_N = 'HitachiSfdcDB';
+const ST_N = 'fileHandles';
+const HIST_STORE = 'workHistory';
+const SYNC_STORE = 'syncState';
+
+/** 팀 DB 스키마 버전 및 동기화 주기 상수 */
+const TEAM_SCHEMA_VERSION = 3;
+const SYNC_STALE_MS = 30 * 60 * 1000;       // 30분 이상 미동기화 시 경고
+const AUTO_SYNC_INTERVAL = 60 * 60 * 1000;  // 1시간 간격 자동 백그라운드 Sync
+
+/** Scale Head 5개 축 정의 */
+const SCALE_AXES = [
+    { key: 'X', label: 'X' },
+    { key: 'Y1', label: 'Y1 (YL)' },
+    { key: 'Y2', label: 'Y2 (YR)' },
+    { key: 'Z1', label: 'Z1 (ZL)' },
+    { key: 'Z2', label: 'Z2 (ZR)' }
+];
+
+/** 전역 런타임 상태 변수 */
+let currentMailTemplate = 'work';           // 현재 활성화된 메일 템플릿 ('work' | 'ship')
+let shipBlockCount = 0;                     // 반출 배차 블록 인덱스 카운터
+let isSyncing = false;                      // 현재 동기화 진행 중 여부 플래그
+let pendingPush = false;                    // 동기화 중 추가 변경 발생 시 후속 Push 대기 플래그
+let activeSyncPromise = null;               // 동시 실행 방지를 위한 활성 Sync 프로미스
+let _autoSyncDebounceTimer = null;          // 자동 저장 디바운스 타이머
+let _pendingPushScope = { scope: 'all' };   // 디바운스 Push 대상 스코프
+let selectedChip = null;                    // 작업 히스토리에서 현재 선택된 설비 호기명
+
+
+// ==============================================================================
+
+// [Module: storage_box.js]
+// 2. [Storage Layer] IndexedDB v3 및 LocalStorage 데이터 접근 계층
+// ==============================================================================
+
+/**
+ * 날짜 문자열에서 'YYYY-MM' 연월 키를 안전하게 추출합니다.
+ * @param {string|number} dateStr 날짜 문자열 (예: '2026-02-17', '2026.02.17', '20260217')
+ * @param {string|number} [fallbackTimestamp] 누락 시 대체 타임스탬프
+ * @returns {string} 'YYYY-MM' 형식의 연월 키
+ */
+function getYearMonthFromDate(dateStr, fallbackTimestamp) {
+    if (dateStr) {
+        const clean = String(dateStr).trim().replace(/[^0-9]/g, '');
+        if (clean.length >= 6) {
+            return `${clean.substring(0, 4)}-${clean.substring(4, 6)}`;
+        }
+    }
+    const d = fallbackTimestamp ? new Date(fallbackTimestamp) : new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * IndexedDB 연결 및 스키마 v3 업그레이드
+ * @returns {Promise<IDBDatabase>}
+ */
+function initDB() { 
+    return new Promise((resolve, reject) => { 
+        const req = indexedDB.open(DB_N, 3); 
+        req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(ST_N)) {
+                db.createObjectStore(ST_N);
+            }
+            
+            let histStore;
+            if (!db.objectStoreNames.contains(HIST_STORE)) {
+                histStore = db.createObjectStore(HIST_STORE, { keyPath: 'id' });
+            } else {
+                histStore = req.transaction.objectStore(HIST_STORE);
+            }
+
+            if (histStore) {
+                if (!histStore.indexNames.contains('yearMonth')) histStore.createIndex('yearMonth', 'yearMonth', { unique: false });
+                if (!histStore.indexNames.contains('date')) histStore.createIndex('date', 'date', { unique: false });
+                if (!histStore.indexNames.contains('machine')) histStore.createIndex('machine', 'machine', { unique: false });
+                if (!histStore.indexNames.contains('sn')) histStore.createIndex('sn', 'sn', { unique: false });
+                if (!histStore.indexNames.contains('updatedAt')) histStore.createIndex('updatedAt', 'updatedAt', { unique: false });
+            }
+
+            if (!db.objectStoreNames.contains(SYNC_STORE)) {
+                db.createObjectStore(SYNC_STORE, { keyPath: 'key' });
+            }
+        };
+        req.onsuccess = () => resolve(req.result); 
+        req.onerror = () => reject(req.error); 
+    }); 
+}
+
+/**
+ * IndexedDB에 파일 또는 디렉터리 핸들을 저장합니다.
+ */
+async function saveFileHandle(key, handle) { 
+    const db = await initDB(); 
+    return new Promise((resolve, reject) => { 
+        const tx = db.transaction(ST_N, 'readwrite'); 
+        tx.objectStore(ST_N).put(handle, key); 
+        tx.oncomplete = resolve; 
+        tx.onerror = () => reject(tx.error); 
+    }); 
+}
+
+/**
+ * IndexedDB에서 저장된 파일 또는 디렉터리 핸들을 조회합니다.
+ */
+async function getFileHandle(key) { 
+    const db = await initDB(); 
+    return new Promise((resolve, reject) => { 
+        const tx = db.transaction(ST_N, 'readonly'); 
+        const req = tx.objectStore(ST_N).get(key); 
+        req.onsuccess = () => resolve(req.result); 
+        req.onerror = () => reject(tx.error); 
+    }); 
+}
+
+/**
+ * IndexedDB에 동기화 상태 메타데이터를 저장합니다.
+ */
+async function saveSyncState(key, value) {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(SYNC_STORE, 'readwrite');
+        tx.objectStore(SYNC_STORE).put({ key, value, updatedAt: Date.now() });
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+/**
+ * IndexedDB에서 동기화 상태 메타데이터를 조회합니다.
+ */
+async function getSyncState(key) {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(SYNC_STORE, 'readonly');
+        const req = tx.objectStore(SYNC_STORE).get(key);
+        req.onsuccess = () => resolve(req.result ? req.result.value : null);
+        req.onerror = () => reject(tx.error);
+    });
+}
+
+/**
+ * IndexedDB에서 전체 작업 히스토리를 가져옵니다. (연월 키 자동 보정 포함)
+ */
+async function getIDBHistory() {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(HIST_STORE, 'readonly');
+        const req = tx.objectStore(HIST_STORE).getAll();
+        req.onsuccess = () => {
+            const list = req.result || [];
+            list.forEach(item => {
+                if (!item.yearMonth) {
+                    item.yearMonth = getYearMonthFromDate(item.date, item.savedAt);
+                }
+            });
+            resolve(list);
+        };
+        req.onerror = () => reject(tx.error);
+    });
+}
+
+/**
+ * 특정 연월(yearMonth)의 작업 히스토리만 선별 조회합니다.
+ */
+async function getIDBHistoryByMonth(yearMonth) {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(HIST_STORE, 'readonly');
+        const store = tx.objectStore(HIST_STORE);
+        if (store.indexNames.contains('yearMonth')) {
+            const index = store.index('yearMonth');
+            const req = index.getAll(yearMonth);
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(tx.error);
+        } else {
+            const req = store.getAll();
+            req.onsuccess = () => {
+                const filtered = (req.result || []).filter(e => getYearMonthFromDate(e.date, e.savedAt) === yearMonth);
+                resolve(filtered);
+            };
+            req.onerror = () => reject(tx.error);
+        }
+    });
+}
+
+/**
+ * IndexedDB의 작업 히스토리를 통째로 덮어씁니다.
+ */
+async function putIDBHistory(dataArray) {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(HIST_STORE, 'readwrite');
+        const store = tx.objectStore(HIST_STORE);
+        store.clear();
+        dataArray.forEach(item => {
+            if (!item.yearMonth) {
+                item.yearMonth = getYearMonthFromDate(item.date, item.savedAt);
+            }
+            store.put(item);
+        });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+/**
+ * 작업 히스토리 목록을 스마트 병합(Upsert)합니다.
+ */
+async function upsertIDBHistoryItems(items) {
+    if (!items || items.length === 0) return;
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(HIST_STORE, 'readwrite');
+        const store = tx.objectStore(HIST_STORE);
+        items.forEach(item => {
+            if (!item.yearMonth) {
+                item.yearMonth = getYearMonthFromDate(item.date, item.savedAt);
+            }
+            store.put(item);
+        });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+/**
+ * 최초 접속 시 기존 localStorage의 히스토리 데이터를 IndexedDB로 1회 안전 마이그레이션합니다.
+ */
+async function migrateToIndexedDB() {
+    const local = JSON.parse(localStorage.getItem("workHistory") || "[]");
+    if (local.length > 0) {
+        const currentIDB = await getIDBHistory();
+        if (currentIDB.length === 0) {
+            await putIDBHistory(local);
+            console.log("✅ [스토리지] 구버전 localStorage 데이터가 IndexedDB로 성공적으로 이전되었습니다.");
+        }
+        localStorage.removeItem("workHistory");
+    }
+}
+
+
+// ==============================================================================
+// 3. [Sync Engine] Box 공용 폴더 분할 차등 동기화(Partitioned Sync) 엔진
+// ==============================================================================
+
+/**
+ * File System Access API: 디렉터리 내 JSON 파일을 읽어옵니다.
+ */
+async function readJsonFromDir(dirHandle, filename, defaultVal = null) {
+    try {
+        const fileHandle = await dirHandle.getFileHandle(filename);
+        const file = await fileHandle.getFile();
+        const text = await file.text();
+        return text ? JSON.parse(text) : defaultVal;
+    } catch (e) {
+        return defaultVal;
+    }
+}
+
+/**
+ * File System Access API: 디렉터리 내 JSON 파일을 저장합니다.
+ */
+async function writeJsonToDir(dirHandle, filename, data) {
+    const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(data, null, 2));
+    await writable.close();
+}
+
+/**
+ * File System Access API: 서브 디렉터리를 조회하거나 생성합니다.
+ */
+async function getOrCreateSubdir(dirHandle, dirname) {
+    return await dirHandle.getDirectoryHandle(dirname, { create: true });
+}
+
+/**
+ * 파일 또는 폴더 핸들의 접근 권한을 확인하고 필요 시 요청합니다.
+ */
+async function verifyPermission(handle, rw, isUserGesture = false) { 
+    if (!handle) return false;
+    const options = { mode: rw ? 'readwrite' : 'read' }; 
+    try {
+        if ((await handle.queryPermission(options)) === 'granted') return true;
+        if (isUserGesture) { 
+            return (await handle.requestPermission(options)) === 'granted'; 
+        }
+    } catch (e) { 
+        return false; 
+    }
+    return false;
+}
+
+/**
+ * 팀 메타데이터 객체의 정규화
+ */
+function normalizeTeamMeta(data) {
+    if (!data) data = {};
+    return {
+        schemaVersion: Math.max(Number(data.schemaVersion) || 1, TEAM_SCHEMA_VERSION),
+        dbRevision: Number(data.dbRevision) || 0,
+        lastUpdatedAt: Number(data.lastUpdatedAt) || 0,
+        lastUpdatedBy: data.lastUpdatedBy || "알 수 없음",
+        partitions: data.partitions || {
+            master_config: { revision: 0, updatedAt: 0 },
+            notes: { revision: 0, updatedAt: 0 },
+            maintenance: { revision: 0, updatedAt: 0 },
+            history: {}
+        }
+    };
+}
+
+/**
+ * 팀 메타데이터를 로컬스토리지 및 상단 라벨에 반영합니다.
+ */
+function rememberTeamMeta(data) {
+    const meta = normalizeTeamMeta(data);
+    localStorage.setItem('teamDbRevision', String(meta.dbRevision));
+    localStorage.setItem('teamDbLastUpdatedAt', String(meta.lastUpdatedAt));
+    localStorage.setItem('teamDbLastUpdatedBy', meta.lastUpdatedBy);
+    
+    const label = document.getElementById('autoSyncLabel');
+    if (label) {
+        const d = meta.lastUpdatedAt ? new Date(meta.lastUpdatedAt) : new Date();
+        const hh = d.getHours().toString().padStart(2, '0');
+        const mm = d.getMinutes().toString().padStart(2, '0');
+        label.textContent = `TEAM DB 최신 확인: ${hh}:${mm} · Rev. ${meta.dbRevision}`;
+    }
+}
+
+/**
+ * 현재 작업자의 이름을 반환합니다.
+ */
+function getTeamEditorName() {
+    return (document.getElementById('mailMyName')?.value || localStorage.getItem('storedMyName') || '알 수 없음').trim() || '알 수 없음';
+}
+
+/**
+ * 작업 이력 배열 병합 (중복 제거 및 최신 수정 우선)
+ */
+function mergeHistory(boxHistory, localHistory) {
+    const map = new Map();
+    const getLegacyId = (item) => "LEGACY_" + item.date + "_" + item.machine + "_" + (item.content || "").substring(0, 10);
+    
+    [...(boxHistory || []), ...(localHistory || [])].forEach(item => {
+        const copy = { ...item }; 
+        if (!copy.id) copy.id = getLegacyId(copy);
+        if (!copy.yearMonth) copy.yearMonth = getYearMonthFromDate(copy.date, copy.savedAt);
+        
+        const old = map.get(copy.id);
+        if (!old || (copy.updatedAt || 0) >= (old.updatedAt || 0)) {
+            map.set(copy.id, copy);
+        }
+    });
+
+    const seen = new Set();
+    return Array.from(map.values())
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        .filter(item => {
+            const cleanMachine = (item.machine || '').trim().toUpperCase();
+            const cleanDate = (item.date || '').replace(/[^0-9]/g, '');
+            const cleanContent = (item.content || '').trim().replace(/\s/g, '');
+            const key = `${cleanMachine}|${cleanDate}|${cleanContent}`;
+            
+            if (seen.has(key)) return false; 
+            seen.add(key); 
+            return true;
+        });
+}
+
+/**
+ * 설비 마스터 목록 병합
+ */
+function mergeEquipment(boxEquipment, localEquipment) {
+    const map = new Map();
+    const keyOf = (e) => (e.sn || '').trim() || `${(e.line || '').trim()}|${(e.name || '').trim()}`;
+    
+    (boxEquipment || []).forEach(e => map.set(keyOf(e), { ...e }));
+    (localEquipment || []).forEach(e => { 
+        const copy = { ...e }; 
+        delete copy.isEditing; 
+        map.set(keyOf(copy), copy); 
+    });
+    
+    return Array.from(map.values());
+}
+
+/**
+ * 설비별 메모(Notes) 병합
+ */
+function mergeNotes(boxNotes, localNotes) {
+    const result = { ...(boxNotes || {}) };
+    Object.entries(localNotes || {}).forEach(([key, value]) => {
+        if (!result[key] || result[key] === value) {
+            result[key] = value;
+        } else if (value && !result[key].includes(value)) {
+            result[key] += `\n\n${value}`;
+        }
+    });
+    return result;
+}
+
+/**
+ * 유지보수 데이터 객체 병합
+ */
+function mergeMaintenance(boxMaint, localMaint) {
+    const result = {};
+    Object.entries(boxMaint || {}).forEach(([key, value]) => {
+        result[key] = normalizeMaintShape(value);
+    });
+    Object.entries(localMaint || {}).forEach(([key, value]) => {
+        result[key] = result[key] ? mergeMaintDataObjects(result[key], value) : normalizeMaintShape(value);
+    });
+    return result;
+}
+
+/**
+ * 레거시 단일 DB.txt를 감지하여 폴더 분할 구조로 1회 자동 마이그레이션합니다.
+ */
+async function autoMigrateLegacyDbTxt(dirHandle) {
+    try {
+        const existingMeta = await readJsonFromDir(dirHandle, 'meta.json', null);
+        if (existingMeta) return; // 이미 분할 구조가 완성되어 있음
+
+        let legacyData = null;
+        for (const fname of ['DB.txt', 'SFDC_DB.txt', 'Hitachi_DB.txt']) {
+            legacyData = await readJsonFromDir(dirHandle, fname, null);
+            if (legacyData) break;
+        }
+
+        // 폴더가 비어있고 로컬에 기존 데이터가 있는 경우 로컬 데이터로 초기 분할 생성
+        if (!legacyData) {
+            const localHist = await getIDBHistory();
+            const localEq = JSON.parse(localStorage.getItem('equipmentData') || '[]');
+            const localRecip = JSON.parse(localStorage.getItem('recipientData') || '{}');
+            const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
+            const localMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
+            
+            legacyData = {
+                workHistory: localHist,
+                equipment: localEq,
+                recipient: localRecip,
+                machineNotes: localNotes,
+                equipMaintenance: localMaint,
+                schemaVersion: 2,
+                dbRevision: 1,
+                lastUpdatedAt: Date.now(),
+                lastUpdatedBy: getTeamEditorName()
+            };
+        }
+
+        console.log("🚀 [분할 마이그레이션] 레거시 데이터를 폴더 분할 구조로 자동 변환합니다...");
+
+        // 1) 마스터 설정 및 메모/유지보수 분할 저장
+        await writeJsonToDir(dirHandle, 'master_config.json', {
+            equipment: legacyData.equipment || [],
+            recipient: legacyData.recipient || {}
+        });
+        await writeJsonToDir(dirHandle, 'notes.json', {
+            machineNotes: legacyData.machineNotes || {}
+        });
+        await writeJsonToDir(dirHandle, 'maintenance.json', {
+            equipMaintenance: legacyData.equipMaintenance || {}
+        });
+
+        // 2) 작업 이력 월별 분할 저장
+        const historySubdir = await getOrCreateSubdir(dirHandle, 'history');
+        const historyByMonth = {};
+        (legacyData.workHistory || []).forEach(item => {
+            const ym = getYearMonthFromDate(item.date, item.savedAt);
+            if (!historyByMonth[ym]) historyByMonth[ym] = [];
+            historyByMonth[ym].push(item);
+        });
+
+        const historyPartitions = {};
+        for (const ym of Object.keys(historyByMonth)) {
+            await writeJsonToDir(historySubdir, `${ym}.json`, historyByMonth[ym]);
+            historyPartitions[ym] = {
+                revision: 1,
+                updatedAt: Date.now(),
+                updatedBy: legacyData.lastUpdatedBy || "초기생성",
+                count: historyByMonth[ym].length
+            };
+        }
+
+        // 3) 총괄 meta.json 생성
+        const meta = {
+            schemaVersion: 3,
+            dbRevision: Number(legacyData.dbRevision) || 1,
+            lastUpdatedAt: Number(legacyData.lastUpdatedAt) || Date.now(),
+            lastUpdatedBy: legacyData.lastUpdatedBy || getTeamEditorName(),
+            partitions: {
+                master_config: { revision: 1, updatedAt: Date.now(), updatedBy: legacyData.lastUpdatedBy || "초기생성" },
+                notes: { revision: 1, updatedAt: Date.now(), updatedBy: legacyData.lastUpdatedBy || "초기생성" },
+                maintenance: { revision: 1, updatedAt: Date.now(), updatedBy: legacyData.lastUpdatedBy || "초기생성" },
+                history: historyPartitions
+            }
+        };
+
+        await writeJsonToDir(dirHandle, 'meta.json', meta);
+        await saveSyncState('teamMeta', meta);
+        console.log("✅ [분할 마이그레이션 완료] 폴더 분할 구조 생성이 완료되었습니다.");
+    } catch (e) {
+        console.error("자동 마이그레이션 중 오류:", e);
+    }
+}
+
+/**
+ * 📥 차등 분할 PULL: 변경된 파티션 파일만 선택적으로 다운로드 및 병합 (실시간 진행률 콜백 지원)
+ */
+async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManualButton = false, progressCb = null) {
+    if (progressCb) progressCb(5, '메타데이터 조회', 'Box 폴더의 meta.json 파일을 읽고 있습니다.', '');
+    let meta = await readJsonFromDir(dirHandle, 'meta.json', null);
+    if (!meta) {
+        if (progressCb) progressCb(8, '레거시 데이터 변환', '이전 버전 데이터를 신규 분할 구조로 변환 중...', '');
+        await autoMigrateLegacyDbTxt(dirHandle);
+        meta = await readJsonFromDir(dirHandle, 'meta.json', null);
+    }
+    if (!meta) return false;
+
+    if (progressCb) progressCb(12, '메타데이터 분석', '팀 DB 파티션 및 리비전을 검사하고 있습니다.', '');
+    const normalizedMeta = normalizeTeamMeta(meta);
+    const localMeta = (await getSyncState('teamMeta')) || {};
+    const localParts = localMeta.partitions || {};
+    const remoteParts = normalizedMeta.partitions;
+
+    // 1) 마스터 설정 (설비, 수신처) 파티션 점검
+    const remoteMasterRev = remoteParts.master_config?.revision || 0;
+    const localMasterRev = localParts.master_config?.revision || 0;
+    if (remoteMasterRev > localMasterRev || !localMeta.dbRevision) {
+        if (progressCb) progressCb(18, '마스터 설정 동기화', '설비 목록 및 메일 수신처 데이터를 동기화 중입니다.', 'master_config.json');
+        const masterData = await readJsonFromDir(dirHandle, 'master_config.json', null);
+        if (masterData) {
+            const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]');
+            const isEditingEquipment = localEquipment.some(item => item.isEditing);
+            const mergedEq = mergeEquipment(masterData.equipment || [], localEquipment);
+            if (!isEditingEquipment) {
+                localStorage.setItem('equipmentData', JSON.stringify(mergedEq));
+                renderTable();
+            }
+            const localRecip = JSON.parse(localStorage.getItem('recipientData') || '{}');
+            const mergedRecip = { ...(masterData.recipient || {}), ...localRecip };
+            localStorage.setItem('recipientData', JSON.stringify(mergedRecip));
+            renderRecipientTable();
+        }
+    }
+
+    // 2) 메모 파티션 점검
+    const remoteNotesRev = remoteParts.notes?.revision || 0;
+    const localNotesRev = localParts.notes?.revision || 0;
+    if (remoteNotesRev > localNotesRev || !localMeta.dbRevision) {
+        if (progressCb) progressCb(24, '설비 메모 동기화', '설비별 특이사항 및 메모를 동기화 중입니다.', 'notes.json');
+        const notesData = await readJsonFromDir(dirHandle, 'notes.json', null);
+        if (notesData && notesData.machineNotes) {
+            const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
+            const mergedNotes = mergeNotes(notesData.machineNotes, localNotes);
+            localStorage.setItem('machineNotes', JSON.stringify(mergedNotes));
+        }
+    }
+
+    // 3) 유지보수 / 소모품 파티션 점검
+    const remoteMaintRev = remoteParts.maintenance?.revision || 0;
+    const localMaintRev = localParts.maintenance?.revision || 0;
+    if (remoteMaintRev > localMaintRev || !localMeta.dbRevision) {
+        if (progressCb) progressCb(30, '유지보수 데이터 동기화', '설비별 소모품 및 유지보수 이력을 동기화 중입니다.', 'maintenance.json');
+        const maintData = await readJsonFromDir(dirHandle, 'maintenance.json', null);
+        if (maintData && maintData.equipMaintenance) {
+            applyIncomingMaintenance(maintData.equipMaintenance);
+        }
+    }
+
+    // 4) 작업 이력 월별 파티션 점검 (변경된 월 파일만 선택적 로드)
+    const remoteHistoryParts = remoteParts.history || {};
+    const localHistoryParts = localParts.history || {};
+    const historySubdir = await getOrCreateSubdir(dirHandle, 'history');
+    const ymKeys = Object.keys(remoteHistoryParts);
+    const totalYm = ymKeys.length;
+
+    if (totalYm === 0) {
+        if (progressCb) progressCb(80, '작업 이력 점검', '등록된 작업 이력 파티션이 없습니다.', '');
+    } else {
+        for (let i = 0; i < totalYm; i++) {
+            const ym = ymKeys[i];
+            const rRev = remoteHistoryParts[ym]?.revision || 0;
+            const lRev = localHistoryParts[ym]?.revision || 0;
+            const pct = 30 + Math.round(((i + 1) / totalYm) * 55);
+            
+            if (progressCb) {
+                progressCb(pct, '작업 이력 동기화', `월별 데이터 로드 중: ${ym}.json`, `${i + 1} / ${totalYm}`);
+                await new Promise(r => setTimeout(r, 5));
+            }
+
+            if (rRev > lRev || !localMeta.dbRevision) {
+                const monthData = await readJsonFromDir(historySubdir, `${ym}.json`, []);
+                if (monthData && monthData.length > 0) {
+                    const localMonthHistory = await getIDBHistoryByMonth(ym);
+                    const mergedMonthHistory = mergeHistory(monthData, localMonthHistory);
+                    await upsertIDBHistoryItems(mergedMonthHistory);
+                }
+            }
+        }
+    }
+
+    // 동기화 상태 로컬 영속화 및 UI 최신화
+    if (progressCb) progressCb(88, '데이터 영속화', 'IndexedDB 데이터베이스 및 동기화 상태 저장 중...', '');
+    await saveSyncState('teamMeta', normalizedMeta);
+    rememberTeamMeta(normalizedMeta);
+    localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
+
+    if (progressCb) progressCb(94, '화면 UI 갱신', '작업 이력 뱃지 및 테이블 렌더링 중...', '');
+    await updateHistoryBadge();
+    if (document.getElementById('history')?.classList.contains('block')) {
+        await renderHistory();
+    }
+    await updateSyncStatusBanner();
+
+    if (progressCb) progressCb(100, '동기화 완료', '모든 팀 데이터가 최신 상태로 반영되었습니다.', '');
+
+    if (isManualButton) {
+        showToast('최신화 완료', `TEAM DB Revision ${normalizedMeta.dbRevision} (분할 동기화)`);
+    } else if (normalizedMeta.dbRevision > Number(localStorage.getItem('teamDbRevision') || 0)) {
+        showToast('TEAM DB 최신화', `Revision ${normalizedMeta.dbRevision} 최신 변경사항을 반영했습니다.`);
+    }
+
+    return true;
+}
+
+/**
+ * 📤 차등 분할 PUSH: 변경된 파티션 파일만 선택적으로 업로드
+ * 🔒 낙관적 동시성 제어(Optimistic Concurrency Control):
+ *    쓰기 직전 meta.json의 lastModified 및 dbRevision을 재확인하여 다른 팀원의 동시 저장을 감지하고 자동 재시도합니다.
+ */
+async function pushPartitionedTeamData(dirHandle, pushScope = {}) {
+    const MAX_RETRY = 3;
+    const historySubdir = await getOrCreateSubdir(dirHandle, 'history');
+    const editorName = getTeamEditorName();
+    const scope = pushScope.scope || 'all';
+    const targetMonths = new Set(pushScope.yearMonths || []);
+
+    for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
+        // 1) meta.json 파일 핸들 및 최초 스냅샷 확인
+        let metaHandle;
+        try {
+            metaHandle = await dirHandle.getFileHandle('meta.json', { create: false });
+        } catch (e) {
+            await autoMigrateLegacyDbTxt(dirHandle);
+            try {
+                metaHandle = await dirHandle.getFileHandle('meta.json', { create: false });
+            } catch (err) {
+                metaHandle = null;
+            }
+        }
+
+        let initialMetaFile = null;
+        let initialMeta = null;
+        if (metaHandle) {
+            initialMetaFile = await metaHandle.getFile();
+            const text = await initialMetaFile.text();
+            initialMeta = text ? JSON.parse(text) : null;
+        }
+        const currentMeta = normalizeTeamMeta(initialMeta);
+        const now = Date.now();
+
+        // 2) [쓰기 직전 재검증: 낙관적 잠금 (Optimistic Concurrency Check)]
+        if (metaHandle && initialMetaFile) {
+            const freshMetaFile = await metaHandle.getFile();
+            if (freshMetaFile.lastModified !== initialMetaFile.lastModified) {
+                console.warn(`[낙관적 잠금] 원격 meta.json 변경(다른 팀원 저장)이 감지되어 최신 데이터를 다시 읽고 병합을 재시도합니다. (시도 ${attempt + 1}/${MAX_RETRY})`);
+                continue;
+            }
+        }
+
+        // 3) 스코프별 데이터 읽기 및 병합
+        // (1) 마스터 설정 (설비, 수신처)
+        let masterToSave = null;
+        if (scope === 'all' || scope === 'master' || scope === 'equipment' || scope === 'recipient') {
+            const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]').map(e => {
+                const copy = { ...e }; 
+                delete copy.isEditing; 
+                return copy;
+            });
+            const localRecipient = JSON.parse(localStorage.getItem('recipientData') || '{}');
+            const remoteMaster = await readJsonFromDir(dirHandle, 'master_config.json', { equipment: [], recipient: {} });
+            const mergedEq = mergeEquipment(remoteMaster.equipment, localEquipment);
+            const mergedRecip = { ...(remoteMaster.recipient || {}), ...localRecipient };
+
+            masterToSave = { equipment: mergedEq, recipient: mergedRecip };
+        }
+
+        // (2) 메모
+        let notesToSave = null;
+        if (scope === 'all' || scope === 'notes') {
+            const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
+            const remoteNotes = await readJsonFromDir(dirHandle, 'notes.json', { machineNotes: {} });
+            const mergedNotes = mergeNotes(remoteNotes.machineNotes, localNotes);
+
+            notesToSave = { machineNotes: mergedNotes };
+        }
+
+        // (3) 유지보수 / 소모품
+        let maintToSave = null;
+        if (scope === 'all' || scope === 'maintenance') {
+            const localMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
+            const remoteMaint = await readJsonFromDir(dirHandle, 'maintenance.json', { equipMaintenance: {} });
+            const mergedMaint = mergeMaintenance(remoteMaint.equipMaintenance, localMaint);
+
+            maintToSave = { equipMaintenance: mergedMaint };
+        }
+
+        // (4) 작업 이력 월별 파티션
+        let historyToSaveByMonth = {};
+        if (scope === 'all' || scope === 'history') {
+            const allHistory = await getIDBHistory();
+            const historyByMonth = {};
+            allHistory.forEach(item => {
+                const ym = item.yearMonth || getYearMonthFromDate(item.date, item.savedAt);
+                if (!historyByMonth[ym]) historyByMonth[ym] = [];
+                historyByMonth[ym].push(item);
+            });
+
+            const monthsToPush = targetMonths.size > 0 ? Array.from(targetMonths) : Object.keys(historyByMonth);
+
+            for (const ym of monthsToPush) {
+                const localMonthItems = historyByMonth[ym] || [];
+                const remoteMonthItems = await readJsonFromDir(historySubdir, `${ym}.json`, []);
+                const mergedMonthItems = mergeHistory(remoteMonthItems, localMonthItems);
+                historyToSaveByMonth[ym] = mergedMonthItems;
+            }
+        }
+
+        // 4) [최종 쓰기 직전 2차 재검증: 쓰기 충돌 방지]
+        if (metaHandle && initialMetaFile) {
+            const freshMetaFile = await metaHandle.getFile();
+            if (freshMetaFile.lastModified !== initialMetaFile.lastModified) {
+                console.warn(`[낙관적 잠금] 파일 저장 직전 다른 팀원의 저장이 감지되어 재시도합니다. (시도 ${attempt + 1}/${MAX_RETRY})`);
+                continue;
+            }
+        }
+
+        // 5) 실제 파일 쓰기 수행
+        if (masterToSave) {
+            await writeJsonToDir(dirHandle, 'master_config.json', masterToSave);
+            currentMeta.partitions.master_config = {
+                revision: (currentMeta.partitions.master_config?.revision || 0) + 1,
+                updatedAt: now,
+                updatedBy: editorName
+            };
+        }
+
+        if (notesToSave) {
+            await writeJsonToDir(dirHandle, 'notes.json', notesToSave);
+            currentMeta.partitions.notes = {
+                revision: (currentMeta.partitions.notes?.revision || 0) + 1,
+                updatedAt: now,
+                updatedBy: editorName
+            };
+        }
+
+        if (maintToSave) {
+            await writeJsonToDir(dirHandle, 'maintenance.json', maintToSave);
+            currentMeta.partitions.maintenance = {
+                revision: (currentMeta.partitions.maintenance?.revision || 0) + 1,
+                updatedAt: now,
+                updatedBy: editorName
+            };
+        }
+
+        for (const ym of Object.keys(historyToSaveByMonth)) {
+            const mergedMonthItems = historyToSaveByMonth[ym];
+            await writeJsonToDir(historySubdir, `${ym}.json`, mergedMonthItems);
+
+            if (!currentMeta.partitions.history) currentMeta.partitions.history = {};
+            currentMeta.partitions.history[ym] = {
+                revision: (currentMeta.partitions.history[ym]?.revision || 0) + 1,
+                updatedAt: now,
+                updatedBy: editorName,
+                count: mergedMonthItems.length
+            };
+        }
+
+        // 6) meta.json 총괄 Revision 증가 및 저장
+        currentMeta.dbRevision = (currentMeta.dbRevision || 0) + 1;
+        currentMeta.lastUpdatedAt = now;
+        currentMeta.lastUpdatedBy = editorName;
+
+        await writeJsonToDir(dirHandle, 'meta.json', currentMeta);
+        await saveSyncState('teamMeta', currentMeta);
+        rememberTeamMeta(currentMeta);
+        localStorage.setItem('lastSyncSuccessAt', now.toString());
+        await updateSyncStatusBanner();
+
+        return true;
+    }
+
+    throw new Error('다른 팀원의 연속 동시 저장으로 인해 재시도 횟수를 초과했습니다.');
+}
+
+/**
+ * 🚀 통합 동기화 디스패처 (폴더 분할 엔진 및 레거시 파일 호환 지원)
+ */
+async function syncWithBox(isUserGesture = false, isPushSettings = false, isManualButton = false, pushScope = { scope: 'all' }, progressCb = null) {
+    if (activeSyncPromise) { 
+        if (isPushSettings) pendingPush = true; 
+        return activeSyncPromise; 
+    }
+
+    activeSyncPromise = (async () => {
+        const dirHandle = await getFileHandle('boxDirectoryHandle');
+        const legacyFileHandle = await getFileHandle('boxBackupFile');
+
+        if (!dirHandle && !legacyFileHandle) {
+            if (isManualButton) alert("⚠️ 상단의 [DB 폴더 연결] 버튼을 눌러 Box 공용 폴더를 연결해 주세요.");
+            await updateSyncStatusBanner(); 
+            return false;
+        }
+
+        const handle = dirHandle || legacyFileHandle;
+        const hasPerm = await verifyPermission(handle, true, isUserGesture);
+        if (!hasPerm) { 
+            if (isManualButton) alert("Box 폴더 접근 권한이 필요합니다."); 
+            await updateSyncStatusBanner(); 
+            return false; 
+        }
+
+        isSyncing = true;
+        const syncIcon = document.getElementById("syncIcon");
+        const syncText = document.getElementById("syncText");
+        const btn = document.getElementById("syncBtn");
+        
+        if (btn) btn.classList.remove("text-red-500", "font-black");
+        if (syncIcon && isManualButton) { 
+            syncIcon.classList.add("animate-spin"); 
+            syncText.innerText = "Checking..."; 
+            if (btn) btn.style.opacity = "0.7"; 
+        }
+
+        try {
+            if (dirHandle) {
+                // 📂 신규: 디렉터리 분할 동기화
+                if (isPushSettings) {
+                    return await pushPartitionedTeamData(dirHandle, pushScope);
+                } else {
+                    return await pullPartitionedTeamData(dirHandle, isUserGesture, isManualButton, progressCb);
+                }
+            } else {
+                // 📄 레거시 단일 파일 동기화 폴백 (낙관적 잠금 재시도 루프 적용)
+                const MAX_RETRY = 3;
+                for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
+                    const file = await legacyFileHandle.getFile();
+                    const fileText = await file.text();
+                    const boxData = fileText ? JSON.parse(fileText) : {};
+                    const boxMeta = normalizeTeamMeta(boxData);
+
+                    if (!isPushSettings) {
+                        const localHistory = await getIDBHistory();
+                        const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]');
+                        const localRecipient = JSON.parse(localStorage.getItem('recipientData') || '{}');
+                        const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
+                        const localMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
+                        
+                        const merged = {
+                            ...boxData,
+                            workHistory: mergeHistory(boxData.workHistory, localHistory),
+                            equipment: mergeEquipment(boxData.equipment, localEquipment),
+                            recipient: { ...(boxData.recipient || {}), ...localRecipient },
+                            machineNotes: mergeNotes(boxData.machineNotes, localNotes),
+                            equipMaintenance: mergeMaintenance(boxData.equipMaintenance, localMaint),
+                            dbRevision: boxMeta.dbRevision,
+                            lastUpdatedAt: boxMeta.lastUpdatedAt,
+                            lastUpdatedBy: boxMeta.lastUpdatedBy
+                        };
+                        await putIDBHistory(merged.workHistory || []);
+                        localStorage.setItem('equipmentData', JSON.stringify(merged.equipment || []));
+                        localStorage.setItem('recipientData', JSON.stringify(merged.recipient || {}));
+                        localStorage.setItem('machineNotes', JSON.stringify(merged.machineNotes || {}));
+                        localStorage.setItem('equipMaintenance', JSON.stringify(merged.equipMaintenance || {}));
+                        rememberTeamMeta(merged);
+                        renderTable();
+                        renderRecipientTable();
+                        await updateHistoryBadge();
+                        if (document.getElementById('history')?.classList.contains('block')) await renderHistory();
+                        localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
+                        await updateSyncStatusBanner();
+                        if (isManualButton) showToast('최신화 완료', `TEAM DB Revision ${boxMeta.dbRevision}`);
+                        return true;
+                    } else {
+                        const allHist = await getIDBHistory();
+                        const allEq = JSON.parse(localStorage.getItem('equipmentData') || '[]');
+                        const allRecip = JSON.parse(localStorage.getItem('recipientData') || '{}');
+                        const allNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
+                        const allMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
+                        
+                        const merged = {
+                            schemaVersion: TEAM_SCHEMA_VERSION,
+                            dbRevision: boxMeta.dbRevision + 1,
+                            lastUpdatedAt: Date.now(),
+                            lastUpdatedBy: getTeamEditorName(),
+                            workHistory: mergeHistory(boxData.workHistory, allHist),
+                            equipment: mergeEquipment(boxData.equipment, allEq),
+                            recipient: { ...(boxData.recipient || {}), ...allRecip },
+                            machineNotes: mergeNotes(boxData.machineNotes, allNotes),
+                            equipMaintenance: mergeMaintenance(boxData.equipMaintenance, allMaint)
+                        };
+
+                        // [낙관적 잠금: 쓰기 직전 원본 파일 수정시간 재확인]
+                        const freshCheck = await legacyFileHandle.getFile();
+                        if (freshCheck.lastModified !== file.lastModified) {
+                            console.warn(`[낙관적 잠금] 파일 동시 수정 감지: 재시도 ${attempt + 1}/${MAX_RETRY}`);
+                            continue;
+                        }
+
+                        const writable = await legacyFileHandle.createWritable();
+                        await writable.write(JSON.stringify(merged, null, 2));
+                        await writable.close();
+                        rememberTeamMeta(merged);
+                        localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
+                        await updateSyncStatusBanner();
+                        return true;
+                    }
+                }
+                throw new Error('다른 팀원의 연속 저장으로 재시도 횟수를 초과했습니다.');
+            }
+        } catch (error) {
+            console.error('동기화 실패:', error);
+            if (isManualButton) alert('동기화 중 오류가 발생했습니다. Box 폴더 연결 상태를 확인해주세요.');
+            await updateSyncStatusBanner(); 
+            return false;
+        } finally {
+            isSyncing = false;
+            if (syncIcon) syncIcon.classList.remove('animate-spin');
+            if (syncText) syncText.innerText = '강제 최신화';
+            if (btn) btn.style.opacity = '1';
+        }
+    })();
+
+    try { 
+        return await activeSyncPromise; 
+    } finally {
+        activeSyncPromise = null;
+        if (pendingPush) { 
+            pendingPush = false; 
+            autoMergeAndSave(pushScope); 
+        }
+    }
+}
+
+/**
+ * 0.7초 디바운스를 거쳐 변경사항을 Box에 자동 Push합니다.
+ */
+function autoMergeAndSave(scope = { scope: 'all' }) {
+    clearTimeout(_autoSyncDebounceTimer);
+    _pendingPushScope = scope;
+    _autoSyncDebounceTimer = setTimeout(() => { 
+        syncWithBox(true, true, false, _pendingPushScope); 
+    }, 700);
+}
+
+/**
+ * 데이터 저장 전 최신 팀 DB 사전 점검 (오래된 데이터 덮어쓰기 방지)
+ */
+async function ensureFreshTeamDb() {
+    const dirHandle = await getFileHandle('boxDirectoryHandle');
+    const legacyFileHandle = await getFileHandle('boxBackupFile');
+    if (!dirHandle && !legacyFileHandle) {
+        return true; // 미연결 상태여도 로컬 저장은 진행
+    }
+    try {
+        const ok = await syncWithBox(true, false, false);
+        if (!ok) {
+            console.warn('팀 DB 사전 동기화 실패. 로컬 저장을 계속 진행합니다.');
+        }
+    } catch(e) {
+        console.warn('동기화 확인 중 오류:', e);
+    }
+    return true;
+}
+
+/**
+ * [강제 최신화] 수동 동기화 실행
+ */
+function manualSync() { 
+    syncWithBox(true, false, true); 
+}
+
+/**
+ * Box DB 연결 해제 및 로컬 데이터 초기화
+ */
+async function disconnectDB() {
+    if (!confirm("⚠️ 현재 연결된 Box 폴더 설정을 해제하시겠습니까? (로컬 데이터도 초기화됩니다)")) return;
+    indexedDB.deleteDatabase('HitachiSfdcDB'); 
+    localStorage.clear();
+    alert("✅ 연결이 해제되었습니다. 초기 상태로 돌아갑니다."); 
+    location.reload();
+}
+
+/**
+ * 🔒 최초 연결 게이트 화면 상태 전환 ('initial' | 'progress' | 'success' | 'error')
+ */
+function setSyncGateState(state, info = '') {
+    const vInitial = document.getElementById('syncGateViewInitial');
+    const vProgress = document.getElementById('syncGateViewProgress');
+    const vSuccess = document.getElementById('syncGateViewSuccess');
+    const vError = document.getElementById('syncGateViewError');
+    if (!vInitial || !vProgress || !vSuccess || !vError) return;
+
+    vInitial.classList.add('hidden');
+    vProgress.classList.add('hidden');
+    vSuccess.classList.add('hidden');
+    vError.classList.add('hidden');
+
+    if (state === 'initial') {
+        vInitial.classList.remove('hidden');
+    } else if (state === 'progress') {
+        vProgress.classList.remove('hidden');
+    } else if (state === 'success') {
+        vSuccess.classList.remove('hidden');
+    } else if (state === 'error') {
+        vError.classList.remove('hidden');
+        const errElem = document.getElementById('syncGateErrorMsg');
+        if (errElem) errElem.innerText = info || '동기화 중 오류가 발생했습니다.';
+    }
+}
+
+/**
+ * 📊 게이트 모달 프로그레스 바 및 텍스트 실시간 갱신
+ */
+function updateSyncGateProgress(percent, stepText, detailText, counterText = '') {
+    const bar = document.getElementById('syncGateProgressBar');
+    const pctLabel = document.getElementById('syncGatePercentLabel');
+    const stepLabel = document.getElementById('syncGateStepLabel');
+    const detailLabel = document.getElementById('syncGateDetailText');
+    const counterLabel = document.getElementById('syncGateItemCounter');
+
+    const safePercent = Math.min(100, Math.max(0, Math.round(percent)));
+
+    if (bar) bar.style.width = safePercent + '%';
+    if (pctLabel) pctLabel.innerText = safePercent + '%';
+    if (stepLabel && stepText) {
+        stepLabel.innerHTML = `<span class="w-2 h-2 rounded-full bg-primary animate-ping"></span> ${stepText}`;
+    }
+    if (detailLabel && detailText) detailLabel.innerText = detailText;
+    if (counterLabel) counterLabel.innerText = counterText || '';
+}
+
+/** 게이트 동기화 재시도 */
+function gateRetry() {
+    setSyncGateState('initial');
+    gateConnect();
+}
+
+/**
+ * 🔗 Box 공용 DB 폴더 연결 (PC) 또는 파일 업로드 (모바일)
+ */
+async function linkBoxFile() {
+    if ('showDirectoryPicker' in window) {
+        try {
+            const copyPath = prompt("👇 [최초 1회 설정] 사내 Box의 공용 DB 폴더(SFDC_DB)를 선택해주세요.", typeof BOX_PATH !== 'undefined' ? BOX_PATH : "");
+            if (copyPath === null) {
+                setSyncGateState('initial');
+                return;
+            }
+
+            const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+
+            // 폴더 선택 완료 즉시 진행 모드로 전환
+            setSyncGateState('progress');
+            updateSyncGateProgress(5, '폴더 연결 확인', 'Box 폴더 핸들을 저장하고 권한을 검증합니다...', '');
+
+            await saveFileHandle('boxDirectoryHandle', dirHandle);
+            
+            if (navigator.storage && navigator.storage.persist) { 
+                try { await navigator.storage.persist(); } catch (e) {} 
+            }
+
+            updateSyncGateProgress(10, '레거시 호환 점검', '폴더 구조를 점검하고 있습니다...', '');
+            await autoMigrateLegacyDbTxt(dirHandle);
+
+            const btn = document.getElementById("syncBtn");
+            if (btn) btn.classList.remove("text-red-500", "font-black");
+            const syncIconElem = document.getElementById("syncIcon");
+            if (syncIconElem) syncIconElem.innerText = "sync"; 
+            const syncTextElem = document.getElementById("syncText");
+            if (syncTextElem) syncTextElem.innerText = "강제 최신화";
+
+            await completeInitialConnect();
+        } catch (e) { 
+            if (e.name !== 'AbortError') {
+                console.error(e);
+                setSyncGateState('error', '폴더 연결에 실패했습니다: ' + (e.message || '접근 권한이 부족합니다.'));
+            } else {
+                setSyncGateState('initial');
+            }
+        }
+    } else {
+        // [모바일/아이폰 전용 파일 선택기 트리거]
+        let fileInput = document.getElementById('mobile-db-upload');
+        if (!fileInput) {
+            fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.id = 'mobile-db-upload';
+            fileInput.accept = '.txt,.json';
+            fileInput.style.display = 'none';
+            fileInput.onchange = handleMobileDB;
+            document.body.appendChild(fileInput);
+        }
+        fileInput.click();
+    }
+}
+
+/**
+ * 최초 연결 완료 후 Pull 실행 및 게이트 닫기 (실시간 진행률 피드백)
+ */
+async function completeInitialConnect() {
+    setSyncGateState('progress');
+    updateSyncGateProgress(12, '최신 데이터 수신', '팀 공용 Box DB에서 최신 데이터를 불러옵니다...', '');
+    
+    const onProg = (percent, step, detail, counter) => {
+        updateSyncGateProgress(percent, step, detail, counter);
+    };
+
+    const ok = await syncWithBox(true, false, false, { scope: 'all' }, onProg);
+    if (!ok) {
+        setSyncGateState('error', '팀 DB 폴더를 불러오지 못했습니다. 연결 상태와 권한을 다시 확인해주세요.');
+        await updateSyncStatusBanner();
+        return;
+    }
+
+    localStorage.setItem('hasCompletedInitialSync', 'yes');
+    sessionStorage.removeItem('syncGateBypassed');
+    setSyncGateState('success');
+    updateSyncGateProgress(100, '동기화 완료', '모든 팀 데이터를 성공적으로 불러왔습니다.', '');
+    await updateSyncStatusBanner();
+
+    // 0.8초 후 게이트 부드럽게 닫기
+    setTimeout(() => {
+        hideSyncGate();
+        showToast('연결 완료', 'Box DB 폴더가 연결되어 최신 팀 데이터가 동기화되었습니다.');
+    }, 800);
+}
+
+/** 최초 연결 게이트 확인 */
+function checkSyncGateOnLoad() {
+    if (sessionStorage.getItem('syncGateBypassed') === 'yes') return;
+    if (!localStorage.getItem('hasCompletedInitialSync')) showSyncGate();
+}
+function showSyncGate() { 
+    setSyncGateState('initial');
+    const o = document.getElementById('syncGateOverlay'); 
+    if (o) o.classList.remove('hidden'); 
+}
+function hideSyncGate() { 
+    const o = document.getElementById('syncGateOverlay'); 
+    if (o) o.classList.add('hidden'); 
+}
+async function gateConnect() { await linkBoxFile(); }
+function gateSkip() {
+    if (!confirm("⚠️ 연결 없이 계속하면 팀원들의 최신 작업 이력이 보이지 않고, 지금부터 작성하는 내용도 Box에 반영되지 않습니다.\n정말 계속하시겠습니까?")) return;
+    hideSyncGate();
+    sessionStorage.setItem('syncGateBypassed', 'yes');
+    updateSyncStatusBanner();
+}
+
+/** 상단 동기화 상태 배너 갱신 */
+async function updateSyncStatusBanner() {
+    const banner = document.getElementById('syncStatusBanner');
+    const icon = document.getElementById('syncStatusIcon');
+    const text = document.getElementById('syncStatusText');
+    if (!banner || !icon || !text) return;
+
+    const DANGER = "mb-6 px-4 py-3 rounded-md border flex items-center justify-between gap-3 text-xs border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400";
+    const WARN   = "mb-6 px-4 py-3 rounded-md border flex items-center justify-between gap-3 text-xs border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-400";
+
+    const isDesktop = 'showDirectoryPicker' in window || 'showOpenFilePicker' in window;
+    const dirHandle = await getFileHandle('boxDirectoryHandle');
+    const fileHandle = await getFileHandle('boxBackupFile');
+    const activeHandle = dirHandle || fileHandle;
+
+    if (isDesktop && !activeHandle) {
+        banner.className = DANGER; 
+        icon.innerText = "folder_off";
+        text.innerText = "Box DB 폴더가 연결되어 있지 않습니다. 팀원과 데이터가 어긋날 수 있습니다.";
+        banner.classList.remove('hidden'); 
+        return;
+    }
+    if (activeHandle) {
+        const hasPerm = await verifyPermission(activeHandle, true, false);
+        if (!hasPerm) {
+            banner.className = DANGER; 
+            icon.innerText = "error";
+            text.innerText = "Box 연결 권한이 끊어졌습니다. [지금 동기화]를 눌러 재연결해주세요.";
+            banner.classList.remove('hidden'); 
+            return;
+        }
+    }
+
+    const last = parseInt(localStorage.getItem('lastSyncSuccessAt') || '0');
+    const elapsed = Date.now() - last;
+    if (!last || elapsed > SYNC_STALE_MS) {
+        banner.className = WARN; 
+        icon.innerText = "schedule";
+        text.innerText = last ? `마지막 동기화로부터 ${Math.floor(elapsed / 60000)}분 경과했습니다. 최신 데이터를 위해 동기화해주세요.` : "아직 동기화 기록이 없습니다.";
+        banner.classList.remove('hidden'); 
+        return;
+    }
+
+    banner.classList.add('hidden');
+}
+
+/**
+ * 📱 모바일/아이폰 전용 DB 업로드 및 다운로드 병합
+ */
+async function handleMobileDB(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        const text = e.target.result;
+        try {
+            let boxData = text ? JSON.parse(text) : {};
+            let boxHistory = boxData.workHistory || [];
+            let localHistory = await getIDBHistory();
+            let mergedMap = new Map();
+            
+            const getLegacyId = (item) => "LEGACY_" + item.date + "_" + item.machine + "_" + (item.content || "").substring(0, 10);
+            boxHistory.forEach(item => { 
+                if (!item.id) item.id = getLegacyId(item); 
+                mergedMap.set(item.id, item); 
+            });
+            localHistory.forEach(item => {
+                if (!item.id) item.id = getLegacyId(item);
+                let existing = mergedMap.get(item.id);
+                if (!existing || (item.updatedAt || 0) >= (existing.updatedAt || 0)) {
+                    mergedMap.set(item.id, item);
+                }
+            });
+            
+            let finalMergedHistory = Array.from(mergedMap.values());
+            let uniqueHistory = [];
+            let seenContent = new Set();
+            finalMergedHistory.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+            finalMergedHistory.forEach(item => {
+                const cleanDate = (item.date || "미상").replace(/[^0-9]/g, ""); 
+                const cleanMachine = (item.machine || "").trim().toUpperCase();
+                const cleanContent = (item.content || "").trim().replace(/\s/g, "");
+                let uniqueKey = `${cleanMachine}|${cleanDate}|${cleanContent}`;
+                if (!seenContent.has(uniqueKey)) { 
+                    seenContent.add(uniqueKey); 
+                    item.yearMonth = getYearMonthFromDate(item.date, item.savedAt);
+                    uniqueHistory.push(item); 
+                }
+            });
+
+            boxData.workHistory = uniqueHistory;
+            await putIDBHistory(uniqueHistory);
+
+            const mobileMeta = normalizeTeamMeta(boxData);
+            boxData.schemaVersion = TEAM_SCHEMA_VERSION;
+            boxData.dbRevision = mobileMeta.dbRevision + 1;
+            boxData.lastUpdatedAt = Date.now();
+            boxData.lastUpdatedBy = getTeamEditorName();
+
+            let localEq = JSON.parse(localStorage.getItem("equipmentData") || "[]"); 
+            let isEditingEq = localEq.some(i => i.isEditing);
+            if (boxData.equipment && !isEditingEq) { 
+                localStorage.setItem("equipmentData", JSON.stringify(boxData.equipment)); 
+                renderTable(); 
+            }
+            if (boxData.recipient) { 
+                localStorage.setItem("recipientData", JSON.stringify(boxData.recipient)); 
+                renderRecipientTable(); 
+            }
+            if (boxData.machineNotes) {
+                localStorage.setItem("machineNotes", JSON.stringify(boxData.machineNotes));
+            }
+            if (boxData.equipMaintenance) {
+                applyIncomingMaintenance(boxData.equipMaintenance); 
+            }
+
+            await updateHistoryBadge();
+            if (document.getElementById('history')?.classList.contains('block')) {
+                await renderHistory();
+            }
+
+            alert("✅ Box 데이터 로드 및 로컬 데이터 병합 완료!\n(아이폰은 보안상 파일 자동 저장이 불가능합니다.)");
+            
+            if (confirm("방금 병합된 최신 데이터를 파일로 다운로드 하시겠습니까?\n다운로드 후 Box 폴더에 직접 덮어쓰시면 팀원들에게도 적용됩니다.")) {
+                const blob = new Blob([JSON.stringify(boxData, null, 2)], { type: "text/plain" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = "DB.txt";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+
+            localStorage.setItem('hasCompletedInitialSync', 'yes');
+            localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
+            rememberTeamMeta(boxData);
+            sessionStorage.removeItem('syncGateBypassed');
+            hideSyncGate();
+            await updateSyncStatusBanner();
+
+        } catch (error) {
+            console.error(error);
+            alert('DB 파일 형식이 올바르지 않거나 오류가 발생했습니다.');
+        }
+        event.target.value = ''; 
+    };
+    reader.readAsText(file);
+}
+
+/**
+ * 💾 정기 PC 로컬 자동 백업 (1주일 단위)
+ */
+async function autoLocalBackup() {
+    const lastBackup = localStorage.getItem('lastBackupDate');
+    const now = Date.now();
+    const ONE_WEEK = 7 * 24 * 60 * 60 * 1000; 
+
+    if (!lastBackup || (now - parseInt(lastBackup)) > ONE_WEEK) {
+        try {
+            let history = await getIDBHistory();
+            let equipment = JSON.parse(localStorage.getItem("equipmentData") || "[]").map(e => { 
+                let obj = { ...e }; 
+                delete obj.isEditing; 
+                return obj; 
+            });
+            let recipient = JSON.parse(localStorage.getItem("recipientData") || "{}");
+            let machineNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
+            let equipMaintenance = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+
+            let backupData = {
+                workHistory: history,
+                equipment: equipment,
+                recipient: recipient,
+                machineNotes: machineNotes,
+                equipMaintenance: equipMaintenance,
+                backupDate: new Date().toISOString()
+            };
+
+            const dataStr = JSON.stringify(backupData, null, 2);
+            const blob = new Blob([dataStr], { type: "text/plain" });
+            const url = URL.createObjectURL(blob);
+            
+            const d = new Date();
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            const dateString = `${yyyy}${mm}${dd}`;
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `SFDC_Backup_${dateString}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            localStorage.setItem('lastBackupDate', now.toString());
+            setTimeout(() => showToast("정기 자동 백업", "PC 다운로드 폴더에 백업 파일이 저장되었습니다."), 1500);
+        } catch (error) {
+            console.error("자동 백업 실패:", error);
+        }
+    }
+}
+
+
+// ==============================================================================
+
+// [Module: extraction_email.js]
+// 4. [Business: Extraction & Email] 작업 메일 분석/추출 및 이메일 양식 생성
+// ==============================================================================
+
+/**
+ * 📩 작업 메일 텍스트 분석 및 정보 추출 (데이터 추출 실행)
+ */
+async function extractData() {
+    if (!(await ensureFreshTeamDb())) return;
+    
+    const text = document.getElementById("mailInput").value; 
+    if (!text.trim()) return alert("메일 내용을 입력하세요.");
+
+    // 1) 작업일자 추출 (어떤 형태의 날짜든 YYYY/MM/DD로 정규화)
+    let df = "미상";
+    const dateMatch = text.match(/(\d{2,4})[\.\/\-년\s]+(\d{1,2})[\.\/\-월\s]+(\d{1,2})[일\s]*/);
+    
+    if (dateMatch) {
+        let year = dateMatch[1];
+        let month = dateMatch[2];
+        let day = dateMatch[3];
+
+        if (year.length === 2) year = "20" + year;
+        month = month.padStart(2, '0');
+        day = day.padStart(2, '0');
+
+        df = `${year}/${month}/${day}`;
+    }
+
+    // 2) 라인 및 설비호기 추출
+    const lm = text.match(/\b(P\d[A-Z0-9]+)\b/); 
+    const line = lm ? lm[1] : "미상";
+    
+    let machine = "미상"; 
+    const mdi = text.match(/MD[IF][A-Z]?[A-Za-z0-9]+/); 
+    if (mdi) {
+        machine = mdi[0];
+    } else { 
+        const ism = text.match(/IS[A-Za-z0-9]+/); 
+        if (ism) machine = ism[0]; 
+    }
+    
+    // 3) 작업내용 추출
+    let content = "미상";
+    const p1 = text.match(/(?:에서|진행한|작업한)\s+(.*?)\s+내용\s*(?:전송|공유|보내|송부)/); 
+    if (p1) {
+        content = p1[1].trim();
+    } else { 
+        const p2 = text.match(/(?:호기(?:\s*\(.*?\))?|에서|진행한|작업한|진행|확인)\s+(.*?)\s+작업\s*(?:내용)?\s*(?:전송|공유|보내|송부)/); 
+        if (p2) {
+            content = p2[1].trim(); 
+        } else if (machine !== "미상") { 
+            const p3 = text.match(new RegExp(machine + "(?:호기)?(?:\\s*\\(.*?\\))?\\s+(.*?)\\s+작업\\s*(?:의\\s*건|전송|진행|완료|내용)")); 
+            if (p3) content = p3[1].trim(); 
+        } 
+    }
+    content = content
+        .replace(/\(.*?\)/g, "")
+        .replace(/^(?:에서|진행한|작업한|진행|한|확인)\s+/, "")
+        .replace(/\s+작업$/, "")
+        .trim();
+    
+    // 4) 작업자 추출 (대아 여부 판별 및 히타치 서명 파싱)
+    let worker = "미상";
+    const workerLineMatch = text.match(/작업자\s*:?\s*([가-힣a-zA-Z].{0,60})/);
+    if (workerLineMatch) {
+        const wLine = workerLineMatch[1].trim();
+        const hasDaea = /대아/i.test(wLine);
+        const hasHitachi = /히타치|hitachi/i.test(wLine);
+        if (hasDaea && !hasHitachi) {
+            worker = "대아";
+        }
+    }
+    if (worker === "미상") {
+        const signMatch = text.match(/HITACHI\s*[\r\n]+\s*([가-힣]{2,4})\s*(?:배상|드림|올림)?/i);
+        if (signMatch) worker = signMatch[1];
+    }
+    
+    // 5) UI 결과 영역 출력
+    document.getElementById("resDate").innerText = df; 
+    document.getElementById("resMachine").innerText = machine; 
+    document.getElementById("resLine").innerText = line; 
+    document.getElementById("resContent").innerText = content; 
+    document.getElementById("resWorker").innerText = worker; 
+    document.getElementById("extractResult").style.display = "block";
+    
+    // 6) 유효한 설비인 경우 히스토리 저장 및 유지보수 특이사항 자동 반영
+    if (machine !== "미상") { 
+        await saveHistoryEntry({ 
+            machine, 
+            line, 
+            date: df, 
+            content, 
+            worker, 
+            rawText: text, 
+            savedAt: new Date().toISOString() 
+        }); 
+        document.getElementById("autoSavedBadge").classList.remove("hidden"); 
+
+        const extraNote = document.getElementById("extraNoteInput") ? document.getElementById("extraNoteInput").value.trim() : "";
+        const extraCategory = document.getElementById("extraNoteCategory") ? document.getElementById("extraNoteCategory").value.trim() : "";
+        
+        let maintSummary = "";
+        if (extraCategory) {
+            maintSummary = applyExtractedMaintenance(machine, extraCategory, df);
+        }
+        
+        if (extraNote || extraCategory) {
+            let ns = JSON.parse(localStorage.getItem("machineNotes") || "{}");
+            let prevNote = ns[machine] || "";
+            let categoryPart = extraCategory ? `[${extraCategory}]` : "";
+            let summaryPart = maintSummary ? `\n${maintSummary}` : "";
+            let notePart = extraNote ? `\n${extraNote}` : "";
+            let newEntry = `-${df}- ${categoryPart}${summaryPart}${notePart}`.trim();
+            ns[machine] = prevNote ? (prevNote + "\n\n" + newEntry) : newEntry;
+            localStorage.setItem("machineNotes", JSON.stringify(ns));
+            
+            document.getElementById("extraNoteInput").value = "";
+            document.getElementById("extraNoteCategory").value = "";
+            onExtraCategoryChange();
+        }
+    }
+}
+
+/** 특이사항 카테고리 선택 시 추가 입력 폼 토글 */
+function onExtraCategoryChange() {
+    const cat = document.getElementById("extraNoteCategory").value;
+    document.getElementById("extraLaserFields").classList.toggle("hidden", cat !== "Laser 교체");
+    document.getElementById("extraScaleFields").classList.toggle("hidden", cat !== "Scale Head");
+    document.getElementById("extraConsumFields").classList.toggle("hidden", cat !== "기타 소모품");
+}
+
+/** 메일 추출 시 입력된 부품 교체 정보를 유지보수 데이터(S/N 키)에 자동 반영 */
+function applyExtractedMaintenance(machine, category, mailDate) {
+    const eqList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+    const eq = eqList.find(e => e.name === machine);
+    if (!eq || !eq.sn) {
+        showToast("⚠️ 설비 미등록", `[${machine}] 설비가 관리 목록에 없거나 S/N이 비어있어 유지보수 이력에 반영하지 못했습니다. (노트에만 기록됨)`);
+        return "";
+    }
+    const snKey = eq.sn;
+    const dm = (mailDate || "").match(/(\d{4})[.\-\/년\s]*(\d{1,2})[.\-\/월\s]*(\d{1,2})/);
+    const fallbackDate = dm ? `${dm[1]}-${String(dm[2]).padStart(2,'0')}-${String(dm[3]).padStart(2,'0')}` : new Date().toISOString().slice(0, 10);
+    let summary = "";
+
+    if (category === "Laser 교체") {
+        const dtVal = document.getElementById("extraLaserDate").value || (fallbackDate + "T00:00");
+        const snHead = document.getElementById("extraLaserHead").value.trim();
+        const snPs = document.getElementById("extraLaserPs").value.trim();
+        const snDiode = document.getElementById("extraLaserDiode").value.trim();
+        const data = getMaintData(snKey); 
+        const l = data.laser;
+
+        if (l.replaceDate) {
+            const oldAuto = elapsedParts(l.replaceDate);
+            const oldManual = l.offsetHours !== undefined ? l.offsetHours : (l.offsetDays ? l.offsetDays * 24 : 0);
+            const totalHours = (oldAuto.days * 24) + oldAuto.hours + oldManual;
+            l.history.push({
+                date: l.replaceDate,
+                usedDays: Math.floor(totalHours / 24),
+                usedHours: totalHours,
+                headSN: l.headSN || "-",
+                psSN: l.psSN || "-",
+                diodeSN: l.diodeSN || "-"
+            });
+        }
+        l.replaceDate = dtVal;
+        l.offsetHours = 0;
+        l.offsetDays = 0;
+        l.headSN = snHead || l.headSN;
+        l.psSN = snPs || l.psSN;
+        l.diodeSN = snDiode || l.diodeSN;
+        saveMaintData(snKey, data);
+
+        document.getElementById("extraLaserDate").value = "";
+        document.getElementById("extraLaserHead").value = "";
+        document.getElementById("extraLaserPs").value = "";
+        document.getElementById("extraLaserDiode").value = "";
+
+        const parts = [snHead && `Head: ${snHead}`, snPs && `P/S: ${snPs}`, snDiode && `Diode: ${snDiode}`].filter(Boolean);
+        summary = `교체일시: ${dtVal.replace('T', ' ')}${parts.length ? ' (' + parts.join(', ') + ')' : ''}`;
+        showToast("✅ 자동 반영", `[${machine}] Laser 교체 정보가 설비 유지보수 데이터에 반영되었습니다.`);
+
+    } else if (category === "Scale Head") {
+        const data = getMaintData(snKey);
+        const updatedAxes = [];
+        SCALE_AXES.forEach(a => {
+            const dateInput = document.getElementById(`extraShDate_${a.key}`);
+            const snInput = document.getElementById(`extraShSn_${a.key}`);
+            const shDate = dateInput ? dateInput.value.trim() : "";
+            const shSn = snInput ? snInput.value.trim() : "";
+            if (shDate) {
+                const target = data.scaleHead[a.key];
+                if (target.replaceDate) {
+                    target.history.push({ date: target.replaceDate, sn: target.sn || "-" });
+                }
+                target.replaceDate = shDate;
+                if (shSn) target.sn = shSn;
+                updatedAxes.push(`${a.label}: ${shDate}${shSn ? ' (S/N: ' + shSn + ')' : ''}`);
+                if (dateInput) dateInput.value = "";
+                if (snInput) snInput.value = "";
+            }
+        });
+        if (updatedAxes.length) {
+            saveMaintData(snKey, data);
+            summary = updatedAxes.join(' / ');
+            showToast("✅ 자동 반영", `[${machine}] Scale Head 교체 정보가 설비 데이터에 반영되었습니다.`);
+        }
+
+    } else if (category === "기타 소모품") {
+        const cName = document.getElementById("extraConsumName").value.trim();
+        const cDate = document.getElementById("extraConsumDate").value.trim() || fallbackDate;
+        const cNote = document.getElementById("extraConsumNote").value.trim();
+        if (!cName) {
+            showToast("⚠️ 부품명 누락", "소모품 부품명이 입력되지 않아 유지보수 이력에 기록하지 못했습니다.");
+            return "";
+        }
+        const data = getMaintData(snKey);
+        data.consumables.push({
+            id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            name: cName,
+            date: cDate,
+            note: cNote,
+            savedAt: new Date().toISOString()
+        });
+        saveMaintData(snKey, data);
+        
+        document.getElementById("extraConsumName").value = "";
+        document.getElementById("extraConsumDate").value = "";
+        document.getElementById("extraConsumNote").value = "";
+        
+        summary = `${cName} (${cDate})${cNote ? ' - ' + cNote : ''}`;
+        showToast("✅ 자동 반영", `[${machine}] 소모품(${cName}) 교환 이력이 설비 정보에 반영되었습니다.`);
+    }
+    return summary;
+}
+
+/** 메일 템플릿 전환 ('work' 일반 보고 / 'ship' 반출 배차) */
+function setTemplate(t) { 
+    currentMailTemplate = t; 
+    const is = t === 'work'; 
+    document.getElementById('btn-tpl-work').className = `px-6 py-2 text-[10px] font-bold uppercase tracking-widest transition-all ${is ? 'bg-primary text-white' : 'bg-surface text-text-muted hover:text-primary'}`; 
+    document.getElementById('btn-tpl-ship').className = `px-6 py-2 text-[10px] font-bold uppercase tracking-widest transition-all ${!is ? 'bg-primary text-white' : 'bg-surface text-text-muted hover:text-primary'}`; 
+    document.getElementById('area-work-only').className = is ? 'space-y-6 block' : 'space-y-6 hidden'; 
+    document.getElementById('area-ship-only').className = !is ? 'space-y-6 block' : 'space-y-6 hidden'; 
+}
+
+/** 반출 배차 메일용 장비 블록 추가 */
+function addShipBlock() {
+    const container = document.getElementById("ship-blocks-container"); 
+    const idx = shipBlockCount++; 
+    const lines = Object.keys(JSON.parse(localStorage.getItem("recipientData") || "{}")).sort(); 
+    
+    let opts = '<option value="">라인 선택</option>'; 
+    lines.forEach(l => opts += `<option value="${l}">${l}</option>`);
+
+    const blockDiv = document.createElement("div"); 
+    blockDiv.className = "ship-block p-4 border border-border bg-background/50 rounded space-y-4 relative animate-[fadeIn_0.2s_ease-in-out]";
+    blockDiv.innerHTML = `
+        ${idx > 0 ? `
+        <button class="btn-text absolute top-2 right-2 !text-text-muted hover:!text-red-500" onclick="this.closest('.ship-block').remove()">
+            <span class="material-symbols-outlined text-sm">close</span>
+        </button>` : ''}
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="label-base mb-2">설비호기 (검색)</label>
+                <input class="ship-equip input-base h-10 px-4 rounded" id="shipEquip_${idx}" placeholder="예: MDIXXXX" type="text" onkeyup="syncShipLine(${idx})"/>
+            </div>
+            <div>
+                <label class="label-base mb-2">수신처 라인 선택</label>
+                <select class="ship-line input-base h-10 px-4 rounded" id="shipLine_${idx}" onchange="updateShipCheckboxes(${idx})">${opts}</select>
+            </div>
+        </div>
+        <div class="p-3 bg-surface/50 border border-dashed border-border rounded space-y-2">
+            <label class="label-base text-primary mb-2">담당자 선택</label>
+            <div id="shipCheckboxes_${idx}" class="flex flex-wrap gap-3">
+                <p class="text-[10px] text-text-muted">설비를 입력하십시오.</p>
+            </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="label-base mb-2">반출 품목</label>
+                <input class="ship-item input-base h-10 px-4 rounded" placeholder="품목명" type="text"/>
+            </div>
+            <div>
+                <label class="label-base mb-2">반입구 명</label>
+                <input class="ship-gate input-base h-10 px-4 rounded" placeholder="예: G" type="text"/>
+            </div>
+            <div>
+                <label class="label-base mb-2">반출 일시</label>
+                <input class="ship-datetime input-base h-10 px-4 rounded" type="datetime-local"/>
+            </div>
+            <div>
+                <label class="label-base mb-2">반출 사유</label>
+                <input class="ship-reason input-base h-10 px-4 rounded" placeholder="사유" type="text"/>
+            </div>
+        </div>
+        <div>
+            <label class="label-base mb-2">S/N / 번호</label>
+            <textarea class="ship-sn input-base h-16 p-4 rounded" placeholder="추가 정보"></textarea>
+        </div>
+    `;
+    container.appendChild(blockDiv);
+}
+
+/** 반출 배차: 설비 입력 시 해당 설비의 라인 자동 매칭 */
+function syncShipLine(idx) { 
+    const search = document.getElementById(`shipEquip_${idx}`).value.trim().toLowerCase(); 
+    const found = JSON.parse(localStorage.getItem("equipmentData") || "[]").find(i => i.name.toLowerCase() === search); 
+    if (found) { 
+        const lineVal = found.line.toUpperCase(); 
+        const sel = document.getElementById(`shipLine_${idx}`); 
+        if (sel.options.length <= 1) { 
+            const ls = Object.keys(JSON.parse(localStorage.getItem("recipientData") || "{}")).sort(); 
+            sel.innerHTML = '<option value="">라인 선택</option>'; 
+            ls.forEach(l => { 
+                const o = document.createElement("option"); 
+                o.value = l; 
+                o.textContent = l; 
+                sel.appendChild(o); 
+            }); 
+        } 
+        sel.value = lineVal; 
+        updateShipCheckboxes(idx); 
+    } 
+}
+
+/** 반출 배차: 라인 선택 시 담당자 체크박스 렌더링 */
+function updateShipCheckboxes(idx) { 
+    const line = document.getElementById(`shipLine_${idx}`).value; 
+    const area = document.getElementById(`shipCheckboxes_${idx}`); 
+    const data = JSON.parse(localStorage.getItem("recipientData") || "{}"); 
+    area.innerHTML = ""; 
+    
+    if (!line || !data[line]) {
+        area.innerHTML = '<p class="text-[10px] text-text-muted">담당자 없음</p>';
+        return;
+    }
+    
+    data[line].split(/[,;]+/).map(e => e.trim()).filter(Boolean).forEach((email, i) => { 
+        const name = email.includes('<') ? email.split('<')[0].trim() : email.split('@')[0]; 
+        area.innerHTML += `
+            <div class="flex items-center gap-2 bg-background/50 px-3 py-1 border border-border rounded">
+                <input type="checkbox" id="recip_${idx}_${i}" value="${email}" class="ship-email-check w-3 h-3 text-primary focus:ring-0">
+                <label for="recip_${idx}_${i}" class="text-xs text-text-main cursor-pointer whitespace-nowrap">${name}</label>
+            </div>
+        `; 
+    }); 
+}
+
+/** ✉️ 전체 이메일 양식 생성 및 본문/수신처 조립 */
+function generateFullMail() {
+    const myName = document.getElementById("mailMyName").value.trim();
+    const inform = document.getElementById("mailInform").value.trim();
+    if (!myName) return alert("작업자명을 입력하세요."); 
+    localStorage.setItem("storedMyName", myName);
+
+    const data = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+    const recipientMap = JSON.parse(localStorage.getItem("recipientData") || "{}");
+    let subject = "", fullText = "";
+
+    if (currentMailTemplate === 'work') {
+        const es = document.getElementById("mailWorkEquipSearch").value.trim().toLowerCase();
+        const cn = document.getElementById("mailCustName").value.trim();
+        const jt = document.getElementById("mailJobTitle").value.trim();
+        const jd = document.getElementById("mailDate").value.replace(/-/g, '/');
+        const jdt = document.getElementById("mailJobDetail").value.trim();
+
+        if (!es || !cn || !jt) return alert("필수 항목을 모두 입력하세요.");
+        const f = data.find(i => i.name.toLowerCase() === es); 
+        if (!f) return alert("등록되지 않은 설비입니다.");
+
+        document.getElementById("resRecipientsOut").closest('.space-y-2').style.display = "block"; 
+        document.getElementById("resRecipientsOut").innerText = recipientMap[f.line.toUpperCase()] || "미등록";
+        
+        subject = `삼성전자_${f.line} Line_${f.model}_${f.name}호기_${f.sn}_${jt} 작업 전송의 건`;
+        fullText = `삼성전자 / (${cn})님\n이하 관계자 각위\n\n업무에 수고가 많으십니다.\n히타치 ${myName}입니다.\n\n${f.line} Line ${f.model} ${f.name}호기에서 진행한 ${jt} 작업 내용 전송드립니다.\n\n작업일: ${jd}\n\n작업내용 :\n${jdt}\n\n작업자 : 히타치 ${myName}\n\n인폼내용 : ${inform}\n\n이상입니다.\n\n상기 내용 중 불명확점 있으시면 연락 부탁드리겠습니다.\n\nHITACHI\n${myName} 배상`;
+
+    } else {
+        const blocks = document.querySelectorAll('.ship-block'); 
+        if (blocks.length === 0) return alert("항목이 없습니다.");
+        
+        let allEmails = new Set();
+        let ilt = "";
+        let firstModel = "";
+        let firstItem = "";
+
+        for (let i = 0; i < blocks.length; i++) {
+            const b = blocks[i];
+            const eq = b.querySelector('.ship-equip').value.trim().toLowerCase();
+            const gt = b.querySelector('.ship-gate').value.trim();
+            const dtr = b.querySelector('.ship-datetime').value;
+            const itm = b.querySelector('.ship-item').value.trim();
+            const rea = b.querySelector('.ship-reason').value.trim();
+            const sn = b.querySelector('.ship-sn').value.trim();
+
+            if (!eq || !gt || !dtr || !itm || !rea) return alert(`${i + 1}번째 항목이 누락되었습니다.`);
+            const fo = data.find(x => x.name.toLowerCase() === eq); 
+            if (!fo) return alert(`${i + 1}번째 설비가 등록되어 있지 않습니다.`);
+
+            if (i === 0) { 
+                firstModel = fo.model; 
+                firstItem = itm; 
+            }
+            
+            const cbs = b.querySelectorAll('.ship-email-check:checked'); 
+            if (cbs.length === 0) return alert(`${i + 1}번째 담당자를 최소 1명 선택해주세요.`);
+
+            let be = []; 
+            cbs.forEach(c => { 
+                allEmails.add(c.value); 
+                be.push(c.value); 
+            });
+
+            const dt = new Date(dtr);
+            const fd = `${dt.getFullYear()}/${String(dt.getMonth() + 1).padStart(2, '0')}/${String(dt.getDate()).padStart(2, '0')} ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+            const pic = be.map(e => e.includes('<') ? e : `${e.split('@')[0]} <${e}>`).join(', ');
+
+            ilt += `${i + 1}) ${fo.line} Line ${fo.model} ${fo.name}호기 ${itm} [사유: ${rea}]\n- 장소 및 시간 : 삼성 ${fo.line} Line ${gt} 반입구, ${fd}\n- 반출 정보 : ${sn.replace(/\n/g, '\n  ')}\n- 현업 담당자: ${pic}\n${i < blocks.length - 1 ? '\n' : ''}`;
+        }
+
+        document.getElementById("resRecipientsOut").innerText = Array.from(allEmails).join(', '); 
+        document.getElementById("resRecipientsOut").closest('.space-y-2').style.display = "none";
+        
+        subject = `[배차요청] ${firstModel} ${blocks.length > 1 ? firstItem + ' 외 ' + (blocks.length - 1) + '건' : firstItem} 반출 배차 요청`;
+        fullText = `SCM / ( 이 희진 ) 과장님\n이하 관계자 각위\n\n연일 업무에 노고가 많으십니다.\n평가4부 ${myName}입니다.\n\n${firstModel} 반출 일정 Arrange 부탁드리며,\n하기와 같이 반출 정보 송부 드리오니 확인 부탁드리겠습니다.\n\n[반출]\n${ilt}\n이상입니다.\n\n${inform ? `(인폼내용) ${inform}\n\n` : ''}감사합니다.\n\n평가 4부\n${myName} 드림`;
+    }
+
+    document.getElementById("email-subject").innerText = subject; 
+    document.getElementById("email-body").innerText = fullText; 
+    document.getElementById("fullMailOutputArea").style.display = "block";
+}
+
+/** 작업 이력 카드에서 메일 작성 탭으로 전환 및 폼 자동 채우기 */
+function loadToMailGen(m, c) { 
+    document.getElementById('mailWorkEquipSearch').value = m; 
+    document.getElementById('mailJobDetail').value = c; 
+    document.getElementById('mailJobTitle').value = c.substring(0, 20) + (c.length > 20 ? "..." : ""); 
+    switchTab('email-gen', document.querySelectorAll('nav a')[1]); 
+    showToast("데이터 로드", "메일 작성 탭으로 전환되었습니다."); 
+}
+
+
+// ==============================================================================
+
+// [Module: maintenance.js]
+// 5. [Business: Maintenance] 설비 소모품(Laser, Scale Head, Mirror) 유지보수
+// ==============================================================================
+
+/** 중복 날짜 이력 제거 (정보가 더 많이 채워진 쪽 우선) */
+function dedupeHistoryArray(arr) {
+    const seen = {};
+    (arr || []).forEach(h => {
+        const key = h.date;
+        if (!key) return;
+        if (!seen[key]) { seen[key] = h; return; }
+        const score = x => Object.values(x).filter(v => v && v !== '-').length;
+        if (score(h) > score(seen[key])) seen[key] = h;
+    });
+    return Object.values(seen).sort((x, y) => new Date((x.date || '').replace(' ', 'T')) - new Date((y.date || '').replace(' ', 'T')));
+}
+
+/** 유지보수 데이터 객체 구조 정규화 */
+function normalizeMaintShape(d) {
+    if (!d) d = {};
+    if (!d.laser) d.laser = { replaceDate: null, offsetDays: 0, history: [] };
+    d.laser.history = dedupeHistoryArray(d.laser.history);
+
+    if (!d.scaleHead || typeof d.scaleHead !== 'object' || 'replaceDate' in d.scaleHead) {
+        d.scaleHead = {};
+    }
+    SCALE_AXES.forEach(a => { 
+        if (!d.scaleHead[a.key]) {
+            d.scaleHead[a.key] = { replaceDate: null, history: [] }; 
+        }
+        d.scaleHead[a.key].history = dedupeHistoryArray(d.scaleHead[a.key].history); 
+    });
+
+    if (!d.consumables) d.consumables = [];
+    return d;
+}
+
+/** 설비 키 기준 유지보수 데이터 조회 */
+function getMaintData(key) {
+    const all = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+    if (!all[key]) all[key] = {};
+    all[key] = normalizeMaintShape(all[key]);
+    return all[key];
+}
+
+/** 설비 키 기준 유지보수 데이터 저장 및 Push */
+function saveMaintData(key, data) {
+    const all = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+    all[key] = data;
+    localStorage.setItem("equipMaintenance", JSON.stringify(all));
+    if (typeof autoMergeAndSave === "function") autoMergeAndSave({ scope: 'maintenance' });
+}
+
+/** 유지보수 데이터 병합 함수 (객체 레벨) */
+function mergeMaintDataObjects(target, source) {
+    if (!source) return target;
+    target = normalizeMaintShape(target); 
+    source = normalizeMaintShape(source);
+    
+    target.laser.history = dedupeHistoryArray([...(target.laser.history || []), ...(source.laser.history || [])]);
+    if (source.laser.replaceDate && (!target.laser.replaceDate || new Date(source.laser.replaceDate) > new Date(target.laser.replaceDate))) {
+        target.laser.replaceDate = source.laser.replaceDate;
+        target.laser.offsetHours = source.laser.offsetHours || 0;
+        target.laser.headSN = source.laser.headSN || target.laser.headSN;
+        target.laser.psSN = source.laser.psSN || target.laser.psSN;
+        target.laser.diodeSN = source.laser.diodeSN || target.laser.diodeSN;
+    }
+
+    SCALE_AXES.forEach(a => {
+        const sa = source.scaleHead[a.key]; 
+        const ta = target.scaleHead[a.key];
+        ta.history = dedupeHistoryArray([...ta.history, ...sa.history]);
+        if (ta.history.length) { 
+            const last = ta.history[ta.history.length - 1]; 
+            ta.replaceDate = last.date; 
+            ta.sn = last.sn || ta.sn; 
+        }
+    });
+
+    const consMerged = {}; 
+    [...(target.consumables || []), ...(source.consumables || [])].forEach(c => { 
+        consMerged[`${c.date}|${c.name}`] = c; 
+    });
+    target.consumables = Object.values(consMerged);
+    return target;
+}
+
+/** 외부 백업/동기화에서 들어온 유지보수 데이터를 S/N 키 기준으로 안전 병합 */
+function applyIncomingMaintenance(incomingMaint) {
+    try {
+        const equipList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+        const nameToSN = {}; 
+        const snSet = new Set();
+        equipList.forEach(eq => { 
+            if (eq.name && eq.sn) nameToSN[eq.name.trim()] = eq.sn.trim(); 
+            if (eq.sn) snSet.add(eq.sn.trim()); 
+        });
+        const resolveKey = k => (snSet.has((k || '').trim()) ? k : (nameToSN[(k || '').trim()] || k));
+
+        const current = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+        const result = {};
+        Object.keys(current).forEach(key => {
+            const t = resolveKey(key);
+            result[t] = result[t] ? mergeMaintDataObjects(result[t], current[key]) : normalizeMaintShape(current[key]);
+        });
+        Object.keys(incomingMaint || {}).forEach(key => {
+            const t = resolveKey(key);
+            result[t] = result[t] ? mergeMaintDataObjects(result[t], incomingMaint[key]) : normalizeMaintShape(incomingMaint[key]);
+        });
+        localStorage.setItem("equipMaintenance", JSON.stringify(result));
+    } catch (err) {
+        console.error("유지보수 데이터 병합 실패:", err);
+    }
+}
+
+/** S/N 변경 시 유지보수 및 작업 이력 키 이전 */
+async function migrateEquipmentSN(oldSN, newSN) {
+    if (!oldSN || !newSN || oldSN === newSN) return;
+    
+    // 1) equipMaintenance 이전
+    const all = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+    const oldData = all[oldSN];
+    if (oldData) {
+        all[newSN] = all[newSN] ? mergeMaintDataObjects(all[newSN], oldData) : oldData;
+        delete all[oldSN];
+        localStorage.setItem("equipMaintenance", JSON.stringify(all));
+    }
+
+    // 2) IndexedDB 히스토리 sn 필드 이전
+    const allHist = await getIDBHistory();
+    let changed = false;
+    allHist.forEach(e => { 
+        if (e.sn === oldSN) { 
+            e.sn = newSN; 
+            changed = true; 
+        } 
+    });
+    if (changed) await putIDBHistory(allHist);
+
+    autoMergeAndSave({ scope: 'all' });
+    showToast("S/N 변경 반영", `이력이 새 S/N(${newSN})으로 이전되었습니다.`);
+}
+
+/** 최초 1회: 기존 호기명 기반 이력을 S/N 기반으로 마이그레이션 */
+async function migrateEquipmentDataToSN() {
+    try {
+        const equipList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+        const nameToSN = {}; 
+        const snSet = new Set();
+        equipList.forEach(eq => { 
+            if (eq.name && eq.sn) nameToSN[eq.name.trim()] = eq.sn.trim(); 
+            if (eq.sn) snSet.add(eq.sn.trim()); 
+        });
+        const resolveKey = k => (snSet.has((k || '').trim()) ? k : (nameToSN[(k || '').trim()] || k));
+
+        const maint = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+        const newMaint = {};
+        Object.keys(maint).forEach(key => {
+            const targetKey = resolveKey(key);
+            newMaint[targetKey] = newMaint[targetKey] ? mergeMaintDataObjects(newMaint[targetKey], maint[key]) : normalizeMaintShape(maint[key]);
+        });
+        localStorage.setItem("equipMaintenance", JSON.stringify(newMaint));
+
+        const hist = await getIDBHistory();
+        let changed = false;
+        hist.forEach(e => { 
+            if (!e.sn && nameToSN[(e.machine || '').trim()]) { 
+                e.sn = nameToSN[e.machine.trim()]; 
+                changed = true; 
+            } 
+        });
+        if (changed) await putIDBHistory(hist);
+
+        localStorage.setItem("snMigrationV1Done", "true");
+        console.log(`[S/N 정합성 점검] 완료 (설비 ${Object.keys(nameToSN).length}대 매칭)`);
+    } catch (err) {
+        console.error("S/N 마이그레이션 실패:", err);
+    }
+}
+
+/** 날짜 경과일수 계산 유틸 */
+function daysSince(dateStr) {
+    if (!dateStr) return 0;
+    const d = new Date(dateStr + 'T00:00:00');
+    const today = new Date(); 
+    today.setHours(0, 0, 0, 0);
+    return Math.floor((today - d) / 86400000);
+}
+function localDatetimeValue(date) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+function normalizeDatetimeValue(v) { 
+    if (!v) return ''; 
+    return v.length === 10 ? v + 'T00:00' : v; 
+}
+function elapsedParts(dtStr) {
+    if (!dtStr) return { days: 0, hours: 0 };
+    const d = new Date(normalizeDatetimeValue(dtStr));
+    let diffMs = new Date() - d; 
+    if (diffMs < 0) diffMs = 0;
+    return { days: Math.floor(diffMs / 86400000), hours: Math.floor((diffMs % 86400000) / 3600000) };
+}
+
+/** Laser 유지보수 섹션 렌더링 */
+function renderLaserSection(name) {
+    const data = getMaintData(name); 
+    const l = data.laser;
+    const auto = elapsedParts(l.replaceDate);
+    const totalManualHours = l.offsetHours !== undefined ? l.offsetHours : (l.offsetDays ? l.offsetDays * 24 : 0);
+    const totalHours = (auto.days * 24) + auto.hours + totalManualHours;
+    const displayDays = Math.floor(totalHours / 24);
+    const hasRecord = l.replaceDate || totalManualHours > 0;
+    
+    const wrap = document.getElementById('detailLaserWrap');
+    wrap.innerHTML = `
+        <div class="flex flex-wrap gap-4 items-end mb-6 bg-background p-4 border border-border rounded">
+            <div class="w-full md:w-64">
+                <label class="label-base mb-2">수동입력 (누적 시간 단위 추가)</label>
+                <input type="number" class="input-base h-10 px-3 rounded" id="laserOffsetInput" value="${totalManualHours}" placeholder="예: 168 (7일)">
+            </div>
+            <button class="btn-text bg-surface border border-border h-10 px-6 text-[10px] rounded hover:!text-primary" onclick="saveLaserOffset('${escapeHtml(name)}')">시간 저장</button>
+        </div>
+        
+        <div class="mb-4">
+            <div class="flex items-center justify-between mb-2">
+                <div>
+                    <span class="label-base !mb-0">현재 누적 사용시간</span>
+                    <p class="text-2xl font-black text-primary mt-1">${hasRecord ? `${displayDays}일 / ${totalHours}시간 사용 중` : '기록 없음'}</p>
+                    ${l.replaceDate ? `<p class="text-xs text-text-muted mt-1">기준 시작일: <span class="font-mono">${l.replaceDate.replace('T', ' ')}</span></p>` : ''}
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6 p-4 bg-background border border-border rounded">
+            <div><span class="label-base mb-1">Laser Head S/N</span><input class="input-base h-9 px-2 rounded text-xs" id="laserHeadSN" value="${escapeHtml(l.headSN || '')}" placeholder="Head S/N"></div>
+            <div><span class="label-base mb-1">P/S S/N</span><input class="input-base h-9 px-2 rounded text-xs" id="laserPsSN" value="${escapeHtml(l.psSN || '')}" placeholder="P/S S/N"></div>
+            <div><span class="label-base mb-1">Diode S/N</span><input class="input-base h-9 px-2 rounded text-xs" id="laserDiodeSN" value="${escapeHtml(l.diodeSN || '')}" placeholder="Diode S/N"></div>
+        </div>
+
+        <div class="border-t border-border pt-6 mt-6">
+            <div class="flex items-center justify-between mb-3">
+                <span class="label-base !mb-0">새 Laser 교체 등록</span>
+                <span class="text-[10px] text-text-muted">교체 완료 시 기존 기록은 아래 이력에 보관됩니다</span>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-end bg-background p-4 border border-border rounded">
+                <div>
+                    <label class="label-base mb-2">교체 일시</label>
+                    <input type="datetime-local" class="input-base h-10 px-3 rounded" id="newLaserDate" value="${localDatetimeValue(new Date())}">
+                </div>
+                <button class="btn-primary h-10 text-[10px] rounded" onclick="completeLaserReplace('${escapeHtml(name)}')">이력 추가 및 교체완료</button>
+            </div>
+        </div>
+
+        <div class="mt-6">
+            <span class="label-base mb-3">Laser 교체 히스토리</span>
+            ${l.history && l.history.length > 0 ? `
+                <div class="border border-border rounded overflow-hidden">
+                    <table class="w-full text-xs">
+                        <thead class="bg-background">
+                            <tr><th class="th-base">교체일자</th><th class="th-base">사용기간</th><th class="th-base">Head S/N</th><th class="th-base">P/S S/N</th><th class="th-base">Diode S/N</th><th class="th-base text-right">관리</th></tr>
+                        </thead>
+                        <tbody>
+                            ${l.history.slice().reverse().map((h, rIdx) => {
+                                const originalIndex = l.history.length - 1 - rIdx;
+                                const hHours = h.usedHours !== undefined ? h.usedHours : (h.usedDays ? h.usedDays * 24 : 0);
+                                const hDays = Math.floor(hHours / 24);
+                                return `<tr class="border-t border-border hover:bg-background/40"><td class="td-base font-mono">${escapeHtml((h.date || '-').replace('T', ' '))}</td><td class="td-base font-bold text-primary">${hDays}일 (${hHours}시간)</td><td class="td-base font-mono">${escapeHtml(h.headSN || '-')}</td><td class="td-base font-mono">${escapeHtml(h.psSN || '-')}</td><td class="td-base font-mono">${escapeHtml(h.diodeSN || '-')}</td><td class="td-base text-right"><button class="btn-text hover:!text-red-600 ml-2" onclick="deleteLaserHistory('${escapeHtml(name)}', ${originalIndex})">삭제</button></td></tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            ` : '<p class="text-text-muted text-xs">이전 교체 이력이 없습니다.</p>'}
+        </div>
+    `;
+}
+
+function saveLaserOffset(name) {
+    const val = parseInt(document.getElementById('laserOffsetInput').value) || 0;
+    const data = getMaintData(name);
+    data.laser.offsetHours = val;
+    data.laser.offsetDays = Math.floor(val / 24);
+    data.laser.headSN = document.getElementById('laserHeadSN').value.trim();
+    data.laser.psSN = document.getElementById('laserPsSN').value.trim();
+    data.laser.diodeSN = document.getElementById('laserDiodeSN').value.trim();
+    saveMaintData(name, data);
+    renderLaserSection(name);
+    showToast("저장 완료", "Laser 정보 및 누적 시간이 저장되었습니다.");
+}
+
+function completeLaserReplace(name) {
+    const newDate = document.getElementById('newLaserDate').value;
+    if (!newDate) { showToast("오류", "교체 일시를 입력해주세요."); return; }
+    const data = getMaintData(name);
+    const l = data.laser;
+
+    if (l.replaceDate) {
+        const auto = elapsedParts(l.replaceDate);
+        const manualHours = l.offsetHours !== undefined ? l.offsetHours : (l.offsetDays ? l.offsetDays * 24 : 0);
+        const totalHours = (auto.days * 24) + auto.hours + manualHours;
+        l.history.push({
+            date: l.replaceDate,
+            usedDays: Math.floor(totalHours / 24),
+            usedHours: totalHours,
+            headSN: l.headSN || "-",
+            psSN: l.psSN || "-",
+            diodeSN: l.diodeSN || "-"
+        });
+    }
+
+    l.replaceDate = newDate;
+    l.offsetHours = 0;
+    l.offsetDays = 0;
+    l.headSN = document.getElementById('laserHeadSN').value.trim();
+    l.psSN = document.getElementById('laserPsSN').value.trim();
+    l.diodeSN = document.getElementById('laserDiodeSN').value.trim();
+    saveMaintData(name, data);
+    renderLaserSection(name);
+    showToast("교체 완료", "새 Laser 기준일이 설정되고 이전 기록이 이력에 보관되었습니다.");
+}
+
+function deleteLaserHistory(name, index) {
+    if (!confirm('이 교체 이력을 삭제하시겠습니까?')) return;
+    const data = getMaintData(name);
+    data.laser.history.splice(index, 1);
+    saveMaintData(name, data);
+    renderLaserSection(name);
+    showToast("삭제 완료", "교체 이력이 삭제되었습니다.");
+}
+
+/** Scale Head 5개 축 유지보수 섹션 렌더링 */
+function toggleScaleHeadHistory(key) { 
+    document.getElementById(`scaleHeadHist_${key}`).classList.toggle('hidden'); 
+}
+
+function saveScaleHeadAxisDate(name, key, value) {
+    const data = getMaintData(name);
+    data.scaleHead[key].replaceDate = value || null;
+    const snInput = document.getElementById(`scaleHeadSn_${key}`);
+    if (snInput) data.scaleHead[key].sn = snInput.value.trim();
+    saveMaintData(name, data);
+    renderScaleHeadSection(name);
+    showToast("저장 완료", `Scale Head [${key}] 축 교체일이 저장되었습니다.`);
+}
+
+function renderScaleHeadSection(name) {
+    const data = getMaintData(name);
+    const wrap = document.getElementById('detailScaleHeadWrap');
+    wrap.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            ${SCALE_AXES.map(a => {
+                const item = data.scaleHead[a.key] || { replaceDate: null, history: [] };
+                const days = daysSince(item.replaceDate);
+                const hasDate = !!item.replaceDate;
+                const histCount = item.history ? item.history.length : 0;
+                return `
+                    <div class="card-base p-4 rounded-md border border-border bg-background/50 flex flex-col justify-between">
+                        <div>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-sm font-black text-primary">${a.label} 축</span>
+                                <span class="text-xs font-bold ${hasDate ? 'text-primary' : 'text-text-muted'}">${hasDate ? `${days}일 사용 중` : '기록 없음'}</span>
+                            </div>
+                            <div class="space-y-2 mb-3">
+                                <div><label class="label-base mb-1 text-[10px]">교체일자</label><input type="date" class="input-base h-8 px-2 text-xs rounded" id="scaleHeadDate_${a.key}" value="${item.replaceDate || ''}" onchange="saveScaleHeadAxisDate('${escapeHtml(name)}', '${a.key}', this.value)"></div>
+                                <div><label class="label-base mb-1 text-[10px]">Scale Head S/N</label><input class="input-base h-8 px-2 text-xs rounded" id="scaleHeadSn_${a.key}" value="${escapeHtml(item.sn || '')}" placeholder="S/N" onchange="saveScaleHeadAxisDate('${escapeHtml(name)}', '${a.key}', document.getElementById('scaleHeadDate_${a.key}').value)"></div>
+                            </div>
+                        </div>
+                        <div class="border-t border-border/50 pt-2 flex items-center justify-between">
+                            <button class="btn-text text-[10px]" onclick="toggleScaleHeadHistory('${a.key}')">이력 (${histCount}건)</button>
+                            <button class="btn-text text-[10px] text-primary hover:underline" onclick="completeScaleHeadReplace('${escapeHtml(name)}', '${a.key}')">교체완료</button>
+                        </div>
+                        <div id="scaleHeadHist_${a.key}" class="hidden mt-2 pt-2 border-t border-border/50 text-[10px] space-y-1">
+                            ${histCount > 0 ? item.history.slice().reverse().map((h, hIdx) => {
+                                const originalIndex = item.history.length - 1 - hIdx;
+                                return `<div class="flex justify-between items-center text-text-muted"><span>${escapeHtml(h.date)} (${escapeHtml(h.sn || '-')})</span><button class="text-red-500 hover:underline" onclick="deleteScaleHeadHistory('${escapeHtml(name)}', '${a.key}', ${originalIndex})">삭제</button></div>`;
+                            }).join('') : '<p class="text-text-muted">이전 이력 없음</p>'}
+                        </div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+}
+
+function completeScaleHeadReplace(name, key) {
+    const input = document.getElementById(`scaleHeadDate_${key}`);
+    const snInput = document.getElementById(`scaleHeadSn_${key}`);
+    const dateVal = input ? input.value : '';
+    const snVal = snInput ? snInput.value.trim() : '';
+    if (!dateVal) { showToast("오류", "교체일자를 먼저 선택해주세요."); return; }
+    
+    const data = getMaintData(name);
+    const target = data.scaleHead[key];
+    if (target.replaceDate) {
+        target.history.push({ date: target.replaceDate, sn: target.sn || '-' });
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    target.replaceDate = today;
+    if (snVal) target.sn = snVal;
+    saveMaintData(name, data);
+    renderScaleHeadSection(name);
+    showToast("교체 완료", `[${key}] 축이 오늘(${today}) 일자로 갱신되었습니다.`);
+}
+
+function deleteScaleHeadHistory(name, key, index) {
+    if (!confirm('이 교체 이력을 삭제하시겠습니까?')) return;
+    const data = getMaintData(name);
+    data.scaleHead[key].history.splice(index, 1);
+    saveMaintData(name, data);
+    renderScaleHeadSection(name);
+    showToast("삭제 완료", "이력이 삭제되었습니다.");
+}
+
+/** 기타 소모품 (Consumables) 섹션 렌더링 및 관리 */
+function renderConsumablesSection(name) {
+    const data = getMaintData(name);
+    const list = data.consumables || [];
+    const wrap = document.getElementById('detailConsumablesWrap');
+    wrap.innerHTML = `
+        <div class="mb-4 bg-background p-4 border border-border rounded flex flex-wrap gap-3 items-end">
+            <div class="flex-1 min-w-[140px]"><label class="label-base mb-1 text-[10px]">부품명</label><input class="input-base h-9 px-2 text-xs rounded" id="newConsumName" placeholder="예: Mirror, Lens"></div>
+            <div class="w-36"><label class="label-base mb-1 text-[10px]">교체일자</label><input type="date" class="input-base h-9 px-2 text-xs rounded" id="newConsumDate" value="${new Date().toISOString().slice(0, 10)}"></div>
+            <div class="flex-[2] min-w-[180px]"><label class="label-base mb-1 text-[10px]">메모 (선택)</label><input class="input-base h-9 px-2 text-xs rounded" id="newConsumNote" placeholder="비고 / 작업자 등"></div>
+            <button class="btn-primary h-9 px-4 text-[10px] rounded" onclick="addConsumableEntry('${escapeHtml(name)}')">추가</button>
+        </div>
+        ${list.length > 0 ? `
+            <div class="border border-border rounded overflow-hidden">
+                <table class="w-full text-xs">
+                    <thead class="bg-background">
+                        <tr><th class="th-base">부품명</th><th class="th-base">교체일자</th><th class="th-base">경과일</th><th class="th-base">메모</th><th class="th-base text-right">삭제</th></tr>
+                    </thead>
+                    <tbody>
+                        ${list.slice().reverse().map(item => `
+                            <tr class="border-t border-border hover:bg-background/40">
+                                <td class="td-base font-bold text-text-main">${escapeHtml(item.name)}</td>
+                                <td class="td-base font-mono">${escapeHtml(item.date)}</td>
+                                <td class="td-base text-text-muted">${daysSince(item.date)}일 경과</td>
+                                <td class="td-base text-text-muted">${escapeHtml(item.note || '-')}</td>
+                                <td class="td-base text-right"><button class="btn-text hover:!text-red-600" onclick="deleteConsumableEntry('${escapeHtml(name)}', '${item.id}')">삭제</button></td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        ` : '<p class="text-text-muted text-xs">등록된 소모품 교환 이력이 없습니다.</p>'}
+    `;
+}
+
+function addConsumableEntry(name) {
+    const cName = document.getElementById('newConsumName').value.trim();
+    const cDate = document.getElementById('newConsumDate').value;
+    const cNote = document.getElementById('newConsumNote').value.trim();
+    if (!cName) { showToast("오류", "부품명을 입력해주세요."); return; }
+    if (!cDate) { showToast("오류", "교체일자를 선택해주세요."); return; }
+    
+    const data = getMaintData(name);
+    data.consumables.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        name: cName,
+        date: cDate,
+        note: cNote,
+        savedAt: new Date().toISOString()
+    });
+    saveMaintData(name, data);
+    renderConsumablesSection(name);
+    showToast("추가 완료", `[${cName}] 소모품 교환 이력이 등록되었습니다.`);
+}
+
+function deleteConsumableEntry(name, id) {
+    if (!confirm('삭제하시겠습니까?')) return;
+    const data = getMaintData(name);
+    data.consumables = data.consumables.filter(c => c.id !== id);
+    saveMaintData(name, data);
+    renderConsumablesSection(name);
+}
+
+
+// ==============================================================================
+
+// [Module: database.js]
+// 6. [Business: Management] 설비 마스터 데이터, 수신처 목록 및 SFDC 검색 연동
+// ==============================================================================
+
+/** 설비 상세 페이지 열기 */
+function openEquipDetail(sn) {
+    const data = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+    const eq = data.find(d => d.sn === sn);
+    if (!eq) { 
+        showToast("오류", "해당 설비를 찾을 수 없습니다."); 
+        return; 
+    }
+    window.location.hash = `detail-${encodeURIComponent(sn)}`;
+    document.querySelectorAll('.tab-content').forEach(s => { 
+        s.classList.remove('block'); 
+        s.classList.add('hidden'); 
+    });
+    document.getElementById('equipDetail').classList.remove('hidden');
+    document.getElementById('equipDetail').classList.add('block');
+    document.querySelectorAll('nav a').forEach(a => { 
+        a.classList.remove('nav-active', 'text-text-main'); 
+        a.classList.add('text-text-muted'); 
+    });
+    renderEquipDetail(eq);
+    if (window.innerWidth < 768) closeSidebar();
+}
+
+/** 설비 상세 페이지 닫기 (Management 탭으로 복귀) */
+function closeEquipDetail() {
+    window.location.hash = '';
+    const dbNav = Array.from(document.querySelectorAll('nav a')).find(a => (a.getAttribute('onclick') || '').includes("'database'"));
+    switchTab('database', dbNav);
+}
+
+/** 설비 상세 페이지 종합 렌더링 */
+async function renderEquipDetail(eq) {
+    document.getElementById('detailTitle').textContent = eq.name;
+    document.getElementById('detailSubtitle').textContent = `${eq.line || '-'} Line · ${eq.model || '-'} · ${eq.location || '-'}`;
+    document.getElementById('detailInfoGrid').innerHTML = `
+        <div><span class="label-base">라인</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.line || '-')}</p></div>
+        <div><span class="label-base">모델명</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.model || '-')}</p></div>
+        <div><span class="label-base">S/N</span><p class="text-sm font-mono text-text-main mt-1">${escapeHtml(eq.sn || '-')}</p></div>
+        <div><span class="label-base">위치</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.location || '-')}</p></div>
+    `;
+    
+    const wrap = document.getElementById('detailHistoryWrap');
+    wrap.innerHTML = '<p class="text-text-muted text-xs">불러오는 중...</p>';
+    
+    const raw = await getIDBHistory();
+    const entries = raw
+        .filter(e => !e.isDeleted && (e.sn === eq.sn || (!e.sn && e.machine === eq.name)))
+        .sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
+
+    if (entries.length === 0) {
+        wrap.innerHTML = '<p class="text-text-muted text-xs">등록된 작업 이력이 없습니다.</p>';
+    } else {
+        const ul = document.createElement('ul'); 
+        ul.className = 'relative space-y-0 pl-8';
+        ul.innerHTML = '<div class="timeline-line"></div>';
+        
+        entries.forEach((e, idx) => {
+            const li = document.createElement('li'); 
+            li.className = 'timeline-item relative flex gap-5 pb-8'; 
+            li.style.animationDelay = `${idx * 50}ms`;
+            
+            const d = new Date(e.savedAt); 
+            const savedStr = `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+            
+            li.innerHTML = `
+                <div class="timeline-dot mt-1"></div>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="px-2 py-0.5 border border-border text-primary text-[10px] font-bold rounded">EVENT</span>
+                        <span class="text-sm font-black text-text-main">${escapeHtml(e.date || '날짜 미상')}</span>
+                    </div>
+                    <div class="${e.rawText ? 'cursor-pointer hover:text-primary transition-colors' : ''}" ${e.rawText ? `onclick="document.getElementById('detailRaw_${e.id}').classList.toggle('hidden')"` : ''}>
+                        <p class="text-sm text-text-main font-medium leading-relaxed">${escapeHtml(e.content || '—')}</p>
+                        ${e.rawText ? '<span class="material-symbols-outlined text-sm text-text-muted mt-1 block">open_in_full</span>' : ''}
+                    </div>
+                    ${e.rawText ? `<div id="detailRaw_${e.id}" class="hidden mt-3 p-4 bg-background/70 text-text-main border border-border text-xs leading-relaxed whitespace-pre-wrap rounded backdrop-blur-sm">${escapeHtml(e.rawText)}</div>` : ''}
+                    <div class="mt-3 text-[10px] text-text-muted flex gap-3 items-center flex-wrap">
+                        <span>👤 ${escapeHtml(e.worker || '—')}</span>
+                        <span>⏱️ Recorded: ${savedStr}</span>
+                        <button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="loadToMailGen('${escapeHtml(eq.name)}', '${escapeHtml(e.content).replace(/'/g, "\\'")}')">메일 작성</button>
+                    </div>
+                </div>
+            `;
+            ul.appendChild(li);
+        });
+        wrap.innerHTML = ''; 
+        wrap.appendChild(ul);
+    }
+    
+    renderLaserSection(eq.sn);
+    renderScaleHeadSection(eq.sn);
+    renderConsumablesSection(eq.sn);
+}
+
+/** 설비 마스터 테이블 렌더링 */
+function renderTable() { 
+    const tbody = document.getElementById("dataTableBody"); 
+    const raw = JSON.parse(localStorage.getItem("equipmentData") || "[]"); 
+    tbody.innerHTML = ""; 
+    
+    const data = raw.map((item, i) => ({ item, i }))
+        .sort((a, b) => a.item.line.localeCompare(b.item.line, 'ko', { numeric: true }) || a.i - b.i); 
+    
+    data.forEach(({ item, i }) => { 
+        if (item.isEditing) { 
+            tbody.innerHTML += `
+                <tr class="bg-background/60">
+                    <td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editLine_${i}" value="${escapeHtml(item.line)}"></td>
+                    <td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editModel_${i}" value="${escapeHtml(item.model)}"></td>
+                    <td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editName_${i}" value="${escapeHtml(item.name)}"></td>
+                    <td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editSN_${i}" value="${escapeHtml(item.sn)}"></td>
+                    <td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editLoc_${i}" value="${escapeHtml(item.location)}"></td>
+                    <td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-primary px-3 py-1 text-[10px] rounded" onclick="saveEdit(${i})">Save</button></div></td>
+                </tr>
+            `; 
+        } else { 
+            tbody.innerHTML += `
+                <tr class="hover:bg-background/40 transition-colors">
+                    <td class="td-base px-6 font-medium">${escapeHtml(item.line)}</td>
+                    <td class="td-base px-6 text-text-muted">${escapeHtml(item.model)}</td>
+                    <td class="td-base px-6 text-primary font-bold equip-link cursor-pointer hover:underline" data-sn="${escapeHtml(item.sn)}">${escapeHtml(item.name)}</td>
+                    <td class="td-base px-6 text-xs text-text-muted font-mono">${escapeHtml(item.sn)}</td>
+                    <td class="td-base px-6 text-text-muted">${escapeHtml(item.location)}</td>
+                    <td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-text" onclick="enableEdit(${i})">Edit</button><button class="btn-text hover:!text-red-600" onclick="deleteData(${i})">Del</button></div></td>
+                </tr>
+            `; 
+        } 
+    }); 
+
+    tbody.querySelectorAll(".equip-link").forEach(el => {
+        el.addEventListener("click", () => { 
+            if (!el.dataset.sn) { 
+                showToast("오류", "S/N이 없는 설비는 상세페이지를 열 수 없습니다. S/N을 먼저 입력해주세요."); 
+                return; 
+            } 
+            openEquipDetail(el.dataset.sn); 
+        });
+    }); 
+    filterTable(); 
+}
+
+/** 설비 테이블 검색 필터 */
+function filterTable() { 
+    const v = document.getElementById("searchInput").value.toLowerCase(); 
+    const r = document.getElementById("dataTableBody").getElementsByTagName("tr"); 
+    for (let x of r) {
+        x.style.display = x.innerText.toLowerCase().includes(v) ? "" : "none";
+    }
+}
+
+/** 설비 인라인 편집 모드 활성화 */
+function enableEdit(i) { 
+    const d = JSON.parse(localStorage.getItem("equipmentData") || "[]"); 
+    d[i].isEditing = true; 
+    localStorage.setItem("equipmentData", JSON.stringify(d)); 
+    renderTable(); 
+}
+
+/** 설비 인라인 편집 저장 */
+function saveEdit(i) { 
+    const d = JSON.parse(localStorage.getItem("equipmentData") || "[]"); 
+    const oldSN = d[i].sn; 
+    const newSN = document.getElementById(`editSN_${i}`).value.trim(); 
+    
+    d[i] = { 
+        line: document.getElementById(`editLine_${i}`).value.trim(), 
+        model: document.getElementById(`editModel_${i}`).value.trim(), 
+        name: document.getElementById(`editName_${i}`).value.trim(), 
+        sn: newSN, 
+        location: document.getElementById(`editLoc_${i}`).value.trim(), 
+        isEditing: false 
+    }; 
+    
+    localStorage.setItem("equipmentData", JSON.stringify(d)); 
+    renderTable(); 
+    autoMergeAndSave({ scope: 'equipment' }); 
+    if (oldSN && newSN && oldSN !== newSN) {
+        migrateEquipmentSN(oldSN, newSN); 
+    }
+}
+
+/** 엑셀 붙여넣기 텍스트 대량 등록 */
+function importFromExcel() { 
+    const v = document.getElementById("excelInput").value.trim(); 
+    if (!v) return; 
+    const d = JSON.parse(localStorage.getItem("equipmentData") || "[]"); 
+    let added = 0; 
+    
+    v.split('\n').forEach(r => { 
+        const c = r.split('\t'); 
+        if (c.length >= 3) { 
+            d.push({
+                line: c[0]?.trim() || "",
+                model: c[1]?.trim() || "",
+                name: c[2]?.trim() || "",
+                sn: c[3]?.trim() || "",
+                location: c[4]?.trim() || ""
+            }); 
+            added++; 
+        } 
+    }); 
+    
+    if (added > 0) { 
+        localStorage.setItem("equipmentData", JSON.stringify(d)); 
+        renderTable(); 
+        document.getElementById("excelInput").value = ""; 
+        showToast("등록 완료", `${added}개 설비가 추가되었습니다.`); 
+        autoMergeAndSave({ scope: 'equipment' }); 
+    } 
+}
+
+/** 단일 설비 추가 */
+function addNewData() { 
+    const name = document.getElementById("newName").value.trim(); 
+    if (!name) return alert("호기명은 필수입니다."); 
+    const d = JSON.parse(localStorage.getItem("equipmentData") || "[]"); 
+    d.push({
+        line: document.getElementById("newLine").value, 
+        model: document.getElementById("newModel").value, 
+        name: name, 
+        sn: document.getElementById("newSN").value, 
+        location: document.getElementById("newLocation").value
+    }); 
+    localStorage.setItem("equipmentData", JSON.stringify(d)); 
+    renderTable(); 
+    autoMergeAndSave({ scope: 'equipment' }); 
+}
+
+/** 단일 설비 삭제 */
+function deleteData(i) { 
+    if (confirm("정말 이 설비를 삭제하시겠습니까?")) { 
+        const d = JSON.parse(localStorage.getItem("equipmentData") || "[]"); 
+        d.splice(i, 1); 
+        localStorage.setItem("equipmentData", JSON.stringify(d)); 
+        renderTable(); 
+        autoMergeAndSave({ scope: 'equipment' }); 
+    } 
+}
+
+/** 수신처 테이블 렌더링 */
+function renderRecipientTable() { 
+    const tbody = document.getElementById("recipientTableBody"); 
+    const data = JSON.parse(localStorage.getItem("recipientData") || "{}"); 
+    tbody.innerHTML = ""; 
+    
+    Object.keys(data).sort().forEach(line => { 
+        tbody.innerHTML += `
+            <tr class="hover:bg-background/40 transition-colors">
+                <td class="td-base font-medium px-6">${escapeHtml(line)}</td>
+                <td class="td-base text-text-muted px-6" id="recip_${line}">${escapeHtml(data[line])}</td>
+                <td class="td-base px-6">
+                    <div class="flex items-center justify-end gap-3">
+                        <button class="btn-text" onclick="copyRecipient('${line}')">Copy</button>
+                        <button class="btn-text" onclick="editRecipient('${line}')">Edit</button>
+                        <button class="btn-text hover:!text-red-600" onclick="deleteRecipient('${line}')">Del</button>
+                    </div>
+                </td>
+            </tr>
+        `; 
+    }); 
+}
+
+function copyRecipient(l) { 
+    const d = JSON.parse(localStorage.getItem("recipientData") || "{}"); 
+    const rawData = d[l] || ""; 
+    navigator.clipboard.writeText(rawData).then(() => showToast("복사 완료", `[${l}] 수신처가 복사되었습니다.`)); 
+}
+function editRecipient(l) { 
+    const d = JSON.parse(localStorage.getItem("recipientData") || "{}"); 
+    const n = prompt(`[${l}] 라인 수신처 수정:`, d[l]); 
+    if (n !== null && n.trim()) { 
+        d[l] = n.trim(); 
+        localStorage.setItem("recipientData", JSON.stringify(d)); 
+        renderRecipientTable(); 
+        autoMergeAndSave({ scope: 'recipient' }); 
+    } 
+}
+function addRecipient() { 
+    const l = document.getElementById("newRecipLine").value.trim().toUpperCase();
+    const e = document.getElementById("newRecipEmails").value.trim(); 
+    if (!l || !e) return alert("라인과 이메일을 모두 입력하세요."); 
+    const d = JSON.parse(localStorage.getItem("recipientData") || "{}"); 
+    d[l] = e; 
+    localStorage.setItem("recipientData", JSON.stringify(d)); 
+    renderRecipientTable(); 
+    autoMergeAndSave({ scope: 'recipient' }); 
+}
+function deleteRecipient(l) { 
+    if (confirm(`[${l}] 라인의 수신처를 삭제하시겠습니까?`)) { 
+        const d = JSON.parse(localStorage.getItem("recipientData") || "{}"); 
+        delete d[l]; 
+        localStorage.setItem("recipientData", JSON.stringify(d)); 
+        renderRecipientTable(); 
+        autoMergeAndSave({ scope: 'recipient' }); 
+    } 
+}
+
+/** 🔎 Salesforce Lightning 전용 Base64 URL 검색 생성기 */
+function searchSalesforce() {
+    const query = document.getElementById('sfSearchInput').value.trim();
+    if (!query) { alert("검색어를 입력해주세요."); return; }
+    
+    const sfData = {
+        "componentDef": "forceSearch:searchPageDesktop",
+        "attributes": {
+            "term": query,
+            "scopeMap": { "type": "TOP_RESULTS" },
+            "context": {
+                "FILTERS": {},
+                "searchSource": "ASSISTANT_DIALOG",
+                "disableIntentQuery": false,
+                "disableSpellCorrection": false
+            },
+            "groupId": "DEFAULT"
+        },
+        "state": {}
+    };
+    
+    const jsonString = JSON.stringify(sfData);
+    const encodedData = btoa(unescape(encodeURIComponent(jsonString)));
+    const targetPath = "/one/one.app#" + encodedData;
+    const sfSearchUrl = "https://hht.my.salesforce.com/?startURL=" + encodeURIComponent(targetPath);
+    
+    window.open(sfSearchUrl, "_blank");
+}
+
+
+// ==============================================================================
+
+// [Module: ui.js]
+// 7. [UI & View Renderers] 화면 전환, 렌더링, 타임라인, 다크모드 및 유틸리티
+// ==============================================================================
+
+/** 테마 및 UI 유틸리티 */
+function toggleDarkMode() { 
+    const h = document.documentElement; 
+    h.classList.toggle('dark'); 
+    const is = h.classList.contains('dark'); 
+    localStorage.setItem('darkMode', is ? 'yes' : 'no'); 
+    document.getElementById('darkModeIcon').innerText = is ? 'light_mode' : 'dark_mode'; 
+    const mobileIcon = document.getElementById('darkModeIconMobile'); 
+    if (mobileIcon) mobileIcon.innerText = is ? 'light_mode' : 'dark_mode'; 
+}
+function initTheme() { 
+    if (localStorage.getItem('darkMode') === 'yes') { 
+        document.documentElement.classList.add('dark'); 
+        document.getElementById('darkModeIcon').innerText = 'light_mode'; 
+    } 
+}
+function openSidebar() { 
+    document.getElementById('sidebar').classList.add('open'); 
+    document.getElementById('sidebar-overlay').style.display = 'block'; 
+}
+function closeSidebar() { 
+    document.getElementById('sidebar').classList.remove('open'); 
+    document.getElementById('sidebar-overlay').style.display = 'none'; 
+}
+function switchTab(t, e) { 
+    document.querySelectorAll('.tab-content').forEach(s => { 
+        s.classList.remove('block'); 
+        s.classList.add('hidden'); 
+    }); 
+    document.getElementById(t).classList.remove('hidden'); 
+    document.getElementById(t).classList.add('block'); 
+    document.querySelectorAll('nav a').forEach(a => { 
+        a.classList.remove('nav-active', 'text-text-main'); 
+        a.classList.add('text-text-muted'); 
+    }); 
+    if (e) {
+        e.classList.remove('text-text-muted'); 
+        e.classList.add('nav-active', 'text-text-main'); 
+    }
+    if (t === 'history') renderHistory(); 
+    if (window.innerWidth < 768) closeSidebar(); 
+}
+function showToast(t, m) { 
+    const ts = document.getElementById('toast'); 
+    document.getElementById('toast-title').innerText = t; 
+    document.getElementById('toast-msg').innerText = m; 
+    ts.classList.remove('translate-y-32', 'opacity-0'); 
+    setTimeout(() => ts.classList.add('translate-y-32', 'opacity-0'), 3000); 
+}
+function escapeHtml(s) { 
+    return String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); 
+}
+function copyRow() { 
+    const t = `${document.getElementById("resDate").innerText}\t${document.getElementById("resMachine").innerText}\t${document.getElementById("resLine").innerText}\t${document.getElementById("resContent").innerText}\t${document.getElementById("resWorker").innerText}`; 
+    navigator.clipboard.writeText(t).then(() => showToast("복사 완료", "데이터가 복사되었습니다.")); 
+}
+function copyToClipboard(id, type) { 
+    navigator.clipboard.writeText(document.getElementById(id).innerText).then(() => showToast("복사 완료", `${type} 복사됨`)); 
+}
+
+/** 사이드바 히스토리 개수 배지 업데이트 */
+async function updateHistoryBadge() { 
+    const raw = await getIDBHistory();
+    const h = raw.filter(e => !e.isDeleted); 
+    const b = document.getElementById("historyBadge"); 
+    if (h.length > 0) { 
+        b.textContent = h.length; 
+        b.classList.remove("hidden"); 
+    } else {
+        b.classList.add("hidden"); 
+    }
+}
+
+/** 설비별 특이사항 / 메모 저장 */
+function saveMachineNote(m, t) { 
+    let ns = JSON.parse(localStorage.getItem("machineNotes") || "{}"); 
+    ns[m] = t.trim(); 
+    localStorage.setItem("machineNotes", JSON.stringify(ns)); 
+    showToast("메모 저장", `[${m}] 특이사항이 저장되었습니다.`); 
+    autoMergeAndSave({ scope: 'notes' }); 
+}
+
+/** 🕒 작업 히스토리 타임라인 및 설비 칩 아코디언 렌더링 */
+async function renderHistory() {
+    const raw = await getIDBHistory();
+    const searchVal = (document.getElementById("historySearch")?.value || "").toLowerCase();
+    const sortOrder = document.getElementById("historySortOrder")?.value || "desc";
+    const chipsWrap = document.getElementById("historyEquipChips");
+    const timelineWrap = document.getElementById("historyTimelineWrap");
+    const emptyEl = document.getElementById("historyEmpty");
+    
+    const filtered = raw.filter(e => !e.isDeleted && (
+        e.machine.toLowerCase().includes(searchVal) || 
+        e.content.toLowerCase().includes(searchVal) || 
+        (e.worker || "").toLowerCase().includes(searchVal) || 
+        (e.rawText || "").toLowerCase().includes(searchVal)
+    ));
+    
+    if (filtered.length === 0) { 
+        chipsWrap.innerHTML = ""; 
+        timelineWrap.innerHTML = ""; 
+        emptyEl.classList.remove("hidden"); 
+        return; 
+    }
+    emptyEl.classList.add("hidden");
+
+    // 라인별 설비 그룹화
+    const lineMap = {}; 
+    let firstMachine = null;
+    filtered.forEach(e => { 
+        const line = e.line || "미분류"; 
+        if (!lineMap[line]) lineMap[line] = {}; 
+        if (!lineMap[line][e.machine]) lineMap[line][e.machine] = 0; 
+        lineMap[line][e.machine]++; 
+        if (!firstMachine) firstMachine = e.machine; 
+    });
+
+    let selectedLine = null; 
+    let isSelectedValid = false; 
+    for (let l in lineMap) { 
+        if (lineMap[l][selectedChip]) { 
+            isSelectedValid = true; 
+            selectedLine = l; 
+            break; 
+        } 
+    }
+    if (!selectedChip || !isSelectedValid) selectedChip = firstMachine; 
+    for (let l in lineMap) { 
+        if (lineMap[l][selectedChip]) { 
+            selectedLine = l; 
+            break; 
+        } 
+    }
+
+    // 칩 아코디언 렌더링
+    chipsWrap.innerHTML = ""; 
+    chipsWrap.className = "flex flex-col gap-2 p-4 w-full";
+    Object.keys(lineMap).sort().forEach(line => {
+        const ms = lineMap[line];
+        const mks = Object.keys(ms).sort();
+        const isOpen = line === selectedLine;
+
+        const groupDiv = document.createElement("div"); 
+        groupDiv.className = `border border-border/50 rounded overflow-hidden transition-colors ${isOpen ? 'accordion-open' : ''}`;
+        
+        const headerBtn = document.createElement("button"); 
+        headerBtn.className = "w-full px-4 py-3 bg-background/50 flex justify-between items-center hover:opacity-80 text-left";
+        headerBtn.onclick = function() { this.parentElement.classList.toggle('accordion-open'); };
+        headerBtn.innerHTML = `
+            <span class="label-base text-text-main !mb-0 flex items-center gap-2">
+                <span class="material-symbols-outlined text-base text-primary">factory</span> ${escapeHtml(line)} 
+                <span class="bg-primary text-white text-[9px] px-1.5 py-0.5 rounded">${mks.reduce((sum, m) => sum + ms[m], 0)}건</span>
+            </span>
+            <span class="material-symbols-outlined accordion-rotate text-text-main">expand_more</span>
+        `;
+        
+        const contentDiv = document.createElement("div"); 
+        contentDiv.className = "accordion-content bg-surface/50";
+        
+        const chipsContainer = document.createElement("div"); 
+        chipsContainer.className = "p-4 flex flex-wrap gap-2 border-t border-border/50";
+        
+        mks.forEach(m => {
+            const active = m === selectedChip; 
+            const chip = document.createElement("button");
+            chip.className = `px-4 py-2 text-xs font-bold uppercase tracking-widest border transition-all flex items-center gap-2 rounded ${active ? "bg-primary text-white border-primary" : "bg-surface/50 text-text-muted border-border hover:border-primary hover:text-primary"}`;
+            chip.innerHTML = `
+                <span class="material-symbols-outlined text-sm">precision_manufacturing</span> ${escapeHtml(m)} 
+                <span class="ml-1 ${active ? 'bg-surface text-primary' : 'bg-background text-text-muted'} text-[9px] font-black px-1.5 py-0.5 rounded">${ms[m]}</span>
+            `;
+            chip.onclick = () => { selectedChip = m; renderHistory(); }; 
+            chipsContainer.appendChild(chip);
+        });
+        
+        contentDiv.appendChild(chipsContainer); 
+        groupDiv.appendChild(headerBtn); 
+        groupDiv.appendChild(contentDiv); 
+        chipsWrap.appendChild(groupDiv);
+    });
+
+    // 선택된 호기의 타임라인 렌더링
+    const entries = filtered.filter(e => e.machine === selectedChip).sort((a, b) => { 
+        const da = new Date(a.savedAt), db = new Date(b.savedAt); 
+        return sortOrder === "desc" ? db - da : da - db; 
+    });
+
+    timelineWrap.innerHTML = ""; 
+    const wrap = document.createElement("div"); 
+    wrap.className = "card-base overflow-hidden rounded-md shadow-sm";
+    wrap.innerHTML = `
+        <div class="px-6 py-4 bg-background/50 border-b border-border flex justify-between items-center">
+            <div>
+                <span class="text-sm font-black text-primary uppercase tracking-widest">${escapeHtml(selectedChip)}</span>
+                <span class="ml-3 text-xs text-text-muted">총 ${entries.length}건 기록</span>
+            </div>
+            <button class="btn-text hover:!text-red-600" onclick="deleteEquipHistory('${escapeHtml(selectedChip)}')">
+                <span class="material-symbols-outlined text-sm">delete</span> 삭제
+            </button>
+        </div>
+    `;
+
+    // 설비 특이사항 메모 영역
+    const noteDiv = document.createElement("div"); 
+    noteDiv.className = "p-6 border-b border-border/50 bg-background/30";
+    const noteContent = JSON.parse(localStorage.getItem("machineNotes") || "{}")[selectedChip] || "";
+    const noteItems = noteContent.split(/\n\n+/).filter(s => s.trim());
+    const noteListHtml = noteItems.length ? noteItems.map(item => {
+        const lines = item.trim().split('\n');
+        const header = lines[0];
+        const body = lines.slice(1).join('\n').trim();
+        return `
+            <div class="border border-border rounded p-2 mb-2 bg-background text-xs">
+                <div class="font-bold text-primary mb-1">${escapeHtml(header)}</div>
+                ${body ? `<div class="text-text-muted whitespace-pre-wrap">${escapeHtml(body)}</div>` : ''}
+            </div>
+        `;
+    }).join('') : '<p class="text-text-muted text-xs">등록된 특이사항이 없습니다.</p>';
+
+    noteDiv.innerHTML = `
+        <label class="label-base text-primary mb-2 flex items-center gap-1">
+            <span class="material-symbols-outlined text-[16px]">edit_note</span>
+            [${escapeHtml(selectedChip)}] 특이사항 및 부품차용
+            <button onclick="(function(btn){
+                    var rv=document.getElementById('noteReadView_${escapeHtml(selectedChip)}');
+                    var ea=document.getElementById('noteEditArea_${escapeHtml(selectedChip)}');
+                    var isEdit=!ea.classList.contains('hidden');
+                    rv.classList.toggle('hidden');
+                    ea.classList.toggle('hidden');
+                    btn.textContent=isEdit?'편집':'목록';
+                })(this)"
+                class="ml-auto text-[10px] bg-surface border border-border px-2 py-0.5 rounded hover:bg-primary hover:text-white transition-colors">
+                편집
+            </button>
+        </label>
+        <div id="noteReadView_${escapeHtml(selectedChip)}" class="mb-3 max-h-40 overflow-y-auto">
+            ${noteListHtml}
+        </div>
+        <textarea class="input-base h-20 p-3 resize-y rounded hidden" id="noteEditArea_${escapeHtml(selectedChip)}"
+            placeholder="메모 입력\n\n새 항목은 기존 내용 아래에 이어서 작성하세요.\n예) -2026/06/11- [Laser 교체]\n상세 내용"
+            onchange="saveMachineNote('${escapeHtml(selectedChip)}', this.value)">${escapeHtml(noteContent)}</textarea>
+    `;
+    wrap.appendChild(noteDiv);
+
+    // 타임라인 리스트
+    const body = document.createElement("div"); 
+    body.className = "p-8"; 
+    const ul = document.createElement("ul"); 
+    ul.className = "relative space-y-0 pl-8";
+    ul.innerHTML = '<div class="timeline-line"></div>';
+
+    entries.forEach((e, idx) => {
+        const li = document.createElement("li"); 
+        li.className = "timeline-item relative flex gap-5 pb-8"; 
+        li.style.animationDelay = `${idx * 50}ms`;
+        
+        const savedDate = new Date(e.savedAt); 
+        const savedStr = `${savedDate.getFullYear()}.${savedDate.getMonth() + 1}.${savedDate.getDate()} ${savedDate.getHours()}:${savedDate.getMinutes()}`;
+        
+        li.innerHTML = `
+            <div class="timeline-dot mt-1"></div>
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="px-2 py-0.5 border border-border text-primary text-[10px] font-bold rounded">EVENT</span>
+                    <span class="text-sm font-black text-text-main">${escapeHtml(e.date || "날짜 미상")}</span>
+                </div>
+                <div class="${e.rawText ? 'cursor-pointer hover:text-primary transition-colors' : ''}" ${e.rawText ? `onclick="document.getElementById('rawText_${e.id}').classList.toggle('hidden')"` : ''}>
+                    <p class="text-sm text-text-main font-medium leading-relaxed">${escapeHtml(e.content || "—")}</p>
+                    ${e.rawText ? '<span class="material-symbols-outlined text-sm text-text-muted mt-1 block">open_in_full</span>' : ''}
+                </div>
+                ${e.rawText ? `<div id="rawText_${e.id}" class="hidden mt-3 p-4 bg-background/70 text-text-main border border-border text-xs leading-relaxed whitespace-pre-wrap rounded backdrop-blur-sm">${escapeHtml(e.rawText)}</div>` : ''}
+                <div class="mt-3 text-[10px] text-text-muted flex gap-3 items-center flex-wrap">
+                    <span>👤 ${escapeHtml(e.worker || "—")}</span>
+                    <span>⏱️ Recorded: ${savedStr}</span>
+                    <button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="loadToMailGen('${escapeHtml(e.machine)}', '${escapeHtml(e.content).replace(/'/g, "\\'")}')">메일 작성</button>
+                </div>
+            </div>
+            <button class="btn-text self-start mt-1 ml-2 hover:!text-red-500" onclick="deleteSingleHistory('${e.id}')">
+                <span class="material-symbols-outlined text-base">close</span>
+            </button>
+        `;
+        ul.appendChild(li);
+    });
+
+    body.appendChild(ul); 
+    wrap.appendChild(body); 
+    timelineWrap.appendChild(wrap);
+}
+
+/** 새 작업 이력 저장 */
+async function saveHistoryEntry(entry) { 
+    let history = await getIDBHistory();
+    entry.id = Date.now() + "_" + Math.floor(Math.random() * 1000); 
+    entry.updatedAt = Date.now();
+    entry.yearMonth = getYearMonthFromDate(entry.date, entry.savedAt);
+    
+    if (!entry.sn) {
+        const eqList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+        const matched = eqList.find(eq => eq.name === entry.machine);
+        if (matched && matched.sn) entry.sn = matched.sn;
+    }
+    
+    if (history.some(e => e.machine === entry.machine && e.date === entry.date && e.content === entry.content)) return; 
+    history.push(entry); 
+    await putIDBHistory(history);
+    await updateHistoryBadge(); 
+    autoMergeAndSave({ scope: 'history', yearMonths: [entry.yearMonth] }); 
+}
+
+/** 특정 설비의 이력 일괄 삭제 (소프트 삭제) */
+async function deleteEquipHistory(m) { 
+    if (!confirm(`[${m}] 기록을 모두 삭제하시겠습니까?`)) return; 
+    let h = await getIDBHistory();
+    const affectedMonths = new Set();
+    h.forEach(e => { 
+        if (e.machine === m) { 
+            e.isDeleted = true; 
+            e.updatedAt = Date.now(); 
+            affectedMonths.add(e.yearMonth || getYearMonthFromDate(e.date, e.savedAt));
+        } 
+    });
+    await putIDBHistory(h); 
+    selectedChip = null; 
+    await updateHistoryBadge(); 
+    await renderHistory(); 
+    autoMergeAndSave({ scope: 'history', yearMonths: Array.from(affectedMonths) }); 
+}
+
+/** 단일 작업 이력 삭제 (소프트 삭제) */
+async function deleteSingleHistory(id) { 
+    if (!confirm("이 작업 이력을 삭제하시겠습니까?")) return; 
+    let h = await getIDBHistory(); 
+    let item = h.find(e => e.id === id);
+    let ym = null;
+    if (item) { 
+        item.isDeleted = true; 
+        item.updatedAt = Date.now(); 
+        ym = item.yearMonth || getYearMonthFromDate(item.date, item.savedAt);
+    }
+    await putIDBHistory(h); 
+    await updateHistoryBadge(); 
+    await renderHistory(); 
+    autoMergeAndSave({ scope: 'history', yearMonths: ym ? [ym] : [] }); 
+}
+
+/** 🔒 관리자 권한(비밀번호: 4437) 전체 이력 일괄 삭제 */
+async function clearAllHistory() { 
+    const pwd = prompt("관리자 권한이 필요합니다.\n비밀번호를 입력하세요.");
+    if (pwd !== "4437") { 
+        if (pwd !== null) alert("⛔ 비밀번호가 일치하지 않습니다. 일괄 삭제가 취소됩니다."); 
+        return; 
+    }
+    if (!confirm("⚠️ [경고] 정말 모든 기록을 일괄 삭제하시겠습니까?\n이후 [Sync] 시 팀원 모두의 화면에서도 삭제 처리됩니다!")) return; 
+    
+    let h = await getIDBHistory();
+    h.forEach(e => { 
+        e.isDeleted = true; 
+        e.updatedAt = Date.now(); 
+    });
+    await putIDBHistory(h);
+    selectedChip = null; 
+    await updateHistoryBadge(); 
+    await renderHistory(); 
+    autoMergeAndSave({ scope: 'history' }); 
+}
+
+/** 전체 데이터 초기화 */
+async function resetAllData() { 
+    if (!confirm("⚠️ [경고] 모든 데이터를 완전히 초기화하시겠습니까?")) return; 
+    localStorage.setItem("equipmentData", "[]"); 
+    localStorage.setItem("recipientData", "{}"); 
+    localStorage.setItem("machineNotes", "{}"); 
+    localStorage.setItem("equipMaintenance", "{}"); 
+    await putIDBHistory([]);
+    renderTable(); 
+    renderRecipientTable(); 
+    await updateHistoryBadge(); 
+    if (document.getElementById('history').classList.contains('block')) await renderHistory(); 
+    showToast("초기화 완료", "모든 데이터가 삭제되었습니다."); 
+    autoMergeAndSave(); 
+}
+
+
+// ==============================================================================
+
+// [Module: app.js]
+// 8. [Lifecycle & Initialization] 애플리케이션 시작 및 주기적 백그라운드 태스크
+// ==============================================================================
+
+/** 애플리케이션 진입점 (Window Load) */
+window.onload = async function() {
+    // 1) 최초 Box 동기화 게이트 확인
+    checkSyncGateOnLoad();
+
+    // 2) 테마 및 기본 스토리지 키 초기화
+    initTheme();
+    ["equipmentData"].forEach(k => { if (!localStorage.getItem(k)) localStorage.setItem(k, "[]"); });
+    if (!localStorage.getItem("recipientData")) localStorage.setItem("recipientData", "{}");
+    if (!localStorage.getItem("machineNotes")) localStorage.setItem("machineNotes", "{}");
+    
+    // 3) 스토리지 마이그레이션 (IndexedDB & S/N 정합성)
+    await migrateToIndexedDB();
+    await migrateEquipmentDataToSN();
+
+    // 4) UI 테이블 및 배지 렌더링
+    renderTable(); 
+    renderRecipientTable(); 
+    await updateHistoryBadge();
+    
+    // 5) 기본 입력 폼 초기값 설정
+    if (localStorage.getItem("storedMyName")) {
+        document.getElementById("mailMyName").value = localStorage.getItem("storedMyName");
+    }
+    document.getElementById("mailDate").valueAsDate = new Date();
+    addShipBlock();
+
+    // 6) 1주일 주기 PC 자동 백업 점검
+    await autoLocalBackup();
+
+    // 7) Box 연결 핸들 권한 상태 점검
+    let dirHandle = await getFileHandle('boxDirectoryHandle');
+    let fileHandle = await getFileHandle('boxBackupFile');
+    let activeHandle = dirHandle || fileHandle;
+    if (activeHandle && !(await verifyPermission(activeHandle, true, false))) {
+        const btn = document.getElementById("syncBtn");
+        if (btn) { 
+            btn.classList.add("text-red-500", "font-black"); 
+            document.getElementById("syncIcon").innerText = "error"; 
+            document.getElementById("syncText").innerText = "연결 끊김(클릭)"; 
+        }
+    }
+
+    // 8) 상태 배너 갱신 및 주기적 감시 리스너 등록
+    await updateSyncStatusBanner();
+    window.addEventListener('focus', updateSyncStatusBanner);
+    document.addEventListener('visibilitychange', () => { 
+        if (document.visibilityState === 'visible') updateSyncStatusBanner(); 
+    });
+    setInterval(updateSyncStatusBanner, 5 * 60 * 1000);
+
+    // 9) 1시간 간격 주기적 백그라운드 자동 Sync
+    function updateAutoSyncLabel(ts) {
+        let el = document.getElementById('autoSyncLabel');
+        if (!el) {
+            el = document.createElement('p');
+            el.id = 'autoSyncLabel';
+            el.style.cssText = 'font-size:9px;color:var(--text-muted,#888);text-align:center;margin-top:4px;opacity:0.7;';
+            const syncBtn = document.getElementById('syncBtn');
+            if (syncBtn && syncBtn.parentNode) syncBtn.parentNode.appendChild(el);
+        }
+        const d = new Date(ts);
+        const revision = localStorage.getItem('teamDbRevision') || '0';
+        el.textContent = `TEAM DB 최신 확인: ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')} · Rev. ${revision}`;
+    }
+
+    function runAutoSync() {
+        syncWithBox(false, false, false);
+        updateAutoSyncLabel(Date.now());
+    }
+
+    runAutoSync();
+    setInterval(runAutoSync, AUTO_SYNC_INTERVAL);
+};
+
+/** URL Hash 라우팅 복원 (설비 상세페이지 #detail-SN) */
+window.addEventListener('load', () => {
+    if (location.hash.startsWith('#detail-')) {
+        const sn = decodeURIComponent(location.hash.replace('#detail-', ''));
+        openEquipDetail(sn);
+    }
+});
+</script>
+</body>
+</html>

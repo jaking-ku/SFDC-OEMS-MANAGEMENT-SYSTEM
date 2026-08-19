@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Hitachi SFDC / OEMS Manager (Local Secure)</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#b7000c", 
+                        "primary-hover": "#e60012",
+                        "surface": "var(--bg-surface)",
+                        "background": "var(--bg-body)",
+                        "border": "var(--border-color)",
+                        "text-main": "var(--text-main)",
+                        "text-muted": "var(--text-muted)"
+                    },
+                    fontFamily: {
+                        "headline": ["Inter", "Malgun Gothic", "sans-serif"],
+                        "body": ["Inter", "Malgun Gothic", "sans-serif"],
+                        "label": ["Inter", "Malgun Gothic", "sans-serif"]
+                    },
+                },
+            },
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer components {
+            .card-base { @apply bg-surface border border-border transition-colors; }
+            .label-base { @apply block text-[10px] font-bold text-text-muted uppercase tracking-widest; }
+            .input-base { @apply w-full bg-surface text-text-main border border-border text-sm focus:border-primary focus:ring-0 transition-colors; }
+            .btn-primary { @apply bg-primary hover:bg-primary-hover text-white font-bold uppercase tracking-widest transition-all inline-flex items-center justify-center gap-1; }
+            /* 💡 수정됨: flex를 inline-flex로 변경하여 버튼이 세로로 꽉 차는 현상 방지 */
+            .btn-text { @apply text-[10px] font-bold text-text-muted hover:text-primary uppercase tracking-widest transition-colors inline-flex items-center gap-1; }
+            .th-base { @apply px-4 py-3 text-[10px] font-bold text-text-muted uppercase; }
+            .td-base { @apply px-4 py-3 text-sm text-text-main border-b border-border; }
+            .nav-item { @apply flex items-center w-full text-sm uppercase tracking-wider transition-colors cursor-pointer; }
+        }
+    </style>
+    <style>
+        :root {
+            --bg-surface: #ffffff;
+            --bg-body: #f8f9fa;
+            --border-color: #e5e7eb;
+            --text-main: #1b1c1c;
+            --text-muted: #6b7280;
+        }
+        html.dark {
+            --bg-surface: #1e293b;
+            --bg-body: #0f172a;
+            --border-color: #334155;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+        #topbar { display: none; }
+        #sidebar-overlay { display: none; }
+        body { font-family: 'Inter', 'Malgun Gothic', sans-serif; background-color: var(--bg-body); color: var(--text-main); transition: background-color 0.3s, color 0.3s; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .nav-active { border-left: 3px solid #b7000c; color: #b7000c !important; font-weight: 700; background: rgba(183,0,12,0.06); }
+        .accordion-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
+        .accordion-open .accordion-content { max-height: 800px; transition: max-height 0.5s ease-in; overflow-y: auto;}
+        .accordion-rotate { transition: transform 0.3s ease; }
+        .accordion-open .accordion-rotate { transform: rotate(180deg); }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-body); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+        .timeline-line { position: absolute; left: 15px; top: 24px; bottom: 0; width: 2px; background: var(--border-color); }
+        .timeline-dot { width: 10px; height: 10px; background: #b7000c; border: 2px solid var(--bg-surface); box-shadow: 0 0 0 2px #b7000c; border-radius: 50%; flex-shrink: 0; margin-top: 3px; z-index: 10; }
+        .timeline-item { opacity: 0; transform: translateY(8px); animation: timelineIn 0.3s ease forwards; }
+        @keyframes timelineIn { to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .save-badge { display: inline-flex; align-items: center; gap: 4px; background: #b7000c; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .08em; padding: 2px 8px; text-transform: uppercase; }
+
+        /* =============================================
+           📱 모바일 전용 최적화 (사이드바 레이아웃)
+           max-width: 767px 이하에서만 적용됨
+           ============================================= */
+        @media (max-width: 767px) {
+
+            /* ── 사이드바 숨김 / 상단 topbar 전환 ── */
+            #sidebar {
+                position: fixed !important;
+                left: -240px !important;
+                top: 0 !important;
+                bottom: 0 !important;
+                z-index: 50 !important;
+                transition: left 0.3s ease !important;
+                width: 240px !important;
+            }
+            #sidebar.open { left: 0 !important; }
+            #topbar { display: flex !important; }
+            #sidebar-overlay { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 49; }
+
+            /* ── 메인 영역 ── */
+            #app-body { margin-left: 0 !important; }
+            footer { margin-left: 0 !important; }
+            main { padding: 16px !important; padding-top: 72px !important; }
+
+            /* ── 섹션 공통 ── */
+            .tab-content { gap: 16px !important; }
+            .tab-content > .border-b { padding-bottom: 12px !important; }
+            .tab-content h2 { font-size: 1.1rem !important; }
+            .tab-content > p { font-size: 12px !important; }
+
+            /* ── 추출(Extraction) 섹션 ── */
+            #extraction .card-base { padding: 16px !important; }
+            #extraction textarea#mailInput { height: 120px !important; }
+            #extraction .flex.justify-end { justify-content: stretch !important; }
+            #extraction .flex.justify-end button { width: 100% !important; padding: 12px !important; }
+            /* 결과 테이블 헤더/툴바 */
+            #extractResult .flex.justify-between { flex-direction: column !important; gap: 8px !important; align-items: flex-start !important; }
+            /* 결과 테이블 - 카드 형태로 전환 */
+            #extractResult table { display: block !important; }
+            #extractResult thead { display: none !important; }
+            #extractResult tbody { display: block !important; }
+            #extractResult tbody tr { display: flex !important; flex-direction: column !important; padding: 12px 16px !important; gap: 6px !important; }
+            #extractResult tbody td { padding: 2px 0 !important; border: none !important; font-size: 13px !important; text-align: left !important; }
+            #extractResult tbody td#resWorker::before { content: "작업자: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+            #extractResult tbody td#resLine::before { content: "라인: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+            #extractResult tbody td#resMachine::before { content: "설비호기: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+            #extractResult tbody td#resDate::before { content: "작업일자: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+            #extractResult tbody td#resContent { text-align: left !important; }
+            #extractResult tbody td#resContent::before { content: "작업내용: "; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; display: block; margin-bottom: 2px; }
+
+            /* ── 메일 작성(Email Gen) 섹션 ── */
+            #email-gen > .border-b { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
+            #email-gen > .border-b > div.flex { width: 100% !important; }
+            #email-gen > .border-b button { flex: 1 !important; font-size: 9px !important; padding: 8px 4px !important; }
+            /* 12컬럼 그리드 → 1컬럼 */
+            #email-gen .grid.grid-cols-1.xl\\:grid-cols-12 { grid-template-columns: 1fr !important; gap: 16px !important; }
+            #email-gen .xl\\:col-span-4 { padding: 16px !important; }
+            #email-gen .xl\\:col-span-8 { padding: 0 !important; }
+            #email-gen .xl\\:col-span-8 > div:last-child { padding: 16px !important; }
+            /* 2컬럼 입력 그리드 → 1컬럼 */
+            #email-gen .grid.grid-cols-2 { grid-template-columns: 1fr !important; }
+            #email-gen #area-ship-only .grid.grid-cols-2 { grid-template-columns: 1fr !important; }
+
+            /* ── 관리(Database) 섹션 ── */
+            #database .card-base { overflow: hidden; }
+            /* 수신처 추가 폼 */
+            #database .flex.gap-4.items-end { flex-direction: column !important; gap: 8px !important; }
+            #database .flex.gap-4.items-end .flex-1,
+            #database .flex.gap-4.items-end .flex-\\[3\\] { width: 100% !important; }
+            #database .flex.gap-4.items-end button { width: 100% !important; }
+            /* 설비 등록 그리드 */
+            #database .grid.grid-cols-2.md\\:grid-cols-5 { grid-template-columns: 1fr 1fr !important; }
+            /* 마스터 테이블 - 가로 스크롤 허용 */
+            #database .overflow-x-auto.h-\\[600px\\] { height: 400px !important; }
+            /* 검색창 영역 */
+            #database .p-4.bg-background.flex.flex-col { flex-direction: column !important; gap: 8px !important; }
+            #database .relative.w-full.md\\:w-96 { width: 100% !important; }
+            /* 수신처 테이블 - 가로 스크롤 */
+            #database .overflow-x-auto { -webkit-overflow-scrolling: touch; }
+
+            /* ── 작업 히스토리 섹션 ── */
+            #history > .flex.items-end { flex-direction: column !important; align-items: flex-start !important; gap: 10px !important; }
+            #history > .flex.items-end > div:last-child { flex-direction: column !important; align-items: stretch !important; width: 100% !important; gap: 8px !important; }
+            #history #historySearch { width: 100% !important; }
+            #history #historySortOrder { width: 100% !important; }
+            #history > .flex.items-end button { width: 100% !important; justify-content: center; }
+            /* 칩 선택 영역 */
+            #history .card-base .p-4.flex.flex-wrap { padding: 12px !important; gap: 6px !important; }
+
+            /* ── 푸터 ── */
+            footer { padding: 24px 16px !important; margin-top: 32px !important; }
+            footer .max-w-7xl { flex-direction: column !important; text-align: center !important; gap: 12px !important; }
+            footer .flex.flex-col.items-center { align-items: center !important; }
+
+            /* ── 토스트 알림 ── */
+            #toast { right: 12px !important; bottom: 12px !important; left: 12px !important; right: 12px !important; padding: 16px !important; }
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+
+<!-- 🔒 최초 DB 연결 게이트 — 팀 데이터 정합성 보호 및 실시간 진행상황 안내 -->
+<div class="hidden fixed inset-0 z-[200] flex items-center justify-center p-6" id="syncGateOverlay" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(2px);">
+    <div class="card-base bg-surface rounded-xl shadow-2xl max-w-md w-full p-8 text-center transition-all duration-300">
+        
+        <!-- 1. 초기 연결 대기 뷰 -->
+        <div id="syncGateViewInitial" class="space-y-5">
+            <div class="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+                <span class="material-symbols-outlined text-3xl text-primary animate-pulse">cloud_sync</span>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold text-text-main" id="syncGateTitle">Box DB 폴더 연결이 필요합니다</h3>
+                <p class="text-xs text-text-muted mt-2 leading-relaxed" id="syncGateDesc">
+                    이 브라우저에서는 아직 팀 공용 Box DB 폴더(SFDC_DB)와 연결된 적이 없습니다.<br>
+                    먼저 폴더를 연결하고 최신 데이터를 불러와야 다른 팀원의 이력이 누락되지 않습니다.
+                </p>
+            </div>
+            <button id="syncGateConnectBtn" class="btn-primary w-full py-3 text-xs rounded-lg flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all" onclick="gateConnect()">
+                <span class="material-symbols-outlined text-base">folder_open</span> Box DB 폴더 연결하기
+            </button>
+            <p class="text-[10px] text-text-muted cursor-pointer hover:text-primary underline transition-colors" onclick="gateSkip()">연결 없이 계속 진행 (비권장 · 팀 데이터와 어긋날 수 있음)</p>
+        </div>
+
+        <!-- 2. 실시간 동기화 진행 뷰 -->
+        <div id="syncGateViewProgress" class="hidden space-y-5">
+            <div class="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto relative">
+                <span class="material-symbols-outlined text-3xl text-primary animate-spin" id="syncGateSpinIcon">sync</span>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold text-text-main" id="syncGateProgressTitle">Box DB 데이터를 동기화하고 있습니다</h3>
+                <p class="text-xs text-text-muted mt-1 leading-relaxed" id="syncGateProgressDesc">
+                    클라우드에서 최신 팀 데이터를 안전하게 불러오는 중입니다.
+                </p>
+            </div>
+
+            <!-- 퍼센트 게이지 영역 -->
+            <div class="space-y-2 text-left bg-body/50 p-4 rounded-lg border border-border">
+                <div class="flex items-center justify-between text-xs font-semibold">
+                    <span class="text-text-main flex items-center gap-1.5" id="syncGateStepLabel">
+                        <span class="w-2 h-2 rounded-full bg-primary animate-ping"></span>
+                        연결 준비 중...
+                    </span>
+                    <span class="text-primary font-bold text-sm" id="syncGatePercentLabel">0%</span>
+                </div>
+                <div class="w-full h-3 bg-border rounded-full overflow-hidden p-0.5 relative">
+                    <div id="syncGateProgressBar" class="h-full bg-gradient-to-r from-primary to-primary-hover rounded-full transition-all duration-300 ease-out" style="width: 0%;"></div>
+                </div>
+                <div class="flex items-center justify-between text-[11px] text-text-muted pt-1">
+                    <span class="truncate max-w-[280px]" id="syncGateDetailText">Box 폴더 구조를 탐색하는 중...</span>
+                    <span class="shrink-0 text-[10px] opacity-75" id="syncGateItemCounter">0 / 0</span>
+                </div>
+            </div>
+
+            <p class="text-[11px] text-text-muted leading-relaxed">
+                💡 데이터 양과 네트워크 속도에 따라 약 10초 ~ 30초 소요될 수 있습니다.<br>창을 닫지 마시고 잠시만 기다려주세요.
+            </p>
+        </div>
+
+        <!-- 3. 동기화 성공 뷰 -->
+        <div id="syncGateViewSuccess" class="hidden space-y-4">
+            <div class="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto text-emerald-600 dark:text-emerald-400">
+                <span class="material-symbols-outlined text-4xl">check_circle</span>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold text-text-main">동기화 완료!</h3>
+                <p class="text-xs text-text-muted mt-1 leading-relaxed" id="syncGateSuccessDesc">
+                    최신 팀 데이터가 성공적으로 반영되었습니다.
+                </p>
+            </div>
+        </div>
+
+        <!-- 4. 동기화 오류 뷰 -->
+        <div id="syncGateViewError" class="hidden space-y-4">
+            <div class="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto text-red-600 dark:text-red-400">
+                <span class="material-symbols-outlined text-4xl">error_outline</span>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold text-text-main">동기화 실패</h3>
+                <p class="text-xs text-red-500 mt-1 leading-relaxed" id="syncGateErrorMsg">
+                    팀 DB 폴더를 불러오지 못했습니다.
+                </p>
+            </div>
+            <div class="space-y-2 pt-2">
+                <button class="btn-primary w-full py-2.5 text-xs rounded-lg flex items-center justify-center gap-2" onclick="gateRetry()">
+                    <span class="material-symbols-outlined text-base">refresh</span> 다시 시도하기
+                </button>
+                <p class="text-[10px] text-text-muted cursor-pointer hover:text-primary underline" onclick="gateSkip()">연결 없이 계속 진행</p>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- 모바일 오버레이 (사이드바 열렸을 때 배경 dimming) -->
+<div id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+<!-- 모바일 상단 Topbar -->
+<header id="topbar" class="fixed top-0 left-0 right-0 z-40 bg-surface border-b border-border h-14 items-center justify-between px-4 transition-colors">
+    <button onclick="openSidebar()" class="text-text-muted hover:text-primary transition-colors flex items-center">
+        <span class="material-symbols-outlined">menu</span>
+    </button>
+    <div class="flex items-center gap-2">
+        <span class="text-lg font-black tracking-tighter text-primary">HITACHI</span>
+        <span class="text-[10px] font-bold uppercase tracking-widest text-text-muted">SFDC/OEMS</span>
+    </div>
+    <button onclick="toggleDarkMode()" class="text-text-muted hover:text-primary transition-colors flex items-center">
+        <span class="material-symbols-outlined text-xl" id="darkModeIconMobile">dark_mode</span>
+    </button>
+</header>
+
+<!-- 전체 앱 래퍼 -->
+<div id="app-body" class="flex min-h-screen" style="margin-left: 240px;">
+
+    <!-- ── 좌측 사이드바 (LNB) ── -->
+    <aside id="sidebar" class="fixed top-0 left-0 bottom-0 w-[240px] z-40 bg-surface border-r border-border flex flex-col transition-colors overflow-y-auto">
+
+        <!-- 로고 영역 -->
+        <div class="px-6 py-5 border-b border-border shrink-0">
+            <div class="flex items-center gap-2 mb-1">
+                <span class="text-2xl font-black tracking-tighter text-black">HITACHI</span>
+                <span class="text-[9px] font-bold text-primary border border-primary/40 rounded px-1.5 py-0.5 leading-none">v1.1</span>
+            </div>
+            <span class="text-[10px] font-bold uppercase tracking-widest text-text-muted">평가4부 Management System</span>
+        </div>
+
+        <!-- 내비게이션 메뉴 -->
+        <nav class="flex flex-col py-4 flex-1 gap-1 px-3">
+            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('extraction', this)">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">data_exploration</span>
+                Information Extraction
+            </a>
+            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('email-gen', this)">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">mail</span>
+                Email Generation
+            </a>
+            <a class="nav-item nav-active text-text-main text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('database', this)">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">database</span>
+                Management
+            </a>
+            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="switchTab('history', this)">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">history</span>
+                Work History
+                <span id="historyBadge" class="ml-auto bg-primary text-white text-[9px] font-black px-1.5 py-0.5 hidden rounded-sm">0</span>
+            </a>
+            <a class="nav-item text-text-muted hover:text-primary text-xs px-3 py-2.5 rounded-r-sm" onclick="window.open('https://jaking-ku.github.io/Team_schedule/', '_blank')" style="cursor:pointer;">
+                <span class="material-symbols-outlined text-base mr-3 shrink-0">calendar_month</span>
+                Schedule
+            </a>
+        </nav>
+
+        <!-- 하단 시스템 제어 버튼 -->
+        <div class="border-t border-border shrink-0 p-3 space-y-1">
+            <button onclick="toggleDarkMode()" class="btn-text w-full px-3 py-2.5 rounded hover:bg-background justify-start">
+                <span class="material-symbols-outlined text-base mr-3" id="darkModeIcon">dark_mode</span>
+                <span class="text-xs uppercase tracking-widest">Dark Mode</span>
+            </button>
+            <button class="btn-text w-full px-3 py-2.5 rounded hover:bg-background hover:!text-blue-500 justify-start" onclick="linkBoxFile()">
+                <span class="material-symbols-outlined text-base mr-3">folder_open</span>
+                <span class="text-xs uppercase tracking-widest">DB 폴더 연결</span>
+            </button>
+            <button class="btn-text w-full px-3 py-2.5 rounded hover:bg-background hover:!text-red-500 justify-start" onclick="disconnectDB()">
+                <span class="material-symbols-outlined text-base mr-3">link_off</span>
+                <span class="text-xs uppercase tracking-widest">연결 끊기</span>
+            </button>
+            <button id="syncBtn" class="btn-text w-full px-3 py-2.5 rounded hover:bg-background hover:!text-green-500 justify-start transition-all duration-300" onclick="manualSync()">
+                <span id="syncIcon" class="material-symbols-outlined text-base mr-3">sync</span>
+                <span id="syncText" class="text-xs uppercase tracking-widest">강제 최신화</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- ── 오른쪽 콘텐츠 영역 ── -->
+    <div class="flex flex-col flex-1 min-w-0">
+
+<main class="flex-1 w-full max-w-7xl mx-auto p-8 relative">
+
+    <!-- ⚠️ [v1.1 추가] 동기화 상태 배너 — 미연결/권한끊김/오래된 동기화 시에만 노출 -->
+    <div class="hidden mb-6 px-4 py-3 rounded-md border flex items-center justify-between gap-3 text-xs" id="syncStatusBanner">
+        <div class="flex items-center gap-2 min-w-0">
+            <span class="material-symbols-outlined text-base shrink-0" id="syncStatusIcon">warning</span>
+            <span id="syncStatusText" class="truncate"></span>
+        </div>
+        <button class="btn-primary px-3 py-1.5 text-[10px] rounded shrink-0" onclick="manualSync()">지금 동기화</button>
+    </div>
+
+
+    <section id="extraction" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+        <div class="border-b border-border pb-4">
+            <h2 class="text-2xl font-bold text-text-main">메일 정보 추출</h2>
+            <p class="text-sm text-text-muted mt-1">작업 메일 텍스트 분석 및 엑셀 데이터화 · 추출 시 원본 내용이 PC 로컬 히스토리에 안전하게 저장됩니다</p>
+        </div>
+        <div class="card-base p-8 rounded-md">
+            <label class="label-base mb-4">작업 메일 텍스트 붙여넣기</label>
+<textarea class="input-base bg-background h-32 p-4 mb-6 font-mono rounded" id="mailInput" placeholder="작성한 메일을 통째로 붙여넣으십시오..."></textarea>
+
+<label class="label-base mb-4">특이사항 / 부품교체 (선택)</label>
+<select class="input-base bg-background h-10 px-3 mb-3 rounded" id="extraNoteCategory" onchange="onExtraCategoryChange()">
+    <option value="">— 항목 선택 (없으면 비워두세요) —</option>
+    <option value="Laser 교체">Laser 교체</option>
+    <option value="Scale Head">Scale Head</option>
+    <option value="기타 소모품">기타 소모품</option>
+</select>
+
+<!-- Laser 교체 입력폼 -->
+<div id="extraLaserFields" class="hidden border border-border rounded p-4 mb-3 space-y-3 bg-background/40">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div><label class="label-base mb-1 text-[10px]">교체 일시</label><input type="datetime-local" class="input-base h-9 px-2 rounded text-xs" id="extraLaserDate"></div>
+        <div><label class="label-base mb-1 text-[10px]">Head S/N</label><input class="input-base h-9 px-2 rounded text-xs" id="extraLaserHead" placeholder="Head S/N"></div>
+        <div><label class="label-base mb-1 text-[10px]">P/S S/N</label><input class="input-base h-9 px-2 rounded text-xs" id="extraLaserPs" placeholder="P/S S/N"></div>
+        <div><label class="label-base mb-1 text-[10px]">Diode S/N</label><input class="input-base h-9 px-2 rounded text-xs" id="extraLaserDiode" placeholder="Diode S/N"></div>
+    </div>
+    <p class="text-[10px] text-text-muted">💡 교체 일시를 비워두면 메일에서 추출된 작업일자가 자동 적용됩니다.</p>
+</div>
+
+<!-- Scale Head 입력폼 (5축, 날짜 입력된 축만 반영) -->
+<div id="extraScaleFields" class="hidden border border-border rounded p-4 mb-3 space-y-2 bg-background/40">
+    <div class="grid grid-cols-3 gap-2 text-[10px] text-text-muted font-bold px-1"><span>축</span><span>교체일</span><span>S/N</span></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">X</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_X"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_X" placeholder="S/N"></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">Y1 (YL)</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_Y1"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_Y1" placeholder="S/N"></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">Y2 (YR)</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_Y2"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_Y2" placeholder="S/N"></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">Z1 (ZL)</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_Z1"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_Z1" placeholder="S/N"></div>
+    <div class="grid grid-cols-3 gap-2 items-center"><span class="text-xs font-bold text-primary">Z2 (ZR)</span><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraShDate_Z2"><input class="input-base h-9 px-2 rounded text-xs" id="extraShSn_Z2" placeholder="S/N"></div>
+    <p class="text-[10px] text-text-muted">💡 교체일이 입력된 축만 반영됩니다. (여러 축 동시 입력 가능)</p>
+</div>
+
+<!-- 기타 소모품 입력폼 -->
+<div id="extraConsumFields" class="hidden border border-border rounded p-4 mb-3 bg-background/40">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div><label class="label-base mb-1 text-[10px]">부품명</label><input class="input-base h-9 px-2 rounded text-xs" id="extraConsumName" placeholder="예: Mirror"></div>
+        <div><label class="label-base mb-1 text-[10px]">교체일</label><input type="date" class="input-base h-9 px-2 rounded text-xs" id="extraConsumDate"></div>
+        <div><label class="label-base mb-1 text-[10px]">메모</label><input class="input-base h-9 px-2 rounded text-xs" id="extraConsumNote" placeholder="선택 입력"></div>
+    </div>
+    <p class="text-[10px] text-text-muted mt-2">💡 교체일을 비워두면 메일에서 추출된 작업일자가 자동 적용됩니다.</p>
+</div>
+
+<textarea class="input-base bg-background h-20 p-4 mb-6 font-mono rounded" id="extraNoteInput" placeholder="특이사항이나 부품교체 내역이 있다면 입력하세요..."></textarea>
+<div class="flex justify-end">
+    <button class="btn-primary px-10 py-3 text-sm rounded" onclick="extractData()">
+        <span class="material-symbols-outlined">data_exploration</span> 데이터 추출 실행
+    </button>
+</div>
+        </div>
+
+        <div id="extractResult" class="card-base overflow-hidden rounded-md" style="display:none;">
+            <div class="bg-background px-6 py-3 border-b border-border flex justify-between items-center transition-colors">
+                <div class="flex items-center gap-3">
+                    <span class="label-base !mb-0">분석 결과 확인</span>
+                    <span id="autoSavedBadge" class="save-badge hidden rounded-sm"><span class="material-symbols-outlined text-xs">save</span> 로컬 자동 저장됨</span>
+                </div>
+                <div class="flex gap-4">
+                    <a href="https://hitachigroup.sharepoint.com/:x:/s/ISDI315/IQCHG_kQLwrYQLwjM1Hjie_8AbOJ3qU0JAaF31fNxUyFYI0?e=JeqecE" target="_blank" class="btn-text text-text-main">
+                        <span class="material-symbols-outlined text-sm">open_in_new</span> 관리 시트 열기
+                    </a>
+                    <button class="btn-text text-primary" onclick="copyRow()">
+                        <span class="material-symbols-outlined text-sm">content_copy</span> 양식 데이터 복사
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead>
+                        <tr class="bg-surface border-b border-border">
+                            <th class="th-base px-6">작업자</th><th class="th-base px-6">라인</th><th class="th-base px-6">설비호기명</th><th class="th-base px-6">작업 일자</th><th class="th-base px-6 text-right">작업 내용</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-border">
+                        <tr class="hover:bg-background transition-colors">
+                            <td class="td-base px-6 font-bold text-primary" id="resWorker"></td>
+                            <td class="td-base px-6 font-medium" id="resLine"></td>
+                            <td class="td-base px-6 text-text-muted" id="resMachine"></td>
+                            <td class="td-base px-6 text-text-muted font-mono" id="resDate"></td>
+                            <td class="td-base px-6 text-right" id="resContent"></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section id="email-gen" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+        <div class="border-b border-border pb-4 flex justify-between items-center">
+            <h2 class="text-2xl font-bold text-text-main">메일 작성</h2>
+            <div class="flex bg-surface border border-border rounded overflow-hidden">
+                <button id="btn-tpl-work" class="px-6 py-2 text-[10px] font-bold uppercase tracking-widest bg-primary text-white transition-all" onclick="setTemplate('work')">일반 작업 보고</button>
+                <button id="btn-tpl-ship" class="px-6 py-2 text-[10px] font-bold uppercase tracking-widest bg-surface text-text-muted hover:text-primary transition-all" onclick="setTemplate('ship')">반출 배차 요청</button>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-8">
+            <div class="xl:col-span-4 card-base p-8 space-y-6 rounded-md">
+                <div>
+                    <label class="label-base mb-3">작업자 (발신자명)</label>
+                    <input class="input-base bg-background h-10 px-4 rounded" id="mailMyName" placeholder="예: 구자원" type="text"/>
+                </div>
+
+                <div id="area-work-only" class="space-y-6 block">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="label-base mb-3">설비호기 (검색)</label>
+                            <input class="input-base bg-background h-10 px-4 rounded" id="mailWorkEquipSearch" placeholder="예: MDIXXXX" type="text"/>
+                        </div>
+                        <div>
+                            <label class="label-base mb-3">현업 담당자 (고객)</label>
+                            <input class="input-base bg-background h-10 px-4 rounded" id="mailCustName" placeholder="예: 구자원" type="text"/>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="label-base mb-3">작업일자</label>
+                        <input class="input-base bg-background h-10 px-4 rounded" id="mailDate" type="date"/>
+                    </div>
+                    <div>
+                        <label class="label-base mb-3">작업 개요 (제목용)</label>
+                        <input class="input-base bg-background h-10 px-4 rounded" id="mailJobTitle" placeholder="간략한 작업 내용" type="text"/>
+                    </div>
+                    <div>
+                        <label class="label-base mb-3">세부 작업 내용</label>
+                        <textarea class="input-base bg-background h-24 p-4 rounded" id="mailJobDetail"></textarea>
+                    </div>
+                </div>
+
+                <div id="area-ship-only" class="space-y-6 hidden">
+                    <div class="flex justify-between items-end border-b border-border pb-2">
+                        <label class="label-base text-primary !mb-0">🚚 반출 배차 리스트</label>
+                        <button class="btn-text px-3 py-1 bg-background border border-border rounded" onclick="addShipBlock()">
+                            <span class="material-symbols-outlined text-xs">add</span> 다른 호기 추가
+                        </button>
+                    </div>
+                    <div id="ship-blocks-container" class="space-y-6"></div>
+                </div>
+
+                <div>
+                    <label class="label-base mb-3">특이사항 (Inform)</label>
+                    <textarea class="input-base bg-background h-16 p-4 rounded" id="mailInform" placeholder="인폼사항 입력"></textarea>
+                </div>
+                
+                <button class="btn-primary w-full py-4 text-sm mt-4 rounded" onclick="generateFullMail()">메일 수신처 및 본문 생성</button>
+            </div>
+            
+            <div class="xl:col-span-8 card-base overflow-hidden rounded-md" id="fullMailOutputArea" style="display:none;">
+                <div class="p-4 bg-background border-b border-border flex justify-between items-center">
+                    <span class="label-base !mb-0">Email Preview</span>
+                </div>
+                <div class="p-8 space-y-8">
+                    <div class="space-y-2">
+                        <div class="flex justify-between items-center">
+                            <label class="label-base !mb-0">Recipients [수신처]</label>
+                            <button class="btn-text" onclick="copyToClipboard('resRecipientsOut', '수신처')"><span class="material-symbols-outlined text-xs">content_copy</span> 복사</button>
+                        </div>
+                        <div class="p-4 bg-background border border-border text-sm font-medium break-all rounded" id="resRecipientsOut"></div>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="flex justify-between items-center">
+                            <label class="label-base !mb-0">Subject [제목]</label>
+                            <button class="btn-text" onclick="copyToClipboard('email-subject', '제목')"><span class="material-symbols-outlined text-xs">content_copy</span> 복사</button>
+                        </div>
+                        <div class="p-4 bg-background border border-border font-bold text-primary rounded" id="email-subject"></div>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="flex justify-between items-center">
+                            <label class="label-base !mb-0">Message [본문]</label>
+                            <button class="btn-primary px-3 py-1 text-[10px] rounded" onclick="copyToClipboard('email-body', '본문 전체')"><span class="material-symbols-outlined text-xs">content_copy</span> 본문 복사</button>
+                        </div>
+                        <div class="p-6 bg-background border border-border text-sm leading-relaxed min-h-[180px] whitespace-pre-wrap rounded" id="email-body"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="database" class="tab-content block space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+        <div class="border-b border-border pb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <h2 class="text-2xl font-bold text-text-main">설비 & 수신처 관리</h2>
+            <!-- 🔎 SFDC(Salesforce) 검색창 -->
+            <div class="flex w-full md:w-96">
+                <input type="text" id="sfSearchInput" class="input-base h-10 px-4 rounded-l-md rounded-r-none border-r-0 flex-1" placeholder="SFDC 검색 창" onkeypress="if(event.key==='Enter')searchSalesforce()">
+                <button class="h-10 px-5 bg-[#0070d2] hover:bg-[#005fb2] text-white text-xs font-bold rounded-r-md transition-colors flex items-center gap-1" onclick="searchSalesforce()">
+                    <span class="material-symbols-outlined text-sm">search</span> 검색
+                </button>
+            </div>
+        </div>
+
+        <!-- 💡 accordion-open 클래스 삭제됨 -->
+        <div class="card-base overflow-hidden rounded-md">
+            <button class="w-full px-6 py-4 bg-background border-b border-border flex justify-between items-center hover:opacity-80 transition-opacity text-left" onclick="this.parentElement.classList.toggle('accordion-open')">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">mail</span> 👥 라인별 메일 수신처 관리</span>
+                <span class="material-symbols-outlined accordion-rotate text-text-main">expand_more</span>
+            </button>
+            <div class="accordion-content">
+                <div class="p-6 space-y-6">
+                    <div class="flex gap-4 items-end bg-background p-4 border border-border flex-wrap md:flex-nowrap rounded">
+                        <div class="flex-1">
+                            <label class="label-base mb-2">Line Name</label>
+                            <input id="newRecipLine" class="input-base h-10 px-3 rounded" placeholder="예: POO" type="text"/>
+                        </div>
+                        <div class="flex-[3]">
+                            <label class="label-base mb-2">Recipient (Emails)</label>
+                            <input id="newRecipEmails" class="input-base h-10 px-3 rounded" placeholder="예: 홍길동 <gildong.hong@XXXX.com>; 구자원 <...>" type="text"/>
+                        </div>
+                        <button class="btn-primary h-10 px-6 text-[10px] rounded" onclick="addRecipient()">수신처 추가/수정</button>
+                    </div>
+                    <div class="overflow-x-auto border border-border rounded">
+                        <table class="w-full text-left text-sm">
+                            <thead class="bg-background border-b border-border">
+                                <tr>
+                                    <th class="th-base w-1/5 px-6">라인명</th><th class="th-base px-6">수신처(이메일)</th><th class="th-base text-right w-[20%] px-6">관리</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-border" id="recipientTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card-base overflow-hidden rounded-md">
+            <button class="w-full px-6 py-4 bg-background border-b border-border flex justify-between items-center hover:opacity-80 transition-opacity text-left" onclick="this.parentElement.classList.toggle('accordion-open')">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">add_box</span> ➕ 신규 설비 등록 및 엑셀 일괄 추가</span>
+                <span class="material-symbols-outlined accordion-rotate text-text-main">expand_more</span>
+            </button>
+            <div class="accordion-content">
+                <div class="p-6 space-y-6">
+                    <div class="space-y-4">
+                        <label class="label-base border-b border-border pb-2">개별 설비 등록</label>
+                        <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+                            <input id="newLine" class="input-base h-10 px-3 rounded" placeholder="라인명" type="text"/>
+                            <input id="newModel" class="input-base h-10 px-3 rounded" placeholder="모델명" type="text"/>
+                            <input id="newName" class="input-base h-10 px-3 !border-primary rounded" placeholder="설비호기 (필수)" type="text"/>
+                            <input id="newSN" class="input-base h-10 px-3 rounded" placeholder="S/N" type="text"/>
+                            <input id="newLocation" class="input-base h-10 px-3 rounded" placeholder="위치" type="text"/>
+                        </div>
+                        <button class="btn-primary w-full h-10 text-[10px] rounded" onclick="addNewData()">개별 설비 데이터 추가</button>
+                    </div>
+                    <div class="space-y-4 pt-4 border-t border-border">
+                        <label class="label-base border-b border-border pb-2">엑셀 데이터 일괄 추가 [라인 / 모델 / 호기 / S/N / 위치]</label>
+                        <textarea id="excelInput" class="input-base h-24 p-4 font-mono rounded" placeholder="엑셀 범위를 복사하여 붙여넣으십시오..."></textarea>
+                        <button class="btn-primary w-full h-10 text-[10px] rounded" onclick="importFromExcel()">엑셀 데이터 일괄 처리</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="p-4 bg-background flex flex-col md:flex-row gap-4 justify-between items-center border-b border-border">
+                <div class="relative w-full md:w-96">
+                    <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-muted">search</span>
+                    <input id="searchInput" class="input-base pl-10 pr-4 py-2 rounded" placeholder="호기 번호나 모델명을 검색하십시오..." type="text" onkeyup="filterTable()"/>
+                </div>
+            </div>
+            <div class="overflow-x-auto h-[600px] overflow-y-auto">
+                <table class="w-full text-left relative" id="master-table">
+                    <thead class="sticky top-0 z-10 bg-background border-b border-border">
+                        <tr>
+                            <th class="th-base px-6">라인명</th><th class="th-base px-6">모델명</th><th class="th-base px-6">설비호기</th><th class="th-base px-6">S/N</th><th class="th-base px-6">위치</th><th class="th-base px-6 text-right">관리</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-border" id="dataTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+<section id="equipDetail" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+        <div class="border-b border-border pb-4">
+            <button class="btn-text mb-3 flex items-center gap-1" onclick="closeEquipDetail()">
+                <span class="material-symbols-outlined text-sm">arrow_back</span> 설비 목록으로
+            </button>
+            <h2 class="text-2xl font-bold text-text-main" id="detailTitle">-</h2>
+            <p class="text-sm text-text-muted mt-1" id="detailSubtitle">-</p>
+        </div>
+
+        <div class="card-base p-6 rounded-md grid grid-cols-2 md:grid-cols-4 gap-6" id="detailInfoGrid"></div>
+
+        <!-- 1. Laser 사용시간 (위로 올림) -->
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="px-6 py-4 bg-background border-b border-border">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">bolt</span> Laser 사용시간</span>
+            </div>
+            <div id="detailLaserWrap" class="p-6"></div>
+        </div>
+
+        <!-- 2. Scale Head 교체 상태 (위로 올림) -->
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="px-6 py-4 bg-background border-b border-border">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">straighten</span> Scale Head 교체 상태</span>
+            </div>
+            <div id="detailScaleHeadWrap" class="p-6"></div>
+        </div>
+
+        <!-- 3. 소모품 교환 이력 (위로 올림) -->
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="px-6 py-4 bg-background border-b border-border">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">build</span> 소모품 교환 이력</span>
+            </div>
+            <div id="detailConsumablesWrap" class="p-6"></div>
+        </div>
+
+        <!-- 4. 작업 이력 (맨 아래로 내림) -->
+        <div class="card-base overflow-hidden rounded-md">
+            <div class="px-6 py-4 bg-background border-b border-border">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">history</span> 작업 이력</span>
+            </div>
+            <div id="detailHistoryWrap" class="p-6"></div>
+        </div>
+    </section>
+
+
+    <section id="history" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+        <div class="flex items-end justify-between border-b border-border pb-4 flex-wrap gap-4">
+            <div>
+                <h2 class="text-2xl font-bold text-text-main">작업 히스토리 타임라인 (Local)</h2>
+                <p class="text-sm text-text-muted mt-1">작업 내용을 클릭하면 복사된 원본 메일 내용을 확인할 수 있습니다.</p>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="relative">
+                    <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-base">search</span>
+                    <input id="historySearch" class="input-base pl-9 pr-4 py-2 w-64 h-9 rounded" placeholder="설비호기 / 작업내용 검색..." type="text" onkeyup="renderHistory()"/>
+                </div>
+                <select id="historySortOrder" class="input-base w-32 h-9 px-3 rounded" onchange="renderHistory()">
+                    <option value="desc">최신순</option><option value="asc">오래된순</option>
+                </select>
+                <button class="btn-text h-9 px-4 border border-border hover:border-red-400 hover:text-red-600 rounded" onclick="clearAllHistory()">
+                    <span class="material-symbols-outlined text-sm">delete_sweep</span> 기록 일괄 삭제
+                </button>
+            </div>
+        </div>
+
+        <div class="card-base rounded-md">
+            <div class="px-6 py-3 bg-background border-b border-border rounded-t-md">
+                <span class="label-base !mb-0">설비 선택</span>
+            </div>
+            <div class="p-4 flex flex-wrap gap-2" id="historyEquipChips"></div>
+        </div>
+
+        <div id="historyTimelineWrap" class="space-y-0"></div>
+
+        <div id="historyEmpty" class="hidden card-base p-16 text-center rounded-md">
+            <span class="material-symbols-outlined text-5xl text-text-muted block mb-4">history</span>
+            <p class="label-base">작업 기록 없음</p>
+        </div>
+    </section>
+</main>
+
+    </div><!-- end content area -->
+</div><!-- end app-body -->
+
+<footer class="bg-[#1b1c1c] text-white py-12 px-8 mt-20 transition-none" style="margin-left: 240px;">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
+        <div class="flex items-center gap-6">
+            <span class="text-2xl font-black tracking-tighter text-white">HITACHI</span>
+            <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest border-l border-gray-800 pl-6">평가4부 Management System</span>
+        </div>
+        <div class="flex flex-col items-center md:items-end gap-2">
+            <div class="text-[10px] text-gray-400 font-medium">문의사항: <a href="mailto:jawon.ku.lf@hitachi-hightech.com" class="text-gray-400 hover:text-white underline decoration-gray-600 hover:decoration-white underline-offset-4 transition-colors">jawon.ku.lf@hitachi-hightech.com</a></div>
+            <div class="text-[10px] text-gray-500 font-medium text-center md:text-right leading-relaxed">© 2026 Hitachi High-Tech Korea Metrology Systems Service 4Dept.<br class="block md:hidden"> built by <span class="text-gray-400 font-bold">[Ku Jawon]</span>.</div>
+        </div>
+    </div>
+</footer>
+
+<div class="fixed bottom-10 right-10 bg-surface border border-border p-6 shadow-2xl flex items-center gap-4 z-[60] transform translate-y-32 opacity-0 transition-all duration-300 rounded-lg" id="toast">
+    <div class="h-10 w-10 bg-primary flex items-center justify-center text-white rounded"><span class="material-symbols-outlined">check</span></div>
+    <div>
+        <p class="label-base text-text-main !mb-0" id="toast-title">Complete</p>
+        <p class="text-xs text-text-muted" id="toast-msg">Success.</p>
+    </div>
+</div>
+<input type="file" id="mobile-db-upload" accept=".txt" style="display: none;" onchange="handleMobileDB(event)">
+<!-- INJECT_SCRIPTS_HERE -->
+</body>
+</html>

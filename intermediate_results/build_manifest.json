@@ -1,0 +1,37 @@
+{
+  "build_timestamp": "2026-08-19T23:32:10.750292",
+  "elapsed_seconds": 0.024,
+  "targets": [
+    {
+      "target": "SFDC/OEMS Manager",
+      "dist": "dist/index.html",
+      "lines": 3867,
+      "bytes": 197274,
+      "modules": [
+        "state.js",
+        "storage_box.js",
+        "extraction_email.js",
+        "maintenance.js",
+        "database.js",
+        "ui.js",
+        "app.js"
+      ]
+    },
+    {
+      "target": "HITACHI Team Scheduler",
+      "dist": "dist/team_schedule.html",
+      "lines": 3388,
+      "bytes": 457445,
+      "modules": [
+        "config.js",
+        "google_sheets.js",
+        "calendar.js",
+        "action_drawer.js",
+        "dashboard.js",
+        "sidebar_notify.js",
+        "setup_manager.js",
+        "search_modal.js"
+      ]
+    }
+  ]
+}
