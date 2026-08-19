@@ -1,0 +1,13 @@
+# 로컬 개발 및 빌드 파이프라인 파일 추적 제외
+dist/
+src/
+scripts/
+interim_reports/
+intermediate_results/
+primary_data/
+secondary_data/
+pdfs/
+visualizations/
+.vscode/
+.agents/
+team_schedule_fixed.html
