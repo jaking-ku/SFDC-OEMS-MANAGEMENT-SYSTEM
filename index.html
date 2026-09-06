@@ -1012,11 +1012,13 @@ async function readJsonFromDir(dirHandle, filename, defaultVal = null) {
         const fileHandle = await dirHandle.getFileHandle(filename);
         const file = await fileHandle.getFile();
         let text = await file.text();
-        if (text && text.charCodeAt(0) === 0xFEFF) {
-            text = text.slice(1);
+        if (text) {
+            text = text.replace(/^\uFEFF+/, '').trim();
         }
-        return text ? JSON.parse(text) : defaultVal;
+        if (!text) return defaultVal;
+        return JSON.parse(text);
     } catch (e) {
+        console.warn(`[파일 읽기 실패] ${filename}:`, e.message || e);
         return defaultVal;
     }
 }
@@ -2035,7 +2037,7 @@ async function completeInitialConnect() {
         updateSyncGateProgress(percent, step, detail, counter);
     };
 
-    const ok = await syncWithBox(true, false, false, { scope: 'all' }, onProg);
+    const ok = await syncWithBox(true, false, true, { scope: 'all' }, onProg);
     if (!ok) {
         setSyncGateState('error', '팀 DB 폴더를 불러오지 못했습니다. 연결 상태와 권한을 다시 확인해주세요.');
         await updateSyncStatusBanner();
