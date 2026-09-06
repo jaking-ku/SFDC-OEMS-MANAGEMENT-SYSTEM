@@ -1011,7 +1011,10 @@ async function readJsonFromDir(dirHandle, filename, defaultVal = null) {
     try {
         const fileHandle = await dirHandle.getFileHandle(filename);
         const file = await fileHandle.getFile();
-        const text = await file.text();
+        let text = await file.text();
+        if (text && text.charCodeAt(0) === 0xFEFF) {
+            text = text.slice(1);
+        }
         return text ? JSON.parse(text) : defaultVal;
     } catch (e) {
         return defaultVal;
@@ -3717,10 +3720,10 @@ async function renderHistory() {
     const emptyEl = document.getElementById("historyEmpty");
     
     const filtered = raw.filter(e => !e.isDeleted && (
-        e.machine.toLowerCase().includes(searchVal) || 
-        e.content.toLowerCase().includes(searchVal) || 
-        (e.worker || "").toLowerCase().includes(searchVal) || 
-        (e.rawText || "").toLowerCase().includes(searchVal)
+        String(e.machine || "").toLowerCase().includes(searchVal) || 
+        String(e.content || "").toLowerCase().includes(searchVal) || 
+        String(e.worker || "").toLowerCase().includes(searchVal) || 
+        String(e.rawText || "").toLowerCase().includes(searchVal)
     ));
     
     if (filtered.length === 0) { 
@@ -3736,10 +3739,11 @@ async function renderHistory() {
     let firstMachine = null;
     filtered.forEach(e => { 
         const line = e.line || "미분류"; 
+        const m = (e.machine || "미상").trim();
         if (!lineMap[line]) lineMap[line] = {}; 
-        if (!lineMap[line][e.machine]) lineMap[line][e.machine] = 0; 
-        lineMap[line][e.machine]++; 
-        if (!firstMachine) firstMachine = e.machine; 
+        if (!lineMap[line][m]) lineMap[line][m] = 0; 
+        lineMap[line][m]++; 
+        if (!firstMachine) firstMachine = m; 
     });
 
     let selectedLine = null; 
@@ -3806,7 +3810,7 @@ async function renderHistory() {
     });
 
     // 선택된 호기의 타임라인 렌더링
-    const entries = filtered.filter(e => e.machine === selectedChip).sort((a, b) => { 
+    const entries = filtered.filter(e => (e.machine || "미상").trim() === selectedChip).sort((a, b) => { 
         const da = new Date(a.savedAt), db = new Date(b.savedAt); 
         return sortOrder === "desc" ? db - da : da - db; 
     });
@@ -3829,7 +3833,10 @@ async function renderHistory() {
     // 설비 특이사항 메모 영역
     const noteDiv = document.createElement("div"); 
     noteDiv.className = "p-6 border-b border-border/50 bg-background/30";
-    const rawNote = JSON.parse(localStorage.getItem("machineNotes") || "{}")[selectedChip];
+    let rawNote = null;
+    try {
+        rawNote = JSON.parse(localStorage.getItem("machineNotes") || "{}")[selectedChip];
+    } catch (_) { rawNote = null; }
     const noteContent = typeof getNoteText === 'function' ? getNoteText(rawNote) : (typeof rawNote === 'string' ? rawNote : rawNote?.text || "");
     const noteItems = noteContent.split(/\n\n+/).filter(s => s.trim());
     const noteListHtml = noteItems.length ? noteItems.map(item => {
