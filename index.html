@@ -2283,6 +2283,90 @@ async function autoLocalBackup() {
 // ==============================================================================
 
 /**
+ * 🏷️ 작업 이력 표시용 간략 대표 제목(Summary) 자동 도출 함수
+ * 긴 불릿 리스트나 본문 복사본이 들어있는 경우, 메일 원문(rawText) 또는 텍스트 구조를 분석하여
+ * 'LPP Teaching 확인', 'Super Cleaning', 'Wafer 회수' 등과 같은 간결한 대표 제목으로 자동 변환
+ * @param {Object|string} e 작업 이력 객체 또는 content 문자열
+ * @returns {string} 화면에 표시할 간략한 핵심 제목
+ */
+function getDisplayContent(e) {
+    if (!e) return "—";
+    let content = "";
+    let rawText = "";
+    let machine = "";
+
+    if (typeof e === "string") {
+        content = e.trim();
+    } else {
+        content = String(e.content || "").trim();
+        rawText = String(e.rawText || "").trim();
+        machine = String(e.machine || "").trim();
+    }
+
+    // 이미 간결하고 불릿 리스트나 줄바꿈이 없으면 그대로 사용
+    const isBulletList = /^[-*•·]\s+/.test(content) || (content.includes(" - ") && content.length > 25) || (content.split(/[-*•·]/).length > 2);
+    const isTooLong = content.length > 40 || /[\r\n]/.test(content);
+
+    if (isBulletList || isTooLong || !content || content === "미상") {
+        // 1순위: rawText가 존재하는 경우 메일 추출 알고리즘 적용
+        if (rawText) {
+            let extracted = "";
+            const p1 = rawText.match(/(?:에서|진행한|작업한)\s+(.*?)\s+내용\s*(?:전송|공유|보내|송부)/);
+            if (p1 && p1[1].trim()) {
+                extracted = p1[1].trim();
+            } else {
+                const p2 = rawText.match(/(?:호기(?:\s*\(.*?\))?|에서|진행한|작업한|진행|확인)\s+(.*?)\s+작업\s*(?:내용)?\s*(?:전송|공유|보내|송부)/);
+                if (p2 && p2[1].trim()) {
+                    extracted = p2[1].trim();
+                } else if (machine && machine !== "미상") {
+                    const escM = machine.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const p3 = rawText.match(new RegExp(escM + "(?:호기)?(?:\\s*\\(.*?\\))?\\s+(.*?)\\s+작업\\s*(?:의\\s*건|전송|진행|완료|내용)"));
+                    if (p3 && p3[1].trim()) {
+                        extracted = p3[1].trim();
+                    }
+                }
+            }
+
+            // 제목 라인에서도 시도
+            if (!extracted) {
+                const subMatch = rawText.match(/_([^_]+?)\s*작업\s*(?:내용)?\s*(?:전송|송부|공유|보고)?(?:의\s*건)?/);
+                if (subMatch && subMatch[1].trim()) {
+                    extracted = subMatch[1].trim();
+                }
+            }
+
+            if (extracted) {
+                extracted = extracted
+                    .replace(/\(.*?\)/g, "")
+                    .replace(/\[.*?\]/g, "")
+                    .replace(/^(?:에서|진행한|작업한|진행|한|확인)\s+/, "")
+                    .replace(/\s+작업$/, "")
+                    .trim();
+                if (extracted && extracted.length <= 40 && !/[\r\n]/.test(extracted)) {
+                    return extracted;
+                }
+            }
+        }
+
+        // 2순위: rawText가 없거나 추출 실패 시 content 자체 구조 분석
+        if (content) {
+            const lines = content.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
+            const firstSeg = lines[0] || content;
+            const items = firstSeg.split(/\s*[-*•·]\s*/).map(s => s.trim()).filter(Boolean);
+            if (items.length > 0) {
+                let firstItem = items[0];
+                firstItem = firstItem.replace(/^(?:에서|진행한|작업한|확인|진행)\s+/, "").trim();
+                if (firstItem.length > 0 && firstItem.length <= 35) {
+                    return firstItem;
+                }
+            }
+        }
+    }
+
+    return content || "작업 진행";
+}
+
+/**
  * 📩 작업 메일 텍스트 분석 및 정보 추출 (데이터 추출 실행)
  */
 async function extractData() {
@@ -3342,6 +3426,10 @@ async function renderEquipDetail(eq) {
             const d = new Date(e.savedAt); 
             const savedStr = `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
             
+            const displayTitle = getDisplayContent(e);
+            const hasDetail = Boolean(e.rawText || (e.content && e.content !== displayTitle && e.content.length > displayTitle.length));
+            const detailText = e.rawText || e.content;
+
             li.innerHTML = `
                 <div class="timeline-dot mt-1"></div>
                 <div class="flex-1 min-w-0">
@@ -3349,15 +3437,15 @@ async function renderEquipDetail(eq) {
                         <span class="px-2 py-0.5 border border-border text-primary text-[10px] font-bold rounded">EVENT</span>
                         <span class="text-sm font-black text-text-main">${escapeHtml(e.date || '날짜 미상')}</span>
                     </div>
-                    <div class="${e.rawText ? 'cursor-pointer hover:text-primary transition-colors' : ''}" ${e.rawText ? `onclick="document.getElementById('detailRaw_${e.id}').classList.toggle('hidden')"` : ''}>
-                        <p class="text-sm text-text-main font-medium leading-relaxed">${escapeHtml(e.content || '—')}</p>
-                        ${e.rawText ? '<span class="material-symbols-outlined text-sm text-text-muted mt-1 block">open_in_full</span>' : ''}
+                    <div class="${hasDetail ? 'cursor-pointer hover:text-primary transition-colors' : ''}" ${hasDetail ? `onclick="document.getElementById('detailRaw_${e.id}').classList.toggle('hidden')"` : ''}>
+                        <p class="text-sm text-text-main font-bold leading-relaxed">${escapeHtml(displayTitle)}</p>
+                        ${hasDetail ? '<span class="material-symbols-outlined text-sm text-text-muted mt-1 block">open_in_full</span>' : ''}
                     </div>
-                    ${e.rawText ? `<div id="detailRaw_${e.id}" class="hidden mt-3 p-4 bg-background/70 text-text-main border border-border text-xs leading-relaxed whitespace-pre-wrap rounded backdrop-blur-sm">${escapeHtml(e.rawText)}</div>` : ''}
+                    ${hasDetail ? `<div id="detailRaw_${e.id}" class="hidden mt-3 p-4 bg-background/70 text-text-main border border-border text-xs leading-relaxed whitespace-pre-wrap rounded backdrop-blur-sm">${escapeHtml(detailText)}</div>` : ''}
                     <div class="mt-3 text-[10px] text-text-muted flex gap-3 items-center flex-wrap">
                         <span>👤 ${escapeHtml(e.worker || '—')}</span>
                         <span>⏱️ Recorded: ${savedStr}</span>
-                        <button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="handleMailGenClick(this)" data-eq="${escapeHtml(eq.name)}" data-content="${escapeHtml(e.content || '')}">메일 작성</button>
+                        <button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="handleMailGenClick(this)" data-eq="${escapeHtml(eq.name)}" data-content="${escapeHtml(displayTitle)}">메일 작성</button>
                     </div>
                 </div>
             `;
@@ -3721,6 +3809,7 @@ async function renderHistory() {
     const filtered = raw.filter(e => !e.isDeleted && (
         String(e.machine || "").toLowerCase().includes(searchVal) || 
         String(e.content || "").toLowerCase().includes(searchVal) || 
+        String(getDisplayContent(e)).toLowerCase().includes(searchVal) || 
         String(e.worker || "").toLowerCase().includes(searchVal) || 
         String(e.rawText || "").toLowerCase().includes(searchVal)
     ));
@@ -3890,6 +3979,10 @@ async function renderHistory() {
         const savedDate = new Date(e.savedAt); 
         const savedStr = `${savedDate.getFullYear()}.${savedDate.getMonth() + 1}.${savedDate.getDate()} ${savedDate.getHours()}:${String(savedDate.getMinutes()).padStart(2, '0')}`;
         
+        const displayTitle = getDisplayContent(e);
+        const hasDetail = Boolean(e.rawText || (e.content && e.content !== displayTitle && e.content.length > displayTitle.length));
+        const detailText = e.rawText || e.content;
+
         li.innerHTML = `
             <div class="timeline-dot mt-1"></div>
             <div class="flex-1 min-w-0">
@@ -3897,15 +3990,15 @@ async function renderHistory() {
                     <span class="px-2 py-0.5 border border-border text-primary text-[10px] font-bold rounded">EVENT</span>
                     <span class="text-sm font-black text-text-main">${escapeHtml(e.date || "날짜 미상")}</span>
                 </div>
-                <div class="${e.rawText ? 'cursor-pointer hover:text-primary transition-colors' : ''}" ${e.rawText ? `onclick="document.getElementById('rawText_${e.id}').classList.toggle('hidden')"` : ''}>
-                    <p class="text-sm text-text-main font-medium leading-relaxed">${escapeHtml(e.content || "—")}</p>
-                    ${e.rawText ? '<span class="material-symbols-outlined text-sm text-text-muted mt-1 block">open_in_full</span>' : ''}
+                <div class="${hasDetail ? 'cursor-pointer hover:text-primary transition-colors' : ''}" ${hasDetail ? `onclick="document.getElementById('rawText_${e.id}').classList.toggle('hidden')"` : ''}>
+                    <p class="text-sm text-text-main font-bold leading-relaxed">${escapeHtml(displayTitle)}</p>
+                    ${hasDetail ? '<span class="material-symbols-outlined text-sm text-text-muted mt-1 block">open_in_full</span>' : ''}
                 </div>
-                ${e.rawText ? `<div id="rawText_${e.id}" class="hidden mt-3 p-4 bg-background/70 text-text-main border border-border text-xs leading-relaxed whitespace-pre-wrap rounded backdrop-blur-sm">${escapeHtml(e.rawText)}</div>` : ''}
+                ${hasDetail ? `<div id="rawText_${e.id}" class="hidden mt-3 p-4 bg-background/70 text-text-main border border-border text-xs leading-relaxed whitespace-pre-wrap rounded backdrop-blur-sm">${escapeHtml(detailText)}</div>` : ''}
                 <div class="mt-3 text-[10px] text-text-muted flex gap-3 items-center flex-wrap">
                     <span>👤 ${escapeHtml(e.worker || "—")}</span>
                     <span>⏱️ Recorded: ${savedStr}</span>
-                    <button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="handleMailGenClick(this)" data-eq="${escapeHtml(e.machine)}" data-content="${escapeHtml(e.content || '')}">메일 작성</button>
+                    <button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="handleMailGenClick(this)" data-eq="${escapeHtml(e.machine)}" data-content="${escapeHtml(displayTitle)}">메일 작성</button>
                 </div>
             </div>
             <button class="btn-text self-start mt-1 ml-2 hover:!text-red-500" onclick="deleteSingleHistory('${e.id}')">
