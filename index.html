@@ -1459,22 +1459,42 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
                 await new Promise(r => setTimeout(r, 2));
             }
 
-            // 조건 없이 무조건 읽어옴 (전수 로드)
+            // 💡 파일 데이터 추출 및 PowerShell 컬렉션 래퍼([ { value: [ ... ] } ]) 완전 언래핑
             const fileData = await readJsonFromDir(historySubdir, fname, []);
-            let items = [];
-            if (Array.isArray(fileData)) {
-                items = fileData;
-            } else if (fileData && typeof fileData === 'object') {
-                items = [fileData];
+            
+            function extractValidEntries(source) {
+                if (!source) return [];
+                const res = [];
+                const list = Array.isArray(source) ? source : [source];
+                list.forEach(entry => {
+                    if (!entry) return;
+                    if (Array.isArray(entry.value)) {
+                        res.push(...extractValidEntries(entry.value));
+                    } else if ((entry.machine && entry.machine !== '미상') || entry.date || entry.content) {
+                        res.push(entry);
+                    }
+                });
+                return res;
             }
+
+            const items = extractValidEntries(fileData);
 
             if (items.length > 0) {
                 const ymKey = fname.replace('.json', '');
-                items.forEach(it => {
-                    if (!it.yearMonth) it.yearMonth = ymKey;
+                items.forEach((it, idx) => {
+                    if (!it.id) {
+                        it.id = `${Date.now()}_${idx}_${Math.floor(Math.random() * 1000)}`;
+                    }
+                    if (!it.yearMonth) {
+                        it.yearMonth = getYearMonthFromDate(it.date, it.savedAt) || ymKey;
+                    }
                 });
-                await upsertIDBHistoryItems(items);
-                totalImportedThisTurn += items.length;
+                try {
+                    await upsertIDBHistoryItems(items);
+                    totalImportedThisTurn += items.length;
+                } catch (err) {
+                    console.warn(`[이력 저장 건너뜀] ${fname} 파싱 저장 중 경고:`, err);
+                }
             }
         }
         console.log(`✅ [History 전수 동기화 완료] 총 ${totalFiles}개 파일에서 ${totalImportedThisTurn}건의 이력을 성공적으로 반영했습니다.`);
