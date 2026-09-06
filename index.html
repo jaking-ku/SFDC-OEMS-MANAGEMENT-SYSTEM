@@ -1413,70 +1413,71 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
         }
     }
 
-    // 4) 작업 이력 월별 파티션 점검 (메타데이터 + 실제 디렉터리 파일 전수 스캔 및 누락 자동 치유)
-    const remoteHistoryParts = remoteParts.history || {};
-    const localHistoryParts = localParts.history || {};
+    // 4) 작업 이력 동기화: Box history 폴더 내의 모든 JSON 파일을 무조건 전수 스캔 및 병합
     const historySubdir = await getOrCreateSubdir(dirHandle, 'history');
+    const allFilesToLoad = new Set();
 
-    // 💡 핵심 개선: meta.json 누락 방지를 위해 실제 history 디렉터리 내 *.json 파일 전수 수집
-    const allYmSet = new Set(Object.keys(remoteHistoryParts));
+    // (1) 실제 history 디렉터리 내의 모든 *.json 파일 전수 수집
     try {
         if (typeof historySubdir.entries === 'function') {
             for await (const [name, handle] of historySubdir.entries()) {
                 if (name.endsWith('.json')) {
-                    allYmSet.add(name.replace('.json', ''));
+                    allFilesToLoad.add(name);
                 }
             }
         } else if (typeof historySubdir.values === 'function') {
             for await (const handle of historySubdir.values()) {
                 if (handle.kind === 'file' && handle.name.endsWith('.json')) {
-                    allYmSet.add(handle.name.replace('.json', ''));
+                    allFilesToLoad.add(handle.name);
                 }
             }
         }
     } catch (e) {
-        console.warn('history 디렉터리 파일 스캔 중 알림 (메타데이터 목록 기반 진행):', e);
+        console.warn('history 디렉터리 파일 스캔 중 알림 (메타 목록 폴백):', e);
     }
 
-    const ymKeys = Array.from(allYmSet).sort();
-    const totalYm = ymKeys.length;
+    // (2) meta.json에 등록된 파일도 누락 방지를 위해 합집합에 추가
+    const remoteHistoryParts = remoteParts.history || {};
+    Object.keys(remoteHistoryParts).forEach(k => {
+        const fname = k.endsWith('.json') ? k : `${k}.json`;
+        allFilesToLoad.add(fname);
+    });
 
-    if (totalYm === 0) {
-        if (progressCb) progressCb(80, '작업 이력 점검', '등록된 작업 이력 파티션이 없습니다.', '');
+    const fileList = Array.from(allFilesToLoad).sort();
+    const totalFiles = fileList.length;
+
+    if (totalFiles === 0) {
+        if (progressCb) progressCb(80, '작업 이력 점검', '등록된 작업 이력 파일이 없습니다.', '');
     } else {
-        for (let i = 0; i < totalYm; i++) {
-            const ym = ymKeys[i];
-            const rRev = remoteHistoryParts[ym]?.revision || 0;
-            const lRev = localHistoryParts[ym]?.revision || 0;
-            const rCount = remoteHistoryParts[ym]?.count || 0;
-            const pct = 30 + Math.round(((i + 1) / totalYm) * 55);
+        let totalImportedThisTurn = 0;
+        for (let i = 0; i < totalFiles; i++) {
+            const fname = fileList[i];
+            const pct = 30 + Math.round(((i + 1) / totalFiles) * 55);
             
             if (progressCb) {
-                progressCb(pct, '작업 이력 동기화', `월별 데이터 로드 중: ${ym}.json`, `${i + 1} / ${totalYm}`);
-                await new Promise(r => setTimeout(r, 5));
+                progressCb(pct, '작업 이력 동기화', `파일 로드 중: ${fname}`, `${i + 1} / ${totalFiles}`);
+                await new Promise(r => setTimeout(r, 2));
             }
 
-            // 💡 4중 점검: 강제최신화 / 리비전상승 / 로컬메타부재 / 데이터건수부족(누락치유)
-            let shouldLoad = forceAll || (rRev > lRev) || !localMeta.dbRevision;
-            if (!shouldLoad && rCount > 0) {
-                const localMonthItems = await getIDBHistoryByMonth(ym);
-                if (localMonthItems.length < rCount) {
-                    shouldLoad = true;
-                }
+            // 조건 없이 무조건 읽어옴 (전수 로드)
+            const fileData = await readJsonFromDir(historySubdir, fname, []);
+            let items = [];
+            if (Array.isArray(fileData)) {
+                items = fileData;
+            } else if (fileData && typeof fileData === 'object') {
+                items = [fileData];
             }
 
-            if (shouldLoad) {
-                const monthData = await readJsonFromDir(historySubdir, `${ym}.json`, []);
-                if (monthData && monthData.length > 0) {
-                    const localMonthHistory = await getIDBHistoryByMonth(ym);
-                    const mergedMonthHistory = mergeHistory(monthData, localMonthHistory);
-                    await upsertIDBHistoryItems(mergedMonthHistory);
-                    if (mergedMonthHistory.length > monthData.length) {
-                        needsPushBack = true;
-                    }
-                }
+            if (items.length > 0) {
+                const ymKey = fname.replace('.json', '');
+                items.forEach(it => {
+                    if (!it.yearMonth) it.yearMonth = ymKey;
+                });
+                await upsertIDBHistoryItems(items);
+                totalImportedThisTurn += items.length;
             }
         }
+        console.log(`✅ [History 전수 동기화 완료] 총 ${totalFiles}개 파일에서 ${totalImportedThisTurn}건의 이력을 성공적으로 반영했습니다.`);
     }
 
     // 동기화 상태 로컬 영속화 및 UI 최신화
