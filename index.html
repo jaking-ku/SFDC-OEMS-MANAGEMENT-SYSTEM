@@ -747,7 +747,7 @@
         <p class="text-xs text-text-muted" id="toast-msg">Success.</p>
     </div>
 </div>
-<input type="file" id="mobile-db-upload" accept=".txt" style="display: none;" onchange="handleMobileDB(event)">
+<input type="file" id="mobile-db-upload" accept=".txt,.json" style="display: none;" onchange="handleMobileDB(event)">
 <script>
 // [Module: state.js]
 // 1. [Constants & Global State] 상수 및 전역 런타임 상태 관리
@@ -783,7 +783,7 @@ let isSyncing = false;                      // 현재 동기화 진행 중 여�
 let pendingPush = false;                    // 동기화 중 추가 변경 발생 시 후속 Push 대기 플래그
 let activeSyncPromise = null;               // 동시 실행 방지를 위한 활성 Sync 프로미스
 let _autoSyncDebounceTimer = null;          // 자동 저장 디바운스 타이머
-let _pendingPushScope = { scope: 'all' };   // 디바운스 Push 대상 스코프
+let _pendingPushScope = null;              // 디바운스 Push 대상 스코프
 let selectedChip = null;                    // 작업 히스토리에서 현재 선택된 설비 호기명
 
 
@@ -1130,7 +1130,43 @@ function mergeHistory(boxHistory, localHistory) {
 }
 
 /**
- * 설비 마스터 목록 병합
+ * 🛡️ 메모(Notes) 값 정규화: 레거시 문자열과 신규 객체 형식 모두 호환
+ */
+function normalizeNoteValue(val) {
+    if (!val) return { text: '', updatedAt: 0 };
+    if (typeof val === 'string') return { text: val, updatedAt: 0 };
+    return { text: val.text || '', updatedAt: val.updatedAt || 0 };
+}
+
+/**
+ * 🛡️ 메모 텍스트 추출 헬퍼 (레거시 호환)
+ */
+function getNoteText(val) {
+    if (!val) return '';
+    if (typeof val === 'string') return val;
+    return val.text || '';
+}
+
+/**
+ * 🛡️ 수신처(Recipient) 값 정규화: 레거시 문자열과 신규 객체 형식 모두 호환
+ */
+function normalizeRecipientValue(val) {
+    if (!val) return { email: '', updatedAt: 0 };
+    if (typeof val === 'string') return { email: val, updatedAt: 0 };
+    return { email: val.email || '', updatedAt: val.updatedAt || 0 };
+}
+
+/**
+ * 🛡️ 수신처 이메일 추출 헬퍼 (레거시 호환)
+ */
+function getRecipientEmail(val) {
+    if (!val) return '';
+    if (typeof val === 'string') return val;
+    return val.email || '';
+}
+
+/**
+ * 설비 마스터 목록 병합 (🔒 updatedAt 타임스탬프 비교 추가)
  */
 function mergeEquipment(boxEquipment, localEquipment) {
     const map = new Map();
@@ -1139,23 +1175,48 @@ function mergeEquipment(boxEquipment, localEquipment) {
     (boxEquipment || []).forEach(e => map.set(keyOf(e), { ...e }));
     (localEquipment || []).forEach(e => { 
         const copy = { ...e }; 
-        delete copy.isEditing; 
-        map.set(keyOf(copy), copy); 
+        delete copy.isEditing;
+        const key = keyOf(copy);
+        const existing = map.get(key);
+        if (!existing || (copy.updatedAt || 0) >= (existing.updatedAt || 0)) {
+            map.set(key, copy);
+        }
     });
     
     return Array.from(map.values());
 }
 
 /**
- * 설비별 메모(Notes) 병합
+ * 설비별 메모(Notes) 병합 (🔒 타임스탬프 기반 최신 우선)
  */
 function mergeNotes(boxNotes, localNotes) {
-    const result = { ...(boxNotes || {}) };
+    const result = {};
+    Object.entries(boxNotes || {}).forEach(([key, value]) => {
+        result[key] = normalizeNoteValue(value);
+    });
     Object.entries(localNotes || {}).forEach(([key, value]) => {
-        if (!result[key] || result[key] === value) {
-            result[key] = value;
-        } else if (value && !result[key].includes(value)) {
-            result[key] += `\n\n${value}`;
+        const local = normalizeNoteValue(value);
+        const existing = result[key];
+        if (!existing || local.updatedAt >= existing.updatedAt) {
+            result[key] = local;
+        }
+    });
+    return result;
+}
+
+/**
+ * 수신처(Recipient) 병합 (🔒 타임스탬프 기반 최신 우선)
+ */
+function mergeRecipients(boxRecip, localRecip) {
+    const result = {};
+    Object.entries(boxRecip || {}).forEach(([key, value]) => {
+        result[key] = normalizeRecipientValue(value);
+    });
+    Object.entries(localRecip || {}).forEach(([key, value]) => {
+        const local = normalizeRecipientValue(value);
+        const existing = result[key];
+        if (!existing || local.updatedAt >= existing.updatedAt) {
+            result[key] = local;
         }
     });
     return result;
@@ -1285,6 +1346,8 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
     const localParts = localMeta.partitions || {};
     const remoteParts = normalizedMeta.partitions;
 
+    let needsPushBack = false;
+
     // 1) 마스터 설정 (설비, 수신처) 파티션 점검
     const remoteMasterRev = remoteParts.master_config?.revision || 0;
     const localMasterRev = localParts.master_config?.revision || 0;
@@ -1294,15 +1357,24 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
         if (masterData) {
             const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]');
             const isEditingEquipment = localEquipment.some(item => item.isEditing);
-            const mergedEq = mergeEquipment(masterData.equipment || [], localEquipment);
+            const remoteEqList = masterData.equipment || [];
+            const mergedEq = mergeEquipment(remoteEqList, localEquipment);
             if (!isEditingEquipment) {
                 localStorage.setItem('equipmentData', JSON.stringify(mergedEq));
                 renderTable();
             }
+            if (mergedEq.length > remoteEqList.length) {
+                needsPushBack = true;
+            }
+
             const localRecip = JSON.parse(localStorage.getItem('recipientData') || '{}');
-            const mergedRecip = { ...(masterData.recipient || {}), ...localRecip };
+            const remoteRecip = masterData.recipient || {};
+            const mergedRecip = mergeRecipients(remoteRecip, localRecip);
             localStorage.setItem('recipientData', JSON.stringify(mergedRecip));
             renderRecipientTable();
+            if (Object.keys(mergedRecip).length > Object.keys(remoteRecip).length) {
+                needsPushBack = true;
+            }
         }
     }
 
@@ -1314,8 +1386,12 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
         const notesData = await readJsonFromDir(dirHandle, 'notes.json', null);
         if (notesData && notesData.machineNotes) {
             const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
-            const mergedNotes = mergeNotes(notesData.machineNotes, localNotes);
+            const remoteNotes = notesData.machineNotes || {};
+            const mergedNotes = mergeNotes(remoteNotes, localNotes);
             localStorage.setItem('machineNotes', JSON.stringify(mergedNotes));
+            if (Object.keys(mergedNotes).length > Object.keys(remoteNotes).length) {
+                needsPushBack = true;
+            }
         }
     }
 
@@ -1357,6 +1433,9 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
                     const localMonthHistory = await getIDBHistoryByMonth(ym);
                     const mergedMonthHistory = mergeHistory(monthData, localMonthHistory);
                     await upsertIDBHistoryItems(mergedMonthHistory);
+                    if (mergedMonthHistory.length > monthData.length) {
+                        needsPushBack = true;
+                    }
                 }
             }
         }
@@ -1381,6 +1460,11 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
         showToast('최신화 완료', `TEAM DB Revision ${normalizedMeta.dbRevision} (분할 동기화)`);
     } else if (normalizedMeta.dbRevision > Number(localStorage.getItem('teamDbRevision') || 0)) {
         showToast('TEAM DB 최신화', `Revision ${normalizedMeta.dbRevision} 최신 변경사항을 반영했습니다.`);
+    }
+
+    if (needsPushBack) {
+        console.log("🔄 [동기화] 로컬에만 존재하는 신규/추가 데이터가 감지되어 Box에 자동 반영(역방향 Push)합니다.");
+        autoMergeAndSave({ scope: 'all' });
     }
 
     return true;
@@ -1443,7 +1527,7 @@ async function pushPartitionedTeamData(dirHandle, pushScope = {}) {
             const localRecipient = JSON.parse(localStorage.getItem('recipientData') || '{}');
             const remoteMaster = await readJsonFromDir(dirHandle, 'master_config.json', { equipment: [], recipient: {} });
             const mergedEq = mergeEquipment(remoteMaster.equipment, localEquipment);
-            const mergedRecip = { ...(remoteMaster.recipient || {}), ...localRecipient };
+            const mergedRecip = mergeRecipients(remoteMaster.recipient || {}, localRecipient);
 
             masterToSave = { equipment: mergedEq, recipient: mergedRecip };
         }
@@ -1486,6 +1570,13 @@ async function pushPartitionedTeamData(dirHandle, pushScope = {}) {
                 const remoteMonthItems = await readJsonFromDir(historySubdir, `${ym}.json`, []);
                 const mergedMonthItems = mergeHistory(remoteMonthItems, localMonthItems);
                 historyToSaveByMonth[ym] = mergedMonthItems;
+                if (mergedMonthItems.length > localMonthItems.length) {
+                    await upsertIDBHistoryItems(mergedMonthItems);
+                    await updateHistoryBadge();
+                    if (document.getElementById('history')?.classList.contains('block')) {
+                        await renderHistory();
+                    }
+                }
             }
         }
 
@@ -1623,7 +1714,7 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
                             ...boxData,
                             workHistory: mergeHistory(boxData.workHistory, localHistory),
                             equipment: mergeEquipment(boxData.equipment, localEquipment),
-                            recipient: { ...(boxData.recipient || {}), ...localRecipient },
+                            recipient: mergeRecipients(boxData.recipient || {}, localRecipient),
                             machineNotes: mergeNotes(boxData.machineNotes, localNotes),
                             equipMaintenance: mergeMaintenance(boxData.equipMaintenance, localMaint),
                             dbRevision: boxMeta.dbRevision,
@@ -1658,7 +1749,7 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
                             lastUpdatedBy: getTeamEditorName(),
                             workHistory: mergeHistory(boxData.workHistory, allHist),
                             equipment: mergeEquipment(boxData.equipment, allEq),
-                            recipient: { ...(boxData.recipient || {}), ...allRecip },
+                            recipient: mergeRecipients(boxData.recipient || {}, allRecip),
                             machineNotes: mergeNotes(boxData.machineNotes, allNotes),
                             equipMaintenance: mergeMaintenance(boxData.equipMaintenance, allMaint)
                         };
@@ -1706,13 +1797,35 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
 }
 
 /**
- * 0.7초 디바운스를 거쳐 변경사항을 Box에 자동 Push합니다.
+ * 🛡️ Push 스코프 누적 병합 헬퍼 (디바운스 중 서로 다른 스코프 요청 유실 방지)
+ */
+function combinePushScopes(prevScope, newScope) {
+    if (!prevScope) return newScope || { scope: 'all' };
+    if (!newScope) return prevScope;
+    if (prevScope.scope === 'all' || newScope.scope === 'all') {
+        return { scope: 'all' };
+    }
+    if (prevScope.scope === newScope.scope) {
+        if (prevScope.scope === 'history') {
+            const ymSet = new Set([...(prevScope.yearMonths || []), ...(newScope.yearMonths || [])]);
+            return { scope: 'history', yearMonths: Array.from(ymSet) };
+        }
+        return prevScope;
+    }
+    // 서로 다른 단일 스코프(예: equipment + notes)가 연속 발생한 경우 'all'로 승격하여 안전하게 전체 저장
+    return { scope: 'all' };
+}
+
+/**
+ * 0.7초 디바운스를 거쳐 변경사항을 Box에 자동 Push합니다. (스코프 누적 지원)
  */
 function autoMergeAndSave(scope = { scope: 'all' }) {
     clearTimeout(_autoSyncDebounceTimer);
-    _pendingPushScope = scope;
+    _pendingPushScope = combinePushScopes(_pendingPushScope, scope);
     _autoSyncDebounceTimer = setTimeout(() => { 
-        syncWithBox(true, true, false, _pendingPushScope); 
+        const targetScope = _pendingPushScope || { scope: 'all' };
+        _pendingPushScope = null;
+        syncWithBox(true, true, false, targetScope); 
     }, 700);
 }
 
@@ -1729,9 +1842,11 @@ async function ensureFreshTeamDb() {
         const ok = await syncWithBox(true, false, false);
         if (!ok) {
             console.warn('팀 DB 사전 동기화 실패. 로컬 저장을 계속 진행합니다.');
+            showToast('동기화 알림', 'Box 최신 데이터 수신 실패. 로컬에 우선 저장됩니다.');
         }
     } catch(e) {
         console.warn('동기화 확인 중 오류:', e);
+        showToast('동기화 알림', 'Box 확인 중 오류 발생. 로컬에 우선 저장됩니다.');
     }
     return true;
 }
@@ -2025,15 +2140,23 @@ async function handleMobileDB(event) {
             let localEq = JSON.parse(localStorage.getItem("equipmentData") || "[]"); 
             let isEditingEq = localEq.some(i => i.isEditing);
             if (boxData.equipment && !isEditingEq) { 
-                localStorage.setItem("equipmentData", JSON.stringify(boxData.equipment)); 
+                const mergedEq = mergeEquipment(boxData.equipment, localEq);
+                boxData.equipment = mergedEq;
+                localStorage.setItem("equipmentData", JSON.stringify(mergedEq)); 
                 renderTable(); 
             }
             if (boxData.recipient) { 
-                localStorage.setItem("recipientData", JSON.stringify(boxData.recipient)); 
+                const localRecip = JSON.parse(localStorage.getItem("recipientData") || "{}");
+                const mergedRecip = mergeRecipients(boxData.recipient, localRecip);
+                boxData.recipient = mergedRecip;
+                localStorage.setItem("recipientData", JSON.stringify(mergedRecip)); 
                 renderRecipientTable(); 
             }
             if (boxData.machineNotes) {
-                localStorage.setItem("machineNotes", JSON.stringify(boxData.machineNotes));
+                const localNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
+                const mergedNotes = mergeNotes(boxData.machineNotes, localNotes);
+                boxData.machineNotes = mergedNotes;
+                localStorage.setItem("machineNotes", JSON.stringify(mergedNotes));
             }
             if (boxData.equipMaintenance) {
                 applyIncomingMaintenance(boxData.equipMaintenance); 
@@ -2074,57 +2197,79 @@ async function handleMobileDB(event) {
 }
 
 /**
- * 💾 정기 PC 로컬 자동 백업 (1주일 단위)
+ * 💾 PC 로컬 백업 파일 다운로드 실행
+ */
+async function executeBackupDownload(isManual = false) {
+    try {
+        let history = await getIDBHistory();
+        let equipment = JSON.parse(localStorage.getItem("equipmentData") || "[]").map(e => { 
+            let obj = { ...e }; 
+            delete obj.isEditing; 
+            return obj; 
+        });
+        let recipient = JSON.parse(localStorage.getItem("recipientData") || "{}");
+        let machineNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
+        let equipMaintenance = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+
+        let backupData = {
+            workHistory: history,
+            equipment: equipment,
+            recipient: recipient,
+            machineNotes: machineNotes,
+            equipMaintenance: equipMaintenance,
+            backupDate: new Date().toISOString()
+        };
+
+        const dataStr = JSON.stringify(backupData, null, 2);
+        const blob = new Blob([dataStr], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        
+        const d = new Date();
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const dateString = `${yyyy}${mm}${dd}`;
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `SFDC_Backup_${dateString}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        localStorage.setItem('lastBackupDate', Date.now().toString());
+        showToast("백업 완료", "다운로드 폴더에 백업 파일이 저장되었습니다.");
+        return true;
+    } catch (error) {
+        console.error("백업 다운로드 실패:", error);
+        showToast("오류", "백업 파일 생성에 실패했습니다.");
+        return false;
+    }
+}
+
+/**
+ * 💾 정기 PC 로컬 백업 점검 (1주일 단위 안내)
  */
 async function autoLocalBackup() {
     const lastBackup = localStorage.getItem('lastBackupDate');
     const now = Date.now();
     const ONE_WEEK = 7 * 24 * 60 * 60 * 1000; 
 
-    if (!lastBackup || (now - parseInt(lastBackup)) > ONE_WEEK) {
-        try {
-            let history = await getIDBHistory();
-            let equipment = JSON.parse(localStorage.getItem("equipmentData") || "[]").map(e => { 
-                let obj = { ...e }; 
-                delete obj.isEditing; 
-                return obj; 
-            });
-            let recipient = JSON.parse(localStorage.getItem("recipientData") || "{}");
-            let machineNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
-            let equipMaintenance = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
+    if (!lastBackup) {
+        localStorage.setItem('lastBackupDate', now.toString());
+        return;
+    }
 
-            let backupData = {
-                workHistory: history,
-                equipment: equipment,
-                recipient: recipient,
-                machineNotes: machineNotes,
-                equipMaintenance: equipMaintenance,
-                backupDate: new Date().toISOString()
-            };
-
-            const dataStr = JSON.stringify(backupData, null, 2);
-            const blob = new Blob([dataStr], { type: "text/plain" });
-            const url = URL.createObjectURL(blob);
-            
-            const d = new Date();
-            const yyyy = d.getFullYear();
-            const mm = String(d.getMonth() + 1).padStart(2, '0');
-            const dd = String(d.getDate()).padStart(2, '0');
-            const dateString = `${yyyy}${mm}${dd}`;
-            
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `SFDC_Backup_${dateString}.txt`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-
-            localStorage.setItem('lastBackupDate', now.toString());
-            setTimeout(() => showToast("정기 자동 백업", "PC 다운로드 폴더에 백업 파일이 저장되었습니다."), 1500);
-        } catch (error) {
-            console.error("자동 백업 실패:", error);
-        }
+    if ((now - parseInt(lastBackup)) > ONE_WEEK) {
+        const days = Math.floor((now - parseInt(lastBackup)) / (24 * 60 * 60 * 1000));
+        setTimeout(() => {
+            if (confirm(`💾 [정기 데이터 백업 알림]\n마지막 PC 백업으로부터 ${days}일이 지났습니다.\n지금 PC에 백업 파일(SFDC_Backup_*.txt)을 저장하시겠습니까?`)) {
+                executeBackupDownload(true);
+            } else {
+                localStorage.setItem('lastBackupDate', (now - (ONE_WEEK - 3 * 24 * 60 * 60 * 1000)).toString());
+            }
+        }, 1200);
     }
 }
 
@@ -2240,13 +2385,15 @@ async function extractData() {
         
         if (extraNote || extraCategory) {
             let ns = JSON.parse(localStorage.getItem("machineNotes") || "{}");
-            let prevNote = ns[machine] || "";
+            let prevNote = typeof getNoteText === 'function' ? getNoteText(ns[machine]) : (typeof ns[machine] === 'string' ? ns[machine] : ns[machine]?.text || "");
             let categoryPart = extraCategory ? `[${extraCategory}]` : "";
             let summaryPart = maintSummary ? `\n${maintSummary}` : "";
             let notePart = extraNote ? `\n${extraNote}` : "";
             let newEntry = `-${df}- ${categoryPart}${summaryPart}${notePart}`.trim();
-            ns[machine] = prevNote ? (prevNote + "\n\n" + newEntry) : newEntry;
+            const combined = prevNote ? (prevNote + "\n\n" + newEntry) : newEntry;
+            ns[machine] = { text: combined, updatedAt: Date.now() };
             localStorage.setItem("machineNotes", JSON.stringify(ns));
+            if (typeof autoMergeAndSave === "function") autoMergeAndSave({ scope: 'notes' });
             
             document.getElementById("extraNoteInput").value = "";
             document.getElementById("extraNoteCategory").value = "";
@@ -2465,12 +2612,15 @@ function updateShipCheckboxes(idx) {
     const data = JSON.parse(localStorage.getItem("recipientData") || "{}"); 
     area.innerHTML = ""; 
     
-    if (!line || !data[line]) {
+    const rawEmailVal = data[line];
+    const emailStr = typeof getRecipientEmail === 'function' ? getRecipientEmail(rawEmailVal) : (typeof rawEmailVal === 'string' ? rawEmailVal : rawEmailVal?.email || "");
+    
+    if (!line || !emailStr) {
         area.innerHTML = '<p class="text-[10px] text-text-muted">담당자 없음</p>';
         return;
     }
     
-    data[line].split(/[,;]+/).map(e => e.trim()).filter(Boolean).forEach((email, i) => { 
+    emailStr.split(/[,;]+/).map(e => e.trim()).filter(Boolean).forEach((email, i) => { 
         const name = email.includes('<') ? email.split('<')[0].trim() : email.split('@')[0]; 
         area.innerHTML += `
             <div class="flex items-center gap-2 bg-background/50 px-3 py-1 border border-border rounded">
@@ -2503,8 +2653,11 @@ function generateFullMail() {
         const f = data.find(i => i.name.toLowerCase() === es); 
         if (!f) return alert("등록되지 않은 설비입니다.");
 
+        const rawLineRecip = recipientMap[f.line.toUpperCase()] || recipientMap[f.line] || null;
+        const lineRecipStr = typeof getRecipientEmail === 'function' ? getRecipientEmail(rawLineRecip) : (typeof rawLineRecip === 'string' ? rawLineRecip : rawLineRecip?.email || "");
+
         document.getElementById("resRecipientsOut").closest('.space-y-2').style.display = "block"; 
-        document.getElementById("resRecipientsOut").innerText = recipientMap[f.line.toUpperCase()] || "미등록";
+        document.getElementById("resRecipientsOut").innerText = lineRecipStr || "미등록";
         
         subject = `삼성전자_${f.line} Line_${f.model}_${f.name}호기_${f.sn}_${jt} 작업 전송의 건`;
         fullText = `삼성전자 / (${cn})님\n이하 관계자 각위\n\n업무에 수고가 많으십니다.\n히타치 ${myName}입니다.\n\n${f.line} Line ${f.model} ${f.name}호기에서 진행한 ${jt} 작업 내용 전송드립니다.\n\n작업일: ${jd}\n\n작업내용 :\n${jdt}\n\n작업자 : 히타치 ${myName}\n\n인폼내용 : ${inform}\n\n이상입니다.\n\n상기 내용 중 불명확점 있으시면 연락 부탁드리겠습니다.\n\nHITACHI\n${myName} 배상`;
@@ -2553,7 +2706,7 @@ function generateFullMail() {
         }
 
         document.getElementById("resRecipientsOut").innerText = Array.from(allEmails).join(', '); 
-        document.getElementById("resRecipientsOut").closest('.space-y-2').style.display = "none";
+        document.getElementById("resRecipientsOut").closest('.space-y-2').style.display = "block";
         
         subject = `[배차요청] ${firstModel} ${blocks.length > 1 ? firstItem + ' 외 ' + (blocks.length - 1) + '건' : firstItem} 반출 배차 요청`;
         fullText = `SCM / ( 이 희진 ) 과장님\n이하 관계자 각위\n\n연일 업무에 노고가 많으십니다.\n평가4부 ${myName}입니다.\n\n${firstModel} 반출 일정 Arrange 부탁드리며,\n하기와 같이 반출 정보 송부 드리오니 확인 부탁드리겠습니다.\n\n[반출]\n${ilt}\n이상입니다.\n\n${inform ? `(인폼내용) ${inform}\n\n` : ''}감사합니다.\n\n평가 4부\n${myName} 드림`;
@@ -2580,15 +2733,26 @@ function loadToMailGen(m, c) {
 // 5. [Business: Maintenance] 설비 소모품(Laser, Scale Head, Mirror) 유지보수
 // ==============================================================================
 
-/** 중복 날짜 이력 제거 (정보가 더 많이 채워진 쪽 우선) */
+/** 🛡️ 중복 날짜 이력 병합 (updatedAt 최신 우선 및 소프트 삭제 상태 전파) */
 function dedupeHistoryArray(arr) {
     const seen = {};
     (arr || []).forEach(h => {
-        const key = h.date;
+        const key = h.id || h.date;
         if (!key) return;
-        if (!seen[key]) { seen[key] = h; return; }
-        const score = x => Object.values(x).filter(v => v && v !== '-').length;
-        if (score(h) > score(seen[key])) seen[key] = h;
+        if (!seen[key]) {
+            seen[key] = { ...h };
+            return;
+        }
+        // updatedAt이 있으면 최신 타임스탬프 우선
+        const prevUpdatedAt = seen[key].updatedAt || 0;
+        const curUpdatedAt = h.updatedAt || 0;
+        if (curUpdatedAt > prevUpdatedAt) {
+            seen[key] = { ...h };
+        } else if (curUpdatedAt === prevUpdatedAt) {
+            // 타임스탬프 동률 시 정보가 더 많은 쪽 우선
+            const score = x => Object.values(x).filter(v => v && v !== '-').length;
+            if (score(h) > score(seen[key])) seen[key] = { ...h };
+        }
     });
     return Object.values(seen).sort((x, y) => new Date((x.date || '').replace(' ', 'T')) - new Date((y.date || '').replace(' ', 'T')));
 }
@@ -2629,7 +2793,7 @@ function saveMaintData(key, data) {
     if (typeof autoMergeAndSave === "function") autoMergeAndSave({ scope: 'maintenance' });
 }
 
-/** 유지보수 데이터 병합 함수 (객체 레벨) */
+/** 유지보수 데이터 병합 함수 (객체 레벨 - 🔒 소프트 삭제 및 최신 updatedAt 보존) */
 function mergeMaintDataObjects(target, source) {
     if (!source) return target;
     target = normalizeMaintShape(target); 
@@ -2648,8 +2812,9 @@ function mergeMaintDataObjects(target, source) {
         const sa = source.scaleHead[a.key]; 
         const ta = target.scaleHead[a.key];
         ta.history = dedupeHistoryArray([...ta.history, ...sa.history]);
-        if (ta.history.length) { 
-            const last = ta.history[ta.history.length - 1]; 
+        const activeHist = ta.history.filter(h => !h.isDeleted);
+        if (activeHist.length) { 
+            const last = activeHist[activeHist.length - 1]; 
             ta.replaceDate = last.date; 
             ta.sn = last.sn || ta.sn; 
         }
@@ -2657,7 +2822,16 @@ function mergeMaintDataObjects(target, source) {
 
     const consMerged = {}; 
     [...(target.consumables || []), ...(source.consumables || [])].forEach(c => { 
-        consMerged[`${c.date}|${c.name}`] = c; 
+        const key = c.id || `${c.date}|${c.name}`;
+        if (!consMerged[key]) {
+            consMerged[key] = c;
+        } else {
+            const prevUp = consMerged[key].updatedAt || 0;
+            const curUp = c.updatedAt || 0;
+            if (curUp >= prevUp) {
+                consMerged[key] = c;
+            }
+        }
     });
     target.consumables = Object.values(consMerged);
     return target;
@@ -2832,18 +3006,18 @@ function renderLaserSection(name) {
 
         <div class="mt-6">
             <span class="label-base mb-3">Laser 교체 히스토리</span>
-            ${l.history && l.history.length > 0 ? `
+            ${l.history && l.history.filter(h => !h.isDeleted).length > 0 ? `
                 <div class="border border-border rounded overflow-hidden">
                     <table class="w-full text-xs">
                         <thead class="bg-background">
                             <tr><th class="th-base">교체일자</th><th class="th-base">사용기간</th><th class="th-base">Head S/N</th><th class="th-base">P/S S/N</th><th class="th-base">Diode S/N</th><th class="th-base text-right">관리</th></tr>
                         </thead>
                         <tbody>
-                            ${l.history.slice().reverse().map((h, rIdx) => {
-                                const originalIndex = l.history.length - 1 - rIdx;
+                            ${l.history.filter(h => !h.isDeleted).slice().reverse().map((h) => {
                                 const hHours = h.usedHours !== undefined ? h.usedHours : (h.usedDays ? h.usedDays * 24 : 0);
                                 const hDays = Math.floor(hHours / 24);
-                                return `<tr class="border-t border-border hover:bg-background/40"><td class="td-base font-mono">${escapeHtml((h.date || '-').replace('T', ' '))}</td><td class="td-base font-bold text-primary">${hDays}일 (${hHours}시간)</td><td class="td-base font-mono">${escapeHtml(h.headSN || '-')}</td><td class="td-base font-mono">${escapeHtml(h.psSN || '-')}</td><td class="td-base font-mono">${escapeHtml(h.diodeSN || '-')}</td><td class="td-base text-right"><button class="btn-text hover:!text-red-600 ml-2" onclick="deleteLaserHistory('${escapeHtml(name)}', ${originalIndex})">삭제</button></td></tr>`;
+                                const hId = h.id || h.date;
+                                return `<tr class="border-t border-border hover:bg-background/40"><td class="td-base font-mono">${escapeHtml((h.date || '-').replace('T', ' '))}</td><td class="td-base font-bold text-primary">${hDays}일 (${hHours}시간)</td><td class="td-base font-mono">${escapeHtml(h.headSN || '-')}</td><td class="td-base font-mono">${escapeHtml(h.psSN || '-')}</td><td class="td-base font-mono">${escapeHtml(h.diodeSN || '-')}</td><td class="td-base text-right"><button class="btn-text hover:!text-red-600 ml-2" onclick="deleteLaserHistory('${escapeHtml(name)}', '${escapeHtml(hId)}')">삭제</button></td></tr>`;
                             }).join('')}
                         </tbody>
                     </table>
@@ -2876,13 +3050,17 @@ function completeLaserReplace(name) {
         const auto = elapsedParts(l.replaceDate);
         const manualHours = l.offsetHours !== undefined ? l.offsetHours : (l.offsetDays ? l.offsetDays * 24 : 0);
         const totalHours = (auto.days * 24) + auto.hours + manualHours;
+        const nowTs = Date.now();
         l.history.push({
+            id: 'LASER_' + nowTs.toString(36) + Math.random().toString(36).slice(2, 6),
             date: l.replaceDate,
             usedDays: Math.floor(totalHours / 24),
             usedHours: totalHours,
             headSN: l.headSN || "-",
             psSN: l.psSN || "-",
-            diodeSN: l.diodeSN || "-"
+            diodeSN: l.diodeSN || "-",
+            isDeleted: false,
+            updatedAt: nowTs
         });
     }
 
@@ -2897,10 +3075,22 @@ function completeLaserReplace(name) {
     showToast("교체 완료", "새 Laser 기준일이 설정되고 이전 기록이 이력에 보관되었습니다.");
 }
 
-function deleteLaserHistory(name, index) {
+function deleteLaserHistory(name, idOrDate) {
     if (!confirm('이 교체 이력을 삭제하시겠습니까?')) return;
     const data = getMaintData(name);
-    data.laser.history.splice(index, 1);
+    const nowTs = Date.now();
+    let found = false;
+    (data.laser.history || []).forEach(h => {
+        if ((h.id && h.id === idOrDate) || (!h.id && h.date === idOrDate)) {
+            h.isDeleted = true;
+            h.updatedAt = nowTs;
+            found = true;
+        }
+    });
+    if (!found && typeof idOrDate === 'number' && data.laser.history[idOrDate]) {
+        data.laser.history[idOrDate].isDeleted = true;
+        data.laser.history[idOrDate].updatedAt = nowTs;
+    }
     saveMaintData(name, data);
     renderLaserSection(name);
     showToast("삭제 완료", "교체 이력이 삭제되었습니다.");
@@ -2928,9 +3118,10 @@ function renderScaleHeadSection(name) {
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             ${SCALE_AXES.map(a => {
                 const item = data.scaleHead[a.key] || { replaceDate: null, history: [] };
+                const activeHist = (item.history || []).filter(h => !h.isDeleted);
                 const days = daysSince(item.replaceDate);
                 const hasDate = !!item.replaceDate;
-                const histCount = item.history ? item.history.length : 0;
+                const histCount = activeHist.length;
                 return `
                     <div class="card-base p-4 rounded-md border border-border bg-background/50 flex flex-col justify-between">
                         <div>
@@ -2948,9 +3139,9 @@ function renderScaleHeadSection(name) {
                             <button class="btn-text text-[10px] text-primary hover:underline" onclick="completeScaleHeadReplace('${escapeHtml(name)}', '${a.key}')">교체완료</button>
                         </div>
                         <div id="scaleHeadHist_${a.key}" class="hidden mt-2 pt-2 border-t border-border/50 text-[10px] space-y-1">
-                            ${histCount > 0 ? item.history.slice().reverse().map((h, hIdx) => {
-                                const originalIndex = item.history.length - 1 - hIdx;
-                                return `<div class="flex justify-between items-center text-text-muted"><span>${escapeHtml(h.date)} (${escapeHtml(h.sn || '-')})</span><button class="text-red-500 hover:underline" onclick="deleteScaleHeadHistory('${escapeHtml(name)}', '${a.key}', ${originalIndex})">삭제</button></div>`;
+                            ${histCount > 0 ? activeHist.slice().reverse().map((h) => {
+                                const hId = h.id || h.date;
+                                return `<div class="flex justify-between items-center text-text-muted"><span>${escapeHtml(h.date)} (${escapeHtml(h.sn || '-')})</span><button class="text-red-500 hover:underline" onclick="deleteScaleHeadHistory('${escapeHtml(name)}', '${a.key}', '${escapeHtml(hId)}')">삭제</button></div>`;
                             }).join('') : '<p class="text-text-muted">이전 이력 없음</p>'}
                         </div>
                     </div>
@@ -2969,8 +3160,15 @@ function completeScaleHeadReplace(name, key) {
     
     const data = getMaintData(name);
     const target = data.scaleHead[key];
+    const nowTs = Date.now();
     if (target.replaceDate) {
-        target.history.push({ date: target.replaceDate, sn: target.sn || '-' });
+        target.history.push({ 
+            id: 'SH_' + key + '_' + nowTs.toString(36) + Math.random().toString(36).slice(2, 6),
+            date: target.replaceDate, 
+            sn: target.sn || '-',
+            isDeleted: false,
+            updatedAt: nowTs
+        });
     }
     const today = new Date().toISOString().slice(0, 10);
     target.replaceDate = today;
@@ -2980,10 +3178,17 @@ function completeScaleHeadReplace(name, key) {
     showToast("교체 완료", `[${key}] 축이 오늘(${today}) 일자로 갱신되었습니다.`);
 }
 
-function deleteScaleHeadHistory(name, key, index) {
+function deleteScaleHeadHistory(name, key, idOrDate) {
     if (!confirm('이 교체 이력을 삭제하시겠습니까?')) return;
     const data = getMaintData(name);
-    data.scaleHead[key].history.splice(index, 1);
+    const target = data.scaleHead[key];
+    const nowTs = Date.now();
+    (target.history || []).forEach(h => {
+        if ((h.id && h.id === idOrDate) || (!h.id && h.date === idOrDate)) {
+            h.isDeleted = true;
+            h.updatedAt = nowTs;
+        }
+    });
     saveMaintData(name, data);
     renderScaleHeadSection(name);
     showToast("삭제 완료", "이력이 삭제되었습니다.");
@@ -2992,7 +3197,7 @@ function deleteScaleHeadHistory(name, key, index) {
 /** 기타 소모품 (Consumables) 섹션 렌더링 및 관리 */
 function renderConsumablesSection(name) {
     const data = getMaintData(name);
-    const list = data.consumables || [];
+    const list = (data.consumables || []).filter(c => !c.isDeleted);
     const wrap = document.getElementById('detailConsumablesWrap');
     wrap.innerHTML = `
         <div class="mb-4 bg-background p-4 border border-border rounded flex flex-wrap gap-3 items-end">
@@ -3014,7 +3219,7 @@ function renderConsumablesSection(name) {
                                 <td class="td-base font-mono">${escapeHtml(item.date)}</td>
                                 <td class="td-base text-text-muted">${daysSince(item.date)}일 경과</td>
                                 <td class="td-base text-text-muted">${escapeHtml(item.note || '-')}</td>
-                                <td class="td-base text-right"><button class="btn-text hover:!text-red-600" onclick="deleteConsumableEntry('${escapeHtml(name)}', '${item.id}')">삭제</button></td>
+                                <td class="td-base text-right"><button class="btn-text hover:!text-red-600" onclick="deleteConsumableEntry('${escapeHtml(name)}', '${escapeHtml(item.id)}')">삭제</button></td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -3032,11 +3237,14 @@ function addConsumableEntry(name) {
     if (!cDate) { showToast("오류", "교체일자를 선택해주세요."); return; }
     
     const data = getMaintData(name);
+    const nowTs = Date.now();
     data.consumables.push({
-        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        id: 'CONS_' + nowTs.toString(36) + Math.random().toString(36).slice(2, 6),
         name: cName,
         date: cDate,
         note: cNote,
+        isDeleted: false,
+        updatedAt: nowTs,
         savedAt: new Date().toISOString()
     });
     saveMaintData(name, data);
@@ -3047,9 +3255,18 @@ function addConsumableEntry(name) {
 function deleteConsumableEntry(name, id) {
     if (!confirm('삭제하시겠습니까?')) return;
     const data = getMaintData(name);
-    data.consumables = data.consumables.filter(c => c.id !== id);
+    const nowTs = Date.now();
+    let found = false;
+    (data.consumables || []).forEach(c => {
+        if (c.id === id) {
+            c.isDeleted = true;
+            c.updatedAt = nowTs;
+            found = true;
+        }
+    });
     saveMaintData(name, data);
     renderConsumablesSection(name);
+    showToast("삭제 완료", "소모품 교환 이력이 삭제되었습니다.");
 }
 
 
@@ -3138,7 +3355,7 @@ async function renderEquipDetail(eq) {
                     <div class="mt-3 text-[10px] text-text-muted flex gap-3 items-center flex-wrap">
                         <span>👤 ${escapeHtml(e.worker || '—')}</span>
                         <span>⏱️ Recorded: ${savedStr}</span>
-                        <button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="loadToMailGen('${escapeHtml(eq.name)}', '${escapeHtml(e.content).replace(/'/g, "\\'")}')">메일 작성</button>
+                        <button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="handleMailGenClick(this)" data-eq="${escapeHtml(eq.name)}" data-content="${escapeHtml(e.content || '')}">메일 작성</button>
                     </div>
                 </div>
             `;
@@ -3151,6 +3368,16 @@ async function renderEquipDetail(eq) {
     renderLaserSection(eq.sn);
     renderScaleHeadSection(eq.sn);
     renderConsumablesSection(eq.sn);
+}
+
+/** 🛡️ 메일 작성 버튼 클릭 핸들러 (줄바꿈/특수문자 100% 안전 전달) */
+function handleMailGenClick(btn) {
+    if (!btn) return;
+    const eqName = btn.dataset.eq || '';
+    const content = btn.dataset.content || '';
+    if (typeof loadToMailGen === 'function') {
+        loadToMailGen(eqName, content);
+    }
 }
 
 /** 설비 마스터 테이블 렌더링 */
@@ -3229,7 +3456,8 @@ function saveEdit(i) {
         name: document.getElementById(`editName_${i}`).value.trim(), 
         sn: newSN, 
         location: document.getElementById(`editLoc_${i}`).value.trim(), 
-        isEditing: false 
+        isEditing: false,
+        updatedAt: Date.now()
     }; 
     
     localStorage.setItem("equipmentData", JSON.stringify(d)); 
@@ -3246,6 +3474,7 @@ function importFromExcel() {
     if (!v) return; 
     const d = JSON.parse(localStorage.getItem("equipmentData") || "[]"); 
     let added = 0; 
+    const now = Date.now();
     
     v.split('\n').forEach(r => { 
         const c = r.split('\t'); 
@@ -3255,7 +3484,8 @@ function importFromExcel() {
                 model: c[1]?.trim() || "",
                 name: c[2]?.trim() || "",
                 sn: c[3]?.trim() || "",
-                location: c[4]?.trim() || ""
+                location: c[4]?.trim() || "",
+                updatedAt: now
             }); 
             added++; 
         } 
@@ -3280,7 +3510,8 @@ function addNewData() {
         model: document.getElementById("newModel").value, 
         name: name, 
         sn: document.getElementById("newSN").value, 
-        location: document.getElementById("newLocation").value
+        location: document.getElementById("newLocation").value,
+        updatedAt: Date.now()
     }); 
     localStorage.setItem("equipmentData", JSON.stringify(d)); 
     renderTable(); 
@@ -3305,10 +3536,11 @@ function renderRecipientTable() {
     tbody.innerHTML = ""; 
     
     Object.keys(data).sort().forEach(line => { 
+        const emailStr = typeof getRecipientEmail === 'function' ? getRecipientEmail(data[line]) : (typeof data[line] === 'string' ? data[line] : data[line]?.email || '');
         tbody.innerHTML += `
             <tr class="hover:bg-background/40 transition-colors">
                 <td class="td-base font-medium px-6">${escapeHtml(line)}</td>
-                <td class="td-base text-text-muted px-6" id="recip_${line}">${escapeHtml(data[line])}</td>
+                <td class="td-base text-text-muted px-6" id="recip_${line}">${escapeHtml(emailStr)}</td>
                 <td class="td-base px-6">
                     <div class="flex items-center justify-end gap-3">
                         <button class="btn-text" onclick="copyRecipient('${line}')">Copy</button>
@@ -3323,14 +3555,15 @@ function renderRecipientTable() {
 
 function copyRecipient(l) { 
     const d = JSON.parse(localStorage.getItem("recipientData") || "{}"); 
-    const rawData = d[l] || ""; 
+    const rawData = typeof getRecipientEmail === 'function' ? getRecipientEmail(d[l]) : (typeof d[l] === 'string' ? d[l] : d[l]?.email || ""); 
     navigator.clipboard.writeText(rawData).then(() => showToast("복사 완료", `[${l}] 수신처가 복사되었습니다.`)); 
 }
 function editRecipient(l) { 
     const d = JSON.parse(localStorage.getItem("recipientData") || "{}"); 
-    const n = prompt(`[${l}] 라인 수신처 수정:`, d[l]); 
+    const curEmail = typeof getRecipientEmail === 'function' ? getRecipientEmail(d[l]) : (typeof d[l] === 'string' ? d[l] : d[l]?.email || "");
+    const n = prompt(`[${l}] 라인 수신처 수정:`, curEmail); 
     if (n !== null && n.trim()) { 
-        d[l] = n.trim(); 
+        d[l] = { email: n.trim(), updatedAt: Date.now() }; 
         localStorage.setItem("recipientData", JSON.stringify(d)); 
         renderRecipientTable(); 
         autoMergeAndSave({ scope: 'recipient' }); 
@@ -3341,7 +3574,7 @@ function addRecipient() {
     const e = document.getElementById("newRecipEmails").value.trim(); 
     if (!l || !e) return alert("라인과 이메일을 모두 입력하세요."); 
     const d = JSON.parse(localStorage.getItem("recipientData") || "{}"); 
-    d[l] = e; 
+    d[l] = { email: e, updatedAt: Date.now() }; 
     localStorage.setItem("recipientData", JSON.stringify(d)); 
     renderRecipientTable(); 
     autoMergeAndSave({ scope: 'recipient' }); 
@@ -3378,7 +3611,7 @@ function searchSalesforce() {
     };
     
     const jsonString = JSON.stringify(sfData);
-    const encodedData = btoa(unescape(encodeURIComponent(jsonString)));
+    const encodedData = btoa(encodeURIComponent(jsonString).replace(/%([0-9A-F]{2})/g, (match, p1) => String.fromCharCode(parseInt(p1, 16))));
     const targetPath = "/one/one.app#" + encodedData;
     const sfSearchUrl = "https://hht.my.salesforce.com/?startURL=" + encodeURIComponent(targetPath);
     
@@ -3465,10 +3698,10 @@ async function updateHistoryBadge() {
     }
 }
 
-/** 설비별 특이사항 / 메모 저장 */
+/** 설비별 특이사항 / 메모 저장 (🔒 updatedAt 타임스탬프 기록) */
 function saveMachineNote(m, t) { 
     let ns = JSON.parse(localStorage.getItem("machineNotes") || "{}"); 
-    ns[m] = t.trim(); 
+    ns[m] = { text: t.trim(), updatedAt: Date.now() }; 
     localStorage.setItem("machineNotes", JSON.stringify(ns)); 
     showToast("메모 저장", `[${m}] 특이사항이 저장되었습니다.`); 
     autoMergeAndSave({ scope: 'notes' }); 
@@ -3596,7 +3829,8 @@ async function renderHistory() {
     // 설비 특이사항 메모 영역
     const noteDiv = document.createElement("div"); 
     noteDiv.className = "p-6 border-b border-border/50 bg-background/30";
-    const noteContent = JSON.parse(localStorage.getItem("machineNotes") || "{}")[selectedChip] || "";
+    const rawNote = JSON.parse(localStorage.getItem("machineNotes") || "{}")[selectedChip];
+    const noteContent = typeof getNoteText === 'function' ? getNoteText(rawNote) : (typeof rawNote === 'string' ? rawNote : rawNote?.text || "");
     const noteItems = noteContent.split(/\n\n+/).filter(s => s.trim());
     const noteListHtml = noteItems.length ? noteItems.map(item => {
         const lines = item.trim().split('\n');
@@ -3648,7 +3882,7 @@ async function renderHistory() {
         li.style.animationDelay = `${idx * 50}ms`;
         
         const savedDate = new Date(e.savedAt); 
-        const savedStr = `${savedDate.getFullYear()}.${savedDate.getMonth() + 1}.${savedDate.getDate()} ${savedDate.getHours()}:${savedDate.getMinutes()}`;
+        const savedStr = `${savedDate.getFullYear()}.${savedDate.getMonth() + 1}.${savedDate.getDate()} ${savedDate.getHours()}:${String(savedDate.getMinutes()).padStart(2, '0')}`;
         
         li.innerHTML = `
             <div class="timeline-dot mt-1"></div>
@@ -3665,7 +3899,7 @@ async function renderHistory() {
                 <div class="mt-3 text-[10px] text-text-muted flex gap-3 items-center flex-wrap">
                     <span>👤 ${escapeHtml(e.worker || "—")}</span>
                     <span>⏱️ Recorded: ${savedStr}</span>
-                    <button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="loadToMailGen('${escapeHtml(e.machine)}', '${escapeHtml(e.content).replace(/'/g, "\\'")}')">메일 작성</button>
+                    <button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="handleMailGenClick(this)" data-eq="${escapeHtml(e.machine)}" data-content="${escapeHtml(e.content || '')}">메일 작성</button>
                 </div>
             </div>
             <button class="btn-text self-start mt-1 ml-2 hover:!text-red-500" onclick="deleteSingleHistory('${e.id}')">
@@ -3693,7 +3927,7 @@ async function saveHistoryEntry(entry) {
         if (matched && matched.sn) entry.sn = matched.sn;
     }
     
-    if (history.some(e => e.machine === entry.machine && e.date === entry.date && e.content === entry.content)) return; 
+    if (history.some(e => !e.isDeleted && e.machine === entry.machine && e.date === entry.date && e.content === entry.content)) return; 
     history.push(entry); 
     await putIDBHistory(history);
     await updateHistoryBadge(); 
