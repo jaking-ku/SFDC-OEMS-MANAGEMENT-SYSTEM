@@ -87,6 +87,7 @@
            ============================================= */
 
 @media (max-width: 767px){
+
             /* ── 사이드바 숨김 / 상단 topbar 전환 ── */
             #sidebar {
                 position: fixed !important;
@@ -1348,12 +1349,14 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
     const localParts = localMeta.partitions || {};
     const remoteParts = normalizedMeta.partitions;
 
+    // 💡 핵심 개선: 사용자가 [강제 최신화]를 클릭한 경우(isManualButton === true) 리비전 검사를 바이패스하고 전체 강제 로드 수행
+    const forceAll = Boolean(isManualButton);
     let needsPushBack = false;
 
     // 1) 마스터 설정 (설비, 수신처) 파티션 점검
     const remoteMasterRev = remoteParts.master_config?.revision || 0;
     const localMasterRev = localParts.master_config?.revision || 0;
-    if (remoteMasterRev > localMasterRev || !localMeta.dbRevision) {
+    if (forceAll || remoteMasterRev > localMasterRev || !localMeta.dbRevision) {
         if (progressCb) progressCb(18, '마스터 설정 동기화', '설비 목록 및 메일 수신처 데이터를 동기화 중입니다.', 'master_config.json');
         const masterData = await readJsonFromDir(dirHandle, 'master_config.json', null);
         if (masterData) {
@@ -1383,7 +1386,7 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
     // 2) 메모 파티션 점검
     const remoteNotesRev = remoteParts.notes?.revision || 0;
     const localNotesRev = localParts.notes?.revision || 0;
-    if (remoteNotesRev > localNotesRev || !localMeta.dbRevision) {
+    if (forceAll || remoteNotesRev > localNotesRev || !localMeta.dbRevision) {
         if (progressCb) progressCb(24, '설비 메모 동기화', '설비별 특이사항 및 메모를 동기화 중입니다.', 'notes.json');
         const notesData = await readJsonFromDir(dirHandle, 'notes.json', null);
         if (notesData && notesData.machineNotes) {
@@ -1400,7 +1403,7 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
     // 3) 유지보수 / 소모품 파티션 점검
     const remoteMaintRev = remoteParts.maintenance?.revision || 0;
     const localMaintRev = localParts.maintenance?.revision || 0;
-    if (remoteMaintRev > localMaintRev || !localMeta.dbRevision) {
+    if (forceAll || remoteMaintRev > localMaintRev || !localMeta.dbRevision) {
         if (progressCb) progressCb(30, '유지보수 데이터 동기화', '설비별 소모품 및 유지보수 이력을 동기화 중입니다.', 'maintenance.json');
         const maintData = await readJsonFromDir(dirHandle, 'maintenance.json', null);
         if (maintData && maintData.equipMaintenance) {
@@ -1408,11 +1411,32 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
         }
     }
 
-    // 4) 작업 이력 월별 파티션 점검 (변경된 월 파일만 선택적 로드)
+    // 4) 작업 이력 월별 파티션 점검 (메타데이터 + 실제 디렉터리 파일 전수 스캔 및 누락 자동 치유)
     const remoteHistoryParts = remoteParts.history || {};
     const localHistoryParts = localParts.history || {};
     const historySubdir = await getOrCreateSubdir(dirHandle, 'history');
-    const ymKeys = Object.keys(remoteHistoryParts);
+
+    // 💡 핵심 개선: meta.json 누락 방지를 위해 실제 history 디렉터리 내 *.json 파일 전수 수집
+    const allYmSet = new Set(Object.keys(remoteHistoryParts));
+    try {
+        if (typeof historySubdir.entries === 'function') {
+            for await (const [name, handle] of historySubdir.entries()) {
+                if (name.endsWith('.json')) {
+                    allYmSet.add(name.replace('.json', ''));
+                }
+            }
+        } else if (typeof historySubdir.values === 'function') {
+            for await (const handle of historySubdir.values()) {
+                if (handle.kind === 'file' && handle.name.endsWith('.json')) {
+                    allYmSet.add(handle.name.replace('.json', ''));
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('history 디렉터리 파일 스캔 중 알림 (메타데이터 목록 기반 진행):', e);
+    }
+
+    const ymKeys = Array.from(allYmSet).sort();
     const totalYm = ymKeys.length;
 
     if (totalYm === 0) {
@@ -1422,6 +1446,7 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
             const ym = ymKeys[i];
             const rRev = remoteHistoryParts[ym]?.revision || 0;
             const lRev = localHistoryParts[ym]?.revision || 0;
+            const rCount = remoteHistoryParts[ym]?.count || 0;
             const pct = 30 + Math.round(((i + 1) / totalYm) * 55);
             
             if (progressCb) {
@@ -1429,7 +1454,16 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
                 await new Promise(r => setTimeout(r, 5));
             }
 
-            if (rRev > lRev || !localMeta.dbRevision) {
+            // 💡 4중 점검: 강제최신화 / 리비전상승 / 로컬메타부재 / 데이터건수부족(누락치유)
+            let shouldLoad = forceAll || (rRev > lRev) || !localMeta.dbRevision;
+            if (!shouldLoad && rCount > 0) {
+                const localMonthItems = await getIDBHistoryByMonth(ym);
+                if (localMonthItems.length < rCount) {
+                    shouldLoad = true;
+                }
+            }
+
+            if (shouldLoad) {
                 const monthData = await readJsonFromDir(historySubdir, `${ym}.json`, []);
                 if (monthData && monthData.length > 0) {
                     const localMonthHistory = await getIDBHistoryByMonth(ym);
@@ -1450,6 +1484,10 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
     localStorage.setItem('lastSyncSuccessAt', Date.now().toString());
 
     if (progressCb) progressCb(94, '화면 UI 갱신', '작업 이력 뱃지 및 테이블 렌더링 중...', '');
+    if (forceAll) {
+        renderTable();
+        renderRecipientTable();
+    }
     await updateHistoryBadge();
     if (document.getElementById('history')?.classList.contains('block')) {
         await renderHistory();
@@ -1459,7 +1497,8 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
     if (progressCb) progressCb(100, '동기화 완료', '모든 팀 데이터가 최신 상태로 반영되었습니다.', '');
 
     if (isManualButton) {
-        showToast('최신화 완료', `TEAM DB Revision ${normalizedMeta.dbRevision} (분할 동기화)`);
+        const totalHistCount = (await getIDBHistory()).length;
+        showToast('최신화 완료', `TEAM DB Rev.${normalizedMeta.dbRevision} · 총 ${totalHistCount}건 이력 동기화 완료`);
     } else if (normalizedMeta.dbRevision > Number(localStorage.getItem('teamDbRevision') || 0)) {
         showToast('TEAM DB 최신화', `Revision ${normalizedMeta.dbRevision} 최신 변경사항을 반영했습니다.`);
     }
