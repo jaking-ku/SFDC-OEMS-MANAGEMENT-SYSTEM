@@ -1477,12 +1477,24 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
                 return res;
             }
 
-            const items = extractValidEntries(fileData);
+            const rawItems = extractValidEntries(fileData);
+            const items = [];
+            rawItems.forEach(it => {
+                const targetMachines = typeof parseTargetMachines === "function" ? parseTargetMachines(it.machine, it.rawText) : [it.machine || "미상"];
+                for (const singleM of targetMachines) {
+                    const corrLine = typeof getCorrectLineForMachine === "function" ? getCorrectLineForMachine(singleM, it.line) : (it.line || "미상");
+                    items.push({
+                        ...it,
+                        machine: singleM,
+                        line: corrLine
+                    });
+                }
+            });
 
             if (items.length > 0) {
                 const ymKey = fname.replace('.json', '');
                 items.forEach((it, idx) => {
-                    if (!it.id) {
+                    if (!it.id || it.id.includes("undefined")) {
                         it.id = `${Date.now()}_${idx}_${Math.floor(Math.random() * 1000)}`;
                     }
                     if (!it.yearMonth) {
@@ -2345,6 +2357,155 @@ async function autoLocalBackup() {
 // ==============================================================================
 
 /**
+ * 설비 마스터 데이터를 바탕으로 정확한 정식 라인명 자동 조회/교정
+ * @param {string} machine 설비 호기명
+ * @param {string} fallbackLine 마스터 미등록 시 사용할 기본 라인명
+ * @returns {string} 정규 라인명 (P1D, P1F, P2D, P2F, P3D, P3F, P4D, P4H 중 하나)
+ */
+function getCorrectLineForMachine(machine, fallbackLine) {
+    if (!machine || machine === "미상") return fallbackLine || "미상";
+    const mUp = String(machine).trim().toUpperCase();
+    
+    try {
+        const eqList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+        const found = eqList.find(e => String(e.name || "").trim().toUpperCase() === mUp);
+        if (found && found.line) {
+            return String(found.line).trim().toUpperCase();
+        }
+    } catch (_) {}
+
+    let cleanLine = String(fallbackLine || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    if (/^P\d[A-Z]$/.test(cleanLine)) return cleanLine;
+    return fallbackLine || "미상";
+}
+
+/**
+ * 작업 메일에서 실제 대상 설비 목록을 추출/분리(Fan Out) 및 모델명 오분류 역추적
+ * @param {string} machine 기존 추출된 machine 필드
+ * @param {string} rawText 메일 원문 텍스트
+ * @returns {Array<string>} 대상 설비 호기명 배열 (예: ['MDIP702', 'MDIP706', ...])
+ */
+function parseTargetMachines(machine, rawText) {
+    const rawStr = String(rawText || "").replace(/\r/g, "");
+    const mStr = String(machine || "").trim();
+
+    let masterNames = new Set();
+    let snToMachine = {};
+    try {
+        const eqList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+        eqList.forEach(e => {
+            if (e.name) masterNames.add(String(e.name).trim().toUpperCase());
+            if (e.sn && e.name) snToMachine[String(e.sn).trim().toUpperCase()] = String(e.name).trim().toUpperCase();
+        });
+    } catch (_) {}
+
+    const isValidEquip = (name) => masterNames.has(String(name).trim().toUpperCase());
+
+    // 1순위: machine 필드 자체가 다중 호기인 경우 (쉼표, 슬래시, 공백 나열 등)
+    if (mStr && (mStr.includes(",") || mStr.includes("/") || /\s{2,}/.test(mStr))) {
+        const cleanM = mStr.replace(/호기/g, "").replace(/외/g, "");
+        const parts = cleanM.split(/[,/]+|\s{2,}/);
+        const cand = [];
+        let pfx = "";
+        for (let p of parts) {
+            p = p.trim().toUpperCase();
+            if (!p) continue;
+            if (isValidEquip(p)) {
+                cand.push(p);
+                const mPfx = p.match(/^[A-Z]+/);
+                if (mPfx) pfx = mPfx[0];
+            } else if (pfx && isValidEquip(pfx + p)) {
+                cand.push(pfx + p);
+            } else if (/^\d+$/.test(p)) {
+                for (let trialPfx of ["MDIP", "MDIB", "MDI", "MDF"]) {
+                    if (isValidEquip(trialPfx + p)) {
+                        cand.push(trialPfx + p);
+                        break;
+                    }
+                }
+            }
+        }
+        if (cand.length > 1) return Array.from(new Set(cand));
+    }
+
+    // 2순위: 메일 본문 내 '작업호기 :', '작업설비 :', '대상설비 :', '작업 대상 :' 명시 블록 탐색
+    const secMatch = rawStr.match(/(?:작업\s*호기|작업\s*설비|대상\s*설비|작업\s*대상)\s*[:：]([\s\S]{1,400}?)(?=(?:작업내용|작업\s*내용|작업일|작업\s*일|인폼|인폼내용|\n\n|\r\n\r\n|$))/i);
+    if (secMatch) {
+        const secText = secMatch[1];
+        const words = secText.match(/[A-Za-z0-9]+/g) || [];
+        const cand = [];
+        for (let w of words) {
+            const wUp = w.toUpperCase();
+            if (isValidEquip(wUp) && !cand.includes(wUp)) {
+                cand.push(wUp);
+            }
+        }
+        if (cand.length > 0) return cand;
+    }
+
+    // 3순위: 본문의 '작업내용' 하위에 호기별 세부 섹션이 나뉘어 있는 경우
+    if (masterNames.size > 0) {
+        const secMatches = [];
+        masterNames.forEach(name => {
+            const pat = new RegExp("(?:^|[\\r\\n])\\s*(?:\\d+[\\.\\)]\\s*(?:작업호기\\s*:\\s*)?)?" + name + "(?:호기)?\\s*(?:[:：\\r\\n]|\\s*[\\r\\n]+[*•·])", "m");
+            if (pat.test(rawStr)) {
+                secMatches.push(name);
+            }
+        });
+        if (secMatches.length > 1) {
+            secMatches.sort((a, b) => rawStr.indexOf(a) - rawStr.indexOf(b));
+            return secMatches;
+        }
+    }
+
+    // 4순위: 첫 문장 또는 제목에서 여러 호기가 쉼표로 나열된 경우
+    const introMatch = rawStr.match(/Line\s+[A-Za-z0-9]+\s+([^\n]+?)\s*(?:에서|진행한|작업한)/);
+    if (introMatch) {
+        const introWords = introMatch[1].match(/[A-Za-z0-9]+/g) || [];
+        const cand = [];
+        for (let w of introWords) {
+            const wUp = w.toUpperCase();
+            if (isValidEquip(wUp) && !cand.includes(wUp)) {
+                cand.push(wUp);
+            }
+        }
+        if (cand.length > 1) return cand;
+    }
+
+    // 5순위: machine 필드가 모델명('IS4100', 'IS3000SE', 'IS3000', 'DI4600', 'IS3200')이거나 '미상'인 경우 본문 역추적
+    const isModelName = /^(?:IS\d+[A-Z]*|DI\d+|미상)$/i.test(mStr);
+    if (isModelName || !mStr) {
+        const allMdMatches = rawStr.match(/MD[IF][A-Za-z0-9]+/g) || [];
+        const validMd = [];
+        for (let mItem of allMdMatches) {
+            const mUp = mItem.toUpperCase();
+            if (isValidEquip(mUp) && !validMd.includes(mUp)) {
+                validMd.push(mUp);
+            }
+        }
+        if (validMd.length > 0) return validMd;
+
+        for (let [snKey, eqName] of Object.entries(snToMachine)) {
+            if (snKey && rawStr.includes(snKey)) {
+                return [eqName];
+            }
+        }
+    }
+
+    // 6순위: 단일 호기명 정리 (예: 'MDIP702호기' -> 'MDIP702')
+    const cleanSingle = mStr.replace(/호기.*$/, "").trim().toUpperCase();
+    if (isValidEquip(cleanSingle)) return [cleanSingle];
+    if (isValidEquip(mStr.toUpperCase())) return [mStr.toUpperCase()];
+
+    const firstMd = (mStr + " " + rawStr).match(/\b(MD[IF][A-Z]?[A-Za-z0-9]+)\b/);
+    if (firstMd && isValidEquip(firstMd[1].toUpperCase())) {
+        return [firstMd[1].toUpperCase()];
+    }
+
+    return [mStr || "미상"];
+}
+
+/**
  * 🏷️ 작업 이력 표시용 간략 대표 제목(Summary) 자동 도출 함수
  * 긴 불릿 리스트나 본문 복사본이 들어있는 경우, 메일 원문(rawText) 또는 텍스트 구조를 분석하여
  * 'LPP Teaching 확인', 'Super Cleaning', 'Wafer 회수' 등과 같은 간결한 대표 제목으로 자동 변환
@@ -2366,7 +2527,7 @@ function getDisplayContent(e) {
     }
 
     // 이미 간결하고 불릿 리스트나 줄바꿈이 없으면 그대로 사용
-    const isBulletList = /^[-*•·]\s+/.test(content) || (content.includes(" - ") && content.length > 25) || (content.split(/[-*•·]/).length > 2);
+    const isBulletList = /^[*•·]\s+/.test(content) || (content.includes(" / ") && content.length > 25) || (content.split(/[*•·]/).length > 2);
     const isTooLong = content.length > 40 || /[\r\n]/.test(content);
 
     if (isBulletList || isTooLong || !content || content === "미상") {
@@ -2414,7 +2575,7 @@ function getDisplayContent(e) {
         if (content) {
             const lines = content.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
             const firstSeg = lines[0] || content;
-            const items = firstSeg.split(/\s*[-*•·]\s*/).map(s => s.trim()).filter(Boolean);
+            const items = firstSeg.split(/\s*[*•·]\s*/).map(s => s.trim()).filter(Boolean);
             if (items.length > 0) {
                 let firstItem = items[0];
                 firstItem = firstItem.replace(/^(?:에서|진행한|작업한|확인|진행)\s+/, "").trim();
@@ -2439,7 +2600,7 @@ async function extractData() {
 
     // 1) 작업일자 추출 (어떤 형태의 날짜든 YYYY/MM/DD로 정규화)
     let df = "미상";
-    const dateMatch = text.match(/(\d{2,4})[\.\/\-년\s]+(\d{1,2})[\.\/\-월\s]+(\d{1,2})[일\s]*/);
+    const dateMatch = text.match(/(\d{2,4})[\.\/\년\s]+(\d{1,2})[\.\/\월\s]+(\d{1,2})[일\s]*/);
     
     if (dateMatch) {
         let year = dateMatch[1];
@@ -2455,7 +2616,7 @@ async function extractData() {
 
     // 2) 라인 및 설비호기 추출
     const lm = text.match(/\b(P\d[A-Z0-9]+)\b/); 
-    const line = lm ? lm[1] : "미상";
+    const rawLine = lm ? lm[1] : "미상";
     
     let machine = "미상"; 
     const mdi = text.match(/MD[IF][A-Z]?[A-Za-z0-9]+/); 
@@ -2502,47 +2663,58 @@ async function extractData() {
         if (signMatch) worker = signMatch[1];
     }
     
-    // 5) UI 결과 영역 출력
+    // 5) 다중 설비 파싱 및 정규 라인 자동 교정
+    const targetMachines = parseTargetMachines(machine, text);
+    const displayMachine = targetMachines.join(", ") || machine;
+    const finalLine = targetMachines.length > 0 ? getCorrectLineForMachine(targetMachines[0], rawLine) : rawLine;
+
+    // UI 결과 영역 출력
     document.getElementById("resDate").innerText = df; 
-    document.getElementById("resMachine").innerText = machine; 
-    document.getElementById("resLine").innerText = line; 
+    document.getElementById("resMachine").innerText = displayMachine; 
+    document.getElementById("resLine").innerText = finalLine; 
     document.getElementById("resContent").innerText = content; 
     document.getElementById("resWorker").innerText = worker; 
     document.getElementById("extractResult").style.display = "block";
     
     // 6) 유효한 설비인 경우 히스토리 저장 및 유지보수 특이사항 자동 반영
-    if (machine !== "미상") { 
-        await saveHistoryEntry({ 
-            machine, 
-            line, 
-            date: df, 
-            content, 
-            worker, 
-            rawText: text, 
-            savedAt: new Date().toISOString() 
-        }); 
+    if (targetMachines.length > 0 && targetMachines[0] !== "미상") {
+        for (const singleM of targetMachines) {
+            const singleLine = getCorrectLineForMachine(singleM, rawLine);
+            await saveHistoryEntry({ 
+                machine: singleM, 
+                line: singleLine, 
+                date: df, 
+                content, 
+                worker, 
+                rawText: text, 
+                savedAt: new Date().toISOString() 
+            });
+        }
         document.getElementById("autoSavedBadge").classList.remove("hidden"); 
 
         const extraNote = document.getElementById("extraNoteInput") ? document.getElementById("extraNoteInput").value.trim() : "";
         const extraCategory = document.getElementById("extraNoteCategory") ? document.getElementById("extraNoteCategory").value.trim() : "";
         
-        let maintSummary = "";
-        if (extraCategory) {
-            maintSummary = applyExtractedMaintenance(machine, extraCategory, df);
-        }
-        
-        if (extraNote || extraCategory) {
-            let ns = JSON.parse(localStorage.getItem("machineNotes") || "{}");
-            let prevNote = typeof getNoteText === 'function' ? getNoteText(ns[machine]) : (typeof ns[machine] === 'string' ? ns[machine] : ns[machine]?.text || "");
-            let categoryPart = extraCategory ? `[${extraCategory}]` : "";
-            let summaryPart = maintSummary ? `\n${maintSummary}` : "";
-            let notePart = extraNote ? `\n${extraNote}` : "";
-            let newEntry = `-${df}- ${categoryPart}${summaryPart}${notePart}`.trim();
-            const combined = prevNote ? (prevNote + "\n\n" + newEntry) : newEntry;
-            ns[machine] = { text: combined, updatedAt: Date.now() };
-            localStorage.setItem("machineNotes", JSON.stringify(ns));
-            if (typeof autoMergeAndSave === "function") autoMergeAndSave({ scope: 'notes' });
+        for (const singleM of targetMachines) {
+            let maintSummary = "";
+            if (extraCategory) {
+                maintSummary = applyExtractedMaintenance(singleM, extraCategory, df);
+            }
             
+            if (extraNote || extraCategory) {
+                let ns = JSON.parse(localStorage.getItem("machineNotes") || "{}");
+                let prevNote = typeof getNoteText === 'function' ? getNoteText(ns[singleM]) : (typeof ns[singleM] === 'string' ? ns[singleM] : ns[singleM]?.text || "");
+                let categoryPart = extraCategory ? `[${extraCategory}]` : "";
+                let summaryPart = maintSummary ? `\n${maintSummary}` : "";
+                let notePart = extraNote ? `\n${extraNote}` : "";
+                let newEntry = `${df} ${categoryPart}${summaryPart}${notePart}`.trim();
+                const combined = prevNote ? (prevNote + "\n\n" + newEntry) : newEntry;
+                ns[singleM] = { text: combined, updatedAt: Date.now() };
+                localStorage.setItem("machineNotes", JSON.stringify(ns));
+            }
+        }
+        if (extraNote || extraCategory) {
+            if (typeof autoMergeAndSave === "function") autoMergeAndSave({ scope: 'notes' });
             document.getElementById("extraNoteInput").value = "";
             document.getElementById("extraNoteCategory").value = "";
             onExtraCategoryChange();
@@ -3884,10 +4056,24 @@ async function renderHistory() {
     }
     emptyEl.classList.add("hidden");
 
+    // 다중 호기 분개(Fan Out) 및 모델명 오분류 역추적, 라인 자동 교정 적용
+    const expandedList = [];
+    filtered.forEach(e => {
+        const targetMachines = typeof parseTargetMachines === "function" ? parseTargetMachines(e.machine, e.rawText) : [e.machine || "미상"];
+        for (const singleM of targetMachines) {
+            const correctLine = typeof getCorrectLineForMachine === "function" ? getCorrectLineForMachine(singleM, e.line) : (e.line || "미상");
+            expandedList.push({
+                ...e,
+                machine: singleM,
+                line: correctLine
+            });
+        }
+    });
+
     // 라인별 설비 그룹화
     const lineMap = {}; 
     let firstMachine = null;
-    filtered.forEach(e => { 
+    expandedList.forEach(e => { 
         const line = e.line || "미분류"; 
         const m = (e.machine || "미상").trim();
         if (!lineMap[line]) lineMap[line] = {}; 
@@ -3913,10 +4099,18 @@ async function renderHistory() {
         } 
     }
 
-    // 칩 아코디언 렌더링
+    // 칩 아코디언 렌더링 (8대 정규 라인 순서 우선 정렬)
+    const stdLines = ["P1D", "P1F", "P2D", "P2F", "P3D", "P3F", "P4D", "P4H"];
     chipsWrap.innerHTML = ""; 
     chipsWrap.className = "flex flex-col gap-2 p-4 w-full";
-    Object.keys(lineMap).sort().forEach(line => {
+    Object.keys(lineMap).sort((a, b) => {
+        const idxA = stdLines.indexOf(a);
+        const idxB = stdLines.indexOf(b);
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+        return a.localeCompare(b);
+    }).forEach(line => {
         const ms = lineMap[line];
         const mks = Object.keys(ms).sort();
         const isOpen = line === selectedLine;
@@ -3960,7 +4154,7 @@ async function renderHistory() {
     });
 
     // 선택된 호기의 타임라인 렌더링
-    const entries = filtered.filter(e => (e.machine || "미상").trim() === selectedChip).sort((a, b) => { 
+    const entries = expandedList.filter(e => (e.machine || "미상").trim() === selectedChip).sort((a, b) => { 
         const da = new Date(a.savedAt), db = new Date(b.savedAt); 
         return sortOrder === "desc" ? db - da : da - db; 
     });
