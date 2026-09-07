@@ -3643,7 +3643,16 @@ async function renderEquipDetail(eq) {
     const raw = await getIDBHistory();
     const entries = raw
         .filter(e => !e.isDeleted && (e.sn === eq.sn || (!e.sn && e.machine === eq.name)))
-        .sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
+        .sort((a, b) => {
+            const dateA = typeof parseEntryDate === "function" ? parseEntryDate(a.date, a.savedAt) : (a.date || "");
+            const dateB = typeof parseEntryDate === "function" ? parseEntryDate(b.date, b.savedAt) : (b.date || "");
+            if (dateA !== dateB) {
+                return dateB.localeCompare(dateA);
+            }
+            const sa = new Date(a.savedAt || a.updatedAt || 0).getTime();
+            const sb = new Date(b.savedAt || b.updatedAt || 0).getTime();
+            return sb - sa;
+        });
 
     if (entries.length === 0) {
         wrap.innerHTML = '<p class="text-text-muted text-xs">등록된 작업 이력이 없습니다.</p>';
@@ -4009,6 +4018,31 @@ function copyToClipboard(id, type) {
     navigator.clipboard.writeText(document.getElementById(id).innerText).then(() => showToast("복사 완료", `${type} 복사됨`)); 
 }
 
+/**
+ * 작업 이력 날짜(date)를 비교 가능한 YYYYMMDD 정규 포맷으로 변환
+ * @param {string} dateStr 메일상 기록된 작업일자 문자열
+ * @param {string} fallbackSavedAt 날짜 누락 시 보조로 사용할 등록시각
+ * @returns {string} YYYYMMDD 문자열
+ */
+function parseEntryDate(dateStr, fallbackSavedAt) {
+    if (dateStr) {
+        const clean = String(dateStr).replace(/[^0-9]/g, "");
+        if (clean.length >= 8) {
+            return clean.substring(0, 8);
+        } else if (clean.length === 6) {
+            return "20" + clean;
+        }
+    }
+    if (fallbackSavedAt) {
+        const cleanSaved = String(fallbackSavedAt).replace(/[^0-9]/g, "");
+        if (cleanSaved.length >= 8) {
+            return cleanSaved.substring(0, 8);
+        }
+    }
+    return "00000000";
+}
+
+
 /** 사이드바 히스토리 개수 배지 업데이트 */
 async function updateHistoryBadge() { 
     const raw = await getIDBHistory();
@@ -4153,10 +4187,16 @@ async function renderHistory() {
         chipsWrap.appendChild(groupDiv);
     });
 
-    // 선택된 호기의 타임라인 렌더링
+    // 선택된 호기의 타임라인 렌더링 (메일상 기록된 작업일자 기준 정렬)
     const entries = expandedList.filter(e => (e.machine || "미상").trim() === selectedChip).sort((a, b) => { 
-        const da = new Date(a.savedAt), db = new Date(b.savedAt); 
-        return sortOrder === "desc" ? db - da : da - db; 
+        const dateA = parseEntryDate(a.date, a.savedAt);
+        const dateB = parseEntryDate(b.date, b.savedAt);
+        if (dateA !== dateB) {
+            return sortOrder === "desc" ? dateB.localeCompare(dateA) : dateA.localeCompare(dateB);
+        }
+        const sa = new Date(a.savedAt || a.updatedAt || 0).getTime();
+        const sb = new Date(b.savedAt || b.updatedAt || 0).getTime();
+        return sortOrder === "desc" ? sb - sa : sa - sb;
     });
 
     timelineWrap.innerHTML = ""; 
