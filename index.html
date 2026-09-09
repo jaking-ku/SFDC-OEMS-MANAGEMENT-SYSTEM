@@ -654,6 +654,17 @@
 
         <div class="card-base p-6 rounded-md grid grid-cols-2 md:grid-cols-4 gap-6" id="detailInfoGrid"></div>
 
+        <!-- 0. 설비 특이사항 및 부품차용 -->
+        <div class="card-base overflow-hidden rounded-md" id="detailNotesCard">
+            <div class="px-6 py-4 bg-background border-b border-border flex justify-between items-center">
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">edit_note</span> 설비 특이사항 및 부품차용</span>
+                <button id="detailNoteToggleBtn" class="text-xs bg-surface border border-border px-3 py-1 rounded hover:bg-primary hover:text-white transition-colors">
+                    편집
+                </button>
+            </div>
+            <div id="detailNotesWrap" class="p-6 bg-background/30"></div>
+        </div>
+
         <!-- 1. Laser 사용시간 (위로 올림) -->
         <div class="card-base overflow-hidden rounded-md">
             <div class="px-6 py-4 bg-background border-b border-border">
@@ -680,8 +691,12 @@
 
         <!-- 4. 작업 이력 (맨 아래로 내림) -->
         <div class="card-base overflow-hidden rounded-md">
-            <div class="px-6 py-4 bg-background border-b border-border">
+            <div class="px-6 py-4 bg-background border-b border-border flex justify-between items-center">
                 <span class="label-base text-text-main !mb-0 flex items-center gap-2"><span class="material-symbols-outlined text-lg text-primary">history</span> 작업 이력</span>
+                <button id="detailHistoryThreadToggleBtn" class="btn-text h-8 px-2.5 border border-primary bg-primary/10 text-primary hover:bg-primary hover:text-white rounded flex items-center gap-1 text-xs font-bold transition-all" onclick="toggleDetailHistoryThreadMode()">
+                    <span class="material-symbols-outlined text-sm">forum</span>
+                    <span id="detailHistoryThreadToggleText">쓰레드 묶기 ON</span>
+                </button>
             </div>
             <div id="detailHistoryWrap" class="p-6"></div>
         </div>
@@ -702,6 +717,10 @@
                 <select id="historySortOrder" class="input-base w-32 h-9 px-3 rounded" onchange="renderHistory()">
                     <option value="desc">최신순</option><option value="asc">오래된순</option>
                 </select>
+                <button id="historyThreadToggleBtn" class="btn-text h-9 px-3 border border-primary bg-primary/10 text-primary hover:bg-primary hover:text-white rounded flex items-center gap-1 text-xs font-bold transition-all" onclick="toggleHistoryThreadMode()">
+                    <span class="material-symbols-outlined text-base">forum</span>
+                    <span id="historyThreadToggleText">쓰레드 묶기 ON</span>
+                </button>
                 <button class="btn-text h-9 px-4 border border-border hover:border-red-400 hover:text-red-600 rounded" onclick="clearAllHistory()">
                     <span class="material-symbols-outlined text-sm">delete_sweep</span> 기록 일괄 삭제
                 </button>
@@ -3596,48 +3615,102 @@ function deleteConsumableEntry(name, id) {
 // 6. [Business: Management] 설비 마스터 데이터, 수신처 목록 및 SFDC 검색 연동
 // ==============================================================================
 
-/** 설비 상세 페이지 열기 */
-function openEquipDetail(sn) {
-    const data = JSON.parse(localStorage.getItem("equipmentData") || "[]");
-    const eq = data.find(d => d.sn === sn);
-    if (!eq) { 
-        showToast("오류", "해당 설비를 찾을 수 없습니다."); 
-        return; 
+/** 설비 상세 페이지 현재 설비 객체 */
+let currentDetailEquip = null;
+
+/** 설비 상세 페이지 작업 이력 쓰레드 묶기 플래그 */
+let isDetailHistoryThreadMode = true;
+
+/** 설비 상세 페이지 작업 이력 쓰레드 묶기 토글 */
+function toggleDetailHistoryThreadMode() {
+    isDetailHistoryThreadMode = !isDetailHistoryThreadMode;
+    const btn = document.getElementById("detailHistoryThreadToggleBtn");
+    const txt = document.getElementById("detailHistoryThreadToggleText");
+    if (btn && txt) {
+        if (isDetailHistoryThreadMode) {
+            btn.className = "btn-text h-8 px-2.5 border border-primary bg-primary/10 text-primary hover:bg-primary hover:text-white rounded flex items-center gap-1 text-xs font-bold transition-all";
+            txt.textContent = "쓰레드 묶기 ON";
+        } else {
+            btn.className = "btn-text h-8 px-2.5 border border-border bg-surface text-text-muted hover:border-primary hover:text-primary rounded flex items-center gap-1 text-xs font-medium transition-all";
+            txt.textContent = "쓰레드 묶기 OFF";
+        }
     }
-    window.location.hash = `detail-${encodeURIComponent(sn)}`;
-    document.querySelectorAll('.tab-content').forEach(s => { 
-        s.classList.remove('block'); 
-        s.classList.add('hidden'); 
-    });
-    document.getElementById('equipDetail').classList.remove('hidden');
-    document.getElementById('equipDetail').classList.add('block');
-    document.querySelectorAll('nav a').forEach(a => { 
-        a.classList.remove('nav-active', 'text-text-main'); 
-        a.classList.add('text-text-muted'); 
-    });
-    renderEquipDetail(eq);
-    if (window.innerWidth < 768) closeSidebar();
+    if (currentDetailEquip) {
+        renderEquipDetailHistory(currentDetailEquip);
+    }
 }
 
-/** 설비 상세 페이지 닫기 (Management 탭으로 복귀) */
-function closeEquipDetail() {
-    window.location.hash = '';
-    const dbNav = Array.from(document.querySelectorAll('nav a')).find(a => (a.getAttribute('onclick') || '').includes("'database'"));
-    switchTab('database', dbNav);
-}
+/** 설비 상세 페이지 내 "설비 특이사항 및 부품차용" 섹션 렌더링 */
+function renderEquipDetailNotes(eq) {
+    const wrap = document.getElementById("detailNotesWrap");
+    const toggleBtn = document.getElementById("detailNoteToggleBtn");
+    if (!wrap || !eq) return;
 
-/** 설비 상세 페이지 종합 렌더링 */
-async function renderEquipDetail(eq) {
-    document.getElementById('detailTitle').textContent = eq.name;
-    document.getElementById('detailSubtitle').textContent = `${eq.line || '-'} Line · ${eq.model || '-'} · ${eq.location || '-'}`;
-    document.getElementById('detailInfoGrid').innerHTML = `
-        <div><span class="label-base">라인</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.line || '-')}</p></div>
-        <div><span class="label-base">모델명</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.model || '-')}</p></div>
-        <div><span class="label-base">S/N</span><p class="text-sm font-mono text-text-main mt-1">${escapeHtml(eq.sn || '-')}</p></div>
-        <div><span class="label-base">위치</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.location || '-')}</p></div>
+    let rawNote = null;
+    try {
+        rawNote = JSON.parse(localStorage.getItem("machineNotes") || "{}")[eq.name];
+    } catch (_) { rawNote = null; }
+
+    const noteContent = typeof getNoteText === 'function' ? getNoteText(rawNote) : (typeof rawNote === 'string' ? rawNote : rawNote?.text || "");
+    const noteItems = noteContent.split(/\n\n+/).filter(s => s.trim());
+    const noteListHtml = noteItems.length ? noteItems.map(item => {
+        const lines = item.trim().split('\n');
+        const header = lines[0];
+        const body = lines.slice(1).join('\n').trim();
+        return `
+            <div class="border border-border rounded p-3 mb-2 bg-background text-xs shadow-xs">
+                <div class="font-bold text-primary mb-1 flex items-center gap-1">
+                    <span class="material-symbols-outlined text-[15px]">event_note</span> ${escapeHtml(header)}
+                </div>
+                ${body ? `<div class="text-text-muted whitespace-pre-wrap pl-4 leading-relaxed">${escapeHtml(body)}</div>` : ''}
+            </div>
+        `;
+    }).join('') : '<p class="text-text-muted text-xs py-2">등록된 특이사항이나 부품차용 기록이 없습니다.</p>';
+
+    wrap.innerHTML = `
+        <div id="detailNoteReadView" class="mb-3 max-h-48 overflow-y-auto">
+            ${noteListHtml}
+        </div>
+        <div id="detailNoteEditArea" class="hidden space-y-2">
+            <textarea class="input-base w-full h-28 p-3 resize-y rounded text-xs leading-relaxed" id="detailNoteTextarea"
+                placeholder="특이사항 및 부품차용 메모 입력\n\n새 항목은 기존 내용 아래에 이어서 작성하세요.\n예) -2026/06/11- [Laser 교체]\n상세 내용">${escapeHtml(noteContent)}</textarea>
+            <div class="flex justify-end gap-2">
+                <button class="btn-primary px-3 py-1 text-xs rounded" onclick="(function(){
+                    var ta = document.getElementById('detailNoteTextarea');
+                    if (ta) {
+                        saveMachineNote('${escapeHtml(eq.name)}', ta.value);
+                        renderEquipDetailNotes(currentDetailEquip);
+                        renderTable();
+                    }
+                })()">저장</button>
+            </div>
+        </div>
     `;
-    
+
+    if (toggleBtn) {
+        toggleBtn.textContent = "편집";
+        toggleBtn.onclick = function() {
+            const rv = document.getElementById("detailNoteReadView");
+            const ea = document.getElementById("detailNoteEditArea");
+            if (!rv || !ea) return;
+            const isEdit = !ea.classList.contains("hidden");
+            if (isEdit) {
+                rv.classList.remove("hidden");
+                ea.classList.add("hidden");
+                toggleBtn.textContent = "편집";
+            } else {
+                rv.classList.add("hidden");
+                ea.classList.remove("hidden");
+                toggleBtn.textContent = "목록 보기";
+            }
+        };
+    }
+}
+
+/** 설비 상세 페이지 내 작업 이력 타임라인 렌더링 (쓰레드 그룹화 지원) */
+async function renderEquipDetailHistory(eq) {
     const wrap = document.getElementById('detailHistoryWrap');
+    if (!wrap || !eq) return;
     wrap.innerHTML = '<p class="text-text-muted text-xs">불러오는 중...</p>';
     
     const raw = await getIDBHistory();
@@ -3656,16 +3729,24 @@ async function renderEquipDetail(eq) {
 
     if (entries.length === 0) {
         wrap.innerHTML = '<p class="text-text-muted text-xs">등록된 작업 이력이 없습니다.</p>';
-    } else {
-        const ul = document.createElement('ul'); 
-        ul.className = 'relative space-y-0 pl-8';
-        ul.innerHTML = '<div class="timeline-line"></div>';
-        
-        entries.forEach((e, idx) => {
-            const li = document.createElement('li'); 
-            li.className = 'timeline-item relative flex gap-5 pb-8'; 
-            li.style.animationDelay = `${idx * 50}ms`;
-            
+        return;
+    }
+
+    const ul = document.createElement('ul'); 
+    ul.className = 'relative space-y-0 pl-8';
+    ul.innerHTML = '<div class="timeline-line"></div>';
+    
+    const renderItems = (isDetailHistoryThreadMode && typeof groupEntriesByThread === "function") 
+        ? groupEntriesByThread(entries) 
+        : entries.map(e => ({ isThread: false, title: getDisplayContent(e), entries: [e], count: 1 }));
+
+    renderItems.forEach((group, idx) => {
+        const li = document.createElement('li'); 
+        li.className = 'timeline-item relative flex gap-5 pb-8'; 
+        li.style.animationDelay = `${idx * 50}ms`;
+
+        if (!group.isThread) {
+            const e = group.entries[0];
             const d = new Date(e.savedAt); 
             const savedStr = `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
             
@@ -3692,12 +3773,134 @@ async function renderEquipDetail(eq) {
                     </div>
                 </div>
             `;
-            ul.appendChild(li);
-        });
-        wrap.innerHTML = ''; 
-        wrap.appendChild(ul);
+        } else {
+            // 🧵 쓰레드 그룹
+            const mainE = group.entries[0];
+            const oldestE = group.entries[group.entries.length - 1];
+            const threadId = "detail_thread_" + String(mainE.id || idx).replace(/[^a-zA-Z0-9_]/g, "_");
+            const newestDate = mainE.date || "날짜 미상";
+            const oldestDate = oldestE.date || newestDate;
+            const dateRange = newestDate === oldestDate ? newestDate : `${newestDate} ~ ${oldestDate}`;
+            const workers = Array.from(new Set(group.entries.map(x => x.worker).filter(Boolean))).join(", ") || "—";
+
+            let subItemsHtml = "";
+            group.entries.forEach((e, subIdx) => {
+                const d = new Date(e.savedAt); 
+                const savedStr = `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+                const displayTitle = getDisplayContent(e);
+                const hasDetail = Boolean(e.rawText || (e.content && e.content !== displayTitle && e.content.length > displayTitle.length));
+                const detailText = e.rawText || e.content;
+                const turnNo = group.count - subIdx;
+
+                subItemsHtml += `
+                    <div class="p-3 bg-surface/80 rounded border border-border/70 hover:border-primary/50 transition-all text-xs">
+                        <div class="flex items-center justify-between mb-1.5 flex-wrap gap-2">
+                            <div class="flex items-center gap-2">
+                                <span class="px-1.5 py-0.5 bg-primary/20 text-primary font-bold text-[10px] rounded">${turnNo}회차</span>
+                                <span class="font-bold text-text-main">${escapeHtml(e.date || "날짜 미상")}</span>
+                            </div>
+                        </div>
+                        <div class="${hasDetail ? 'cursor-pointer hover:text-primary transition-colors' : ''}" ${hasDetail ? `onclick="document.getElementById('detailSubRaw_${e.id}').classList.toggle('hidden')"` : ''}>
+                            <p class="text-xs text-text-main leading-relaxed">${escapeHtml(displayTitle)}</p>
+                            ${hasDetail ? '<span class="material-symbols-outlined text-xs text-text-muted mt-0.5 block">open_in_full</span>' : ''}
+                        </div>
+                        ${hasDetail ? `<div id="detailSubRaw_${e.id}" class="hidden mt-2 p-3 bg-background/90 text-text-main border border-border text-[11px] leading-relaxed whitespace-pre-wrap rounded">${escapeHtml(detailText)}</div>` : ''}
+                        <div class="mt-2 text-[10px] text-text-muted flex gap-2 items-center flex-wrap">
+                            <span>👤 ${escapeHtml(e.worker || "—")}</span>
+                            <span>⏱️ Recorded: ${savedStr}</span>
+                            <button class="ml-auto bg-text-main text-surface px-2 py-0.5 rounded hover:bg-primary font-bold transition-colors" onclick="handleMailGenClick(this)" data-eq="${escapeHtml(eq.name)}" data-content="${escapeHtml(displayTitle)}">메일 작성</button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            li.innerHTML = `
+                <div class="timeline-dot mt-1 !bg-primary ring-4 ring-primary/20"></div>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1 flex-wrap">
+                        <span class="px-2 py-0.5 bg-primary/10 border border-primary/30 text-primary text-[10px] font-black rounded flex items-center gap-1">
+                            <span class="material-symbols-outlined text-[12px]">forum</span> 연속 ${group.count}건
+                        </span>
+                        <span class="text-sm font-black text-text-main">${escapeHtml(dateRange)}</span>
+                    </div>
+                    <div>
+                        <p class="text-sm text-primary font-black leading-relaxed">${escapeHtml(group.title)}</p>
+                    </div>
+                    <div class="mt-2 text-[10px] text-text-muted flex gap-3 items-center flex-wrap">
+                        <span>👥 작업자: ${escapeHtml(workers)}</span>
+                        <span>총 ${group.count}회차 누적</span>
+                        <button class="ml-auto text-xs bg-surface border border-primary/40 text-primary hover:bg-primary hover:text-white px-3 py-1 rounded flex items-center gap-1 font-bold transition-all shadow-sm"
+                            onclick="(function(btn){
+                                var sub = document.getElementById('${threadId}');
+                                var icon = btn.querySelector('.thread-icon');
+                                var txt = btn.querySelector('.thread-txt');
+                                var isHidden = sub.classList.toggle('hidden');
+                                icon.textContent = isHidden ? 'expand_more' : 'expand_less';
+                                txt.textContent = isHidden ? '전체 펼치기 (${group.count}건)' : '접기';
+                            })(this)">
+                            <span class="thread-txt">전체 펼치기 (${group.count}건)</span>
+                            <span class="material-symbols-outlined text-sm thread-icon">expand_more</span>
+                        </button>
+                    </div>
+                    <div id="${threadId}" class="hidden mt-4 space-y-2.5 pl-4 border-l-2 border-primary/40 py-1">
+                        ${subItemsHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        ul.appendChild(li);
+    });
+
+    wrap.innerHTML = ''; 
+    wrap.appendChild(ul);
+}
+
+/** 설비 상세 페이지 열기 */
+function openEquipDetail(sn) {
+    const data = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+    const eq = data.find(d => d.sn === sn);
+    if (!eq) { 
+        showToast("오류", "해당 설비를 찾을 수 없습니다."); 
+        return; 
     }
+    currentDetailEquip = eq;
+    window.location.hash = `detail-${encodeURIComponent(sn)}`;
+    document.querySelectorAll('.tab-content').forEach(s => { 
+        s.classList.remove('block'); 
+        s.classList.add('hidden'); 
+    });
+    document.getElementById('equipDetail').classList.remove('hidden');
+    document.getElementById('equipDetail').classList.add('block');
+    document.querySelectorAll('nav a').forEach(a => { 
+        a.classList.remove('nav-active', 'text-text-main'); 
+        a.classList.add('text-text-muted'); 
+    });
+    renderEquipDetail(eq);
+    if (window.innerWidth < 768) closeSidebar();
+}
+
+/** 설비 상세 페이지 닫기 (Management 탭으로 복귀) */
+function closeEquipDetail() {
+    window.location.hash = '';
+    const dbNav = Array.from(document.querySelectorAll('nav a')).find(a => (a.getAttribute('onclick') || '').includes("'database'"));
+    switchTab('database', dbNav);
+}
+
+/** 설비 상세 페이지 종합 렌더링 */
+async function renderEquipDetail(eq) {
+    currentDetailEquip = eq;
+    document.getElementById('detailTitle').textContent = eq.name;
+    document.getElementById('detailSubtitle').textContent = `${eq.line || '-'} Line · ${eq.model || '-'} · ${eq.location || '-'}`;
+    document.getElementById('detailInfoGrid').innerHTML = `
+        <div><span class="label-base">라인</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.line || '-')}</p></div>
+        <div><span class="label-base">모델명</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.model || '-')}</p></div>
+        <div><span class="label-base">S/N</span><p class="text-sm font-mono text-text-main mt-1">${escapeHtml(eq.sn || '-')}</p></div>
+        <div><span class="label-base">위치</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.location || '-')}</p></div>
+    `;
     
+    renderEquipDetailNotes(eq);
+    await renderEquipDetailHistory(eq);
     renderLaserSection(eq.sn);
     renderScaleHeadSection(eq.sn);
     renderConsumablesSection(eq.sn);
@@ -3719,10 +3922,20 @@ function renderTable() {
     const raw = JSON.parse(localStorage.getItem("equipmentData") || "[]"); 
     tbody.innerHTML = ""; 
     
+    let notesMap = {};
+    try {
+        notesMap = JSON.parse(localStorage.getItem("machineNotes") || "{}");
+    } catch (_) { notesMap = {}; }
+
     const data = raw.map((item, i) => ({ item, i }))
         .sort((a, b) => a.item.line.localeCompare(b.item.line, 'ko', { numeric: true }) || a.i - b.i); 
     
     data.forEach(({ item, i }) => { 
+        const rawNote = notesMap[item.name];
+        const noteText = typeof getNoteText === 'function' ? getNoteText(rawNote) : (typeof rawNote === 'string' ? rawNote : rawNote?.text || "");
+        const hasNote = Boolean(noteText && noteText.trim());
+        const noteBadge = hasNote ? `<span class="material-symbols-outlined text-[15px] text-amber-500 align-middle ml-1" title="특이사항 및 부품차용 등록됨">edit_note</span>` : '';
+
         if (item.isEditing) { 
             tbody.innerHTML += `
                 <tr class="bg-background/60">
@@ -3739,7 +3952,7 @@ function renderTable() {
                 <tr class="hover:bg-background/40 transition-colors">
                     <td class="td-base px-6 font-medium">${escapeHtml(item.line)}</td>
                     <td class="td-base px-6 text-text-muted">${escapeHtml(item.model)}</td>
-                    <td class="td-base px-6 text-primary font-bold equip-link cursor-pointer hover:underline" data-sn="${escapeHtml(item.sn)}">${escapeHtml(item.name)}</td>
+                    <td class="td-base px-6 text-primary font-bold equip-link cursor-pointer hover:underline" data-sn="${escapeHtml(item.sn)}">${escapeHtml(item.name)}${noteBadge}</td>
                     <td class="td-base px-6 text-xs text-text-muted font-mono">${escapeHtml(item.sn)}</td>
                     <td class="td-base px-6 text-text-muted">${escapeHtml(item.location)}</td>
                     <td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-text" onclick="enableEdit(${i})">Edit</button><button class="btn-text hover:!text-red-600" onclick="deleteData(${i})">Del</button></div></td>
@@ -4065,6 +4278,60 @@ function saveMachineNote(m, t) {
     autoMergeAndSave({ scope: 'notes' }); 
 }
 
+/** 작업 이력 동일 제목 쓰레드 그룹화 모드 플래그 */
+let isHistoryThreadMode = true;
+
+/** 작업 이력 쓰레드 묶기 토글 */
+function toggleHistoryThreadMode() {
+    isHistoryThreadMode = !isHistoryThreadMode;
+    const btn = document.getElementById("historyThreadToggleBtn");
+    const txt = document.getElementById("historyThreadToggleText");
+    if (btn && txt) {
+        if (isHistoryThreadMode) {
+            btn.className = "btn-text h-9 px-3 border border-primary bg-primary/10 text-primary hover:bg-primary hover:text-white rounded flex items-center gap-1 text-xs font-bold transition-all";
+            txt.textContent = "쓰레드 묶기 ON";
+        } else {
+            btn.className = "btn-text h-9 px-3 border border-border bg-surface text-text-muted hover:border-primary hover:text-primary rounded flex items-center gap-1 text-xs font-medium transition-all";
+            txt.textContent = "쓰레드 묶기 OFF";
+        }
+    }
+    renderHistory();
+}
+
+/**
+ * 정렬된 작업 이력 목록에서 인접한 동일 제목(Setup, Upgrade 등)을 쓰레드로 그룹화
+ * @param {Array} entries 정렬된 이력 객체 배열
+ * @returns {Array} 그룹화된 이력 객체 배열 [{ isThread, title, entries, count }]
+ */
+function groupEntriesByThread(entries) {
+    if (!entries || entries.length === 0) return [];
+    const groups = [];
+    let currentGroup = null;
+
+    entries.forEach(e => {
+        const title = (typeof getDisplayContent === "function" ? getDisplayContent(e) : (e.content || "")).trim();
+        const normKey = title.toLowerCase().replace(/\s+/g, " ");
+
+        if (currentGroup && normKey && normKey !== "—" && normKey !== "미상" && currentGroup.normKey === normKey) {
+            currentGroup.entries.push(e);
+        } else {
+            currentGroup = {
+                normKey: normKey,
+                title: title,
+                entries: [e]
+            };
+            groups.push(currentGroup);
+        }
+    });
+
+    return groups.map(g => ({
+        isThread: g.entries.length > 1,
+        title: g.title,
+        entries: g.entries,
+        count: g.entries.length
+    }));
+}
+
 /** 🕒 작업 히스토리 타임라인 및 설비 칩 아코디언 렌더링 */
 async function renderHistory() {
     const raw = await getIDBHistory();
@@ -4267,40 +4534,123 @@ async function renderHistory() {
     ul.className = "relative space-y-0 pl-8";
     ul.innerHTML = '<div class="timeline-line"></div>';
 
-    entries.forEach((e, idx) => {
+    const renderItems = isHistoryThreadMode ? groupEntriesByThread(entries) : entries.map(e => ({ isThread: false, title: getDisplayContent(e), entries: [e], count: 1 }));
+
+    renderItems.forEach((group, idx) => {
         const li = document.createElement("li"); 
         li.className = "timeline-item relative flex gap-5 pb-8"; 
         li.style.animationDelay = `${idx * 50}ms`;
-        
-        const savedDate = new Date(e.savedAt); 
-        const savedStr = `${savedDate.getFullYear()}.${savedDate.getMonth() + 1}.${savedDate.getDate()} ${savedDate.getHours()}:${String(savedDate.getMinutes()).padStart(2, '0')}`;
-        
-        const displayTitle = getDisplayContent(e);
-        const hasDetail = Boolean(e.rawText || (e.content && e.content !== displayTitle && e.content.length > displayTitle.length));
-        const detailText = e.rawText || e.content;
 
-        li.innerHTML = `
-            <div class="timeline-dot mt-1"></div>
-            <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1">
-                    <span class="px-2 py-0.5 border border-border text-primary text-[10px] font-bold rounded">EVENT</span>
-                    <span class="text-sm font-black text-text-main">${escapeHtml(e.date || "날짜 미상")}</span>
+        if (!group.isThread) {
+            const e = group.entries[0];
+            const savedDate = new Date(e.savedAt); 
+            const savedStr = `${savedDate.getFullYear()}.${savedDate.getMonth() + 1}.${savedDate.getDate()} ${savedDate.getHours()}:${String(savedDate.getMinutes()).padStart(2, '0')}`;
+            
+            const displayTitle = getDisplayContent(e);
+            const hasDetail = Boolean(e.rawText || (e.content && e.content !== displayTitle && e.content.length > displayTitle.length));
+            const detailText = e.rawText || e.content;
+
+            li.innerHTML = `
+                <div class="timeline-dot mt-1"></div>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="px-2 py-0.5 border border-border text-primary text-[10px] font-bold rounded">EVENT</span>
+                        <span class="text-sm font-black text-text-main">${escapeHtml(e.date || "날짜 미상")}</span>
+                    </div>
+                    <div class="${hasDetail ? 'cursor-pointer hover:text-primary transition-colors' : ''}" ${hasDetail ? `onclick="document.getElementById('rawText_${e.id}').classList.toggle('hidden')"` : ''}>
+                        <p class="text-sm text-text-main font-bold leading-relaxed">${escapeHtml(displayTitle)}</p>
+                        ${hasDetail ? '<span class="material-symbols-outlined text-sm text-text-muted mt-1 block">open_in_full</span>' : ''}
+                    </div>
+                    ${hasDetail ? `<div id="rawText_${e.id}" class="hidden mt-3 p-4 bg-background/70 text-text-main border border-border text-xs leading-relaxed whitespace-pre-wrap rounded backdrop-blur-sm">${escapeHtml(detailText)}</div>` : ''}
+                    <div class="mt-3 text-[10px] text-text-muted flex gap-3 items-center flex-wrap">
+                        <span>👤 ${escapeHtml(e.worker || "—")}</span>
+                        <span>⏱️ Recorded: ${savedStr}</span>
+                        <button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="handleMailGenClick(this)" data-eq="${escapeHtml(e.machine)}" data-content="${escapeHtml(displayTitle)}">메일 작성</button>
+                    </div>
                 </div>
-                <div class="${hasDetail ? 'cursor-pointer hover:text-primary transition-colors' : ''}" ${hasDetail ? `onclick="document.getElementById('rawText_${e.id}').classList.toggle('hidden')"` : ''}>
-                    <p class="text-sm text-text-main font-bold leading-relaxed">${escapeHtml(displayTitle)}</p>
-                    ${hasDetail ? '<span class="material-symbols-outlined text-sm text-text-muted mt-1 block">open_in_full</span>' : ''}
+                <button class="btn-text self-start mt-1 ml-2 hover:!text-red-500" onclick="deleteSingleHistory('${e.id}')">
+                    <span class="material-symbols-outlined text-base">close</span>
+                </button>
+            `;
+        } else {
+            // 🧵 쓰레드 그룹 (2건 이상 연속 동일 작업)
+            const mainE = group.entries[0];
+            const oldestE = group.entries[group.entries.length - 1];
+            const threadId = "thread_hist_" + String(mainE.id || idx).replace(/[^a-zA-Z0-9_]/g, "_");
+            const newestDate = mainE.date || "날짜 미상";
+            const oldestDate = oldestE.date || newestDate;
+            const dateRange = newestDate === oldestDate ? newestDate : (sortOrder === "desc" ? `${newestDate} ~ ${oldestDate}` : `${oldestDate} ~ ${newestDate}`);
+            const workers = Array.from(new Set(group.entries.map(x => x.worker).filter(Boolean))).join(", ") || "—";
+
+            let subItemsHtml = "";
+            group.entries.forEach((e, subIdx) => {
+                const savedDate = new Date(e.savedAt);
+                const savedStr = `${savedDate.getFullYear()}.${savedDate.getMonth() + 1}.${savedDate.getDate()} ${savedDate.getHours()}:${String(savedDate.getMinutes()).padStart(2, '0')}`;
+                const displayTitle = getDisplayContent(e);
+                const hasDetail = Boolean(e.rawText || (e.content && e.content !== displayTitle && e.content.length > displayTitle.length));
+                const detailText = e.rawText || e.content;
+                const turnNo = sortOrder === "desc" ? (group.count - subIdx) : (subIdx + 1);
+
+                subItemsHtml += `
+                    <div class="p-3 bg-surface/80 rounded border border-border/70 hover:border-primary/50 transition-all text-xs">
+                        <div class="flex items-center justify-between mb-1.5 flex-wrap gap-2">
+                            <div class="flex items-center gap-2">
+                                <span class="px-1.5 py-0.5 bg-primary/20 text-primary font-bold text-[10px] rounded">${turnNo}회차</span>
+                                <span class="font-bold text-text-main">${escapeHtml(e.date || "날짜 미상")}</span>
+                            </div>
+                            <button class="btn-text hover:!text-red-500 text-[11px]" onclick="deleteSingleHistory('${e.id}')">
+                                <span class="material-symbols-outlined text-sm">close</span>
+                            </button>
+                        </div>
+                        <div class="${hasDetail ? 'cursor-pointer hover:text-primary transition-colors' : ''}" ${hasDetail ? `onclick="document.getElementById('rawText_${e.id}').classList.toggle('hidden')"` : ''}>
+                            <p class="text-xs text-text-main leading-relaxed">${escapeHtml(displayTitle)}</p>
+                            ${hasDetail ? '<span class="material-symbols-outlined text-xs text-text-muted mt-0.5 block">open_in_full</span>' : ''}
+                        </div>
+                        ${hasDetail ? `<div id="rawText_${e.id}" class="hidden mt-2 p-3 bg-background/90 text-text-main border border-border text-[11px] leading-relaxed whitespace-pre-wrap rounded">${escapeHtml(detailText)}</div>` : ''}
+                        <div class="mt-2 text-[10px] text-text-muted flex gap-2 items-center flex-wrap">
+                            <span>👤 ${escapeHtml(e.worker || "—")}</span>
+                            <span>⏱️ Recorded: ${savedStr}</span>
+                            <button class="ml-auto bg-text-main text-surface px-2 py-0.5 rounded hover:bg-primary font-bold transition-colors" onclick="handleMailGenClick(this)" data-eq="${escapeHtml(e.machine)}" data-content="${escapeHtml(displayTitle)}">메일 작성</button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            li.innerHTML = `
+                <div class="timeline-dot mt-1 !bg-primary ring-4 ring-primary/20"></div>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1 flex-wrap">
+                        <span class="px-2 py-0.5 bg-primary/10 border border-primary/30 text-primary text-[10px] font-black rounded flex items-center gap-1">
+                            <span class="material-symbols-outlined text-[12px]">forum</span> 연속 ${group.count}건
+                        </span>
+                        <span class="text-sm font-black text-text-main">${escapeHtml(dateRange)}</span>
+                    </div>
+                    <div>
+                        <p class="text-sm text-primary font-black leading-relaxed">${escapeHtml(group.title)}</p>
+                    </div>
+                    <div class="mt-2 text-[10px] text-text-muted flex gap-3 items-center flex-wrap">
+                        <span>👥 작업자: ${escapeHtml(workers)}</span>
+                        <span>총 ${group.count}회차 누적</span>
+                        <button class="ml-auto text-xs bg-surface border border-primary/40 text-primary hover:bg-primary hover:text-white px-3 py-1 rounded flex items-center gap-1 font-bold transition-all shadow-sm"
+                            onclick="(function(btn){
+                                var sub = document.getElementById('${threadId}');
+                                var icon = btn.querySelector('.thread-icon');
+                                var txt = btn.querySelector('.thread-txt');
+                                var isHidden = sub.classList.toggle('hidden');
+                                icon.textContent = isHidden ? 'expand_more' : 'expand_less';
+                                txt.textContent = isHidden ? '전체 펼치기 (${group.count}건)' : '접기';
+                            })(this)">
+                            <span class="thread-txt">전체 펼치기 (${group.count}건)</span>
+                            <span class="material-symbols-outlined text-sm thread-icon">expand_more</span>
+                        </button>
+                    </div>
+                    <div id="${threadId}" class="hidden mt-4 space-y-2.5 pl-4 border-l-2 border-primary/40 py-1">
+                        ${subItemsHtml}
+                    </div>
                 </div>
-                ${hasDetail ? `<div id="rawText_${e.id}" class="hidden mt-3 p-4 bg-background/70 text-text-main border border-border text-xs leading-relaxed whitespace-pre-wrap rounded backdrop-blur-sm">${escapeHtml(detailText)}</div>` : ''}
-                <div class="mt-3 text-[10px] text-text-muted flex gap-3 items-center flex-wrap">
-                    <span>👤 ${escapeHtml(e.worker || "—")}</span>
-                    <span>⏱️ Recorded: ${savedStr}</span>
-                    <button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="handleMailGenClick(this)" data-eq="${escapeHtml(e.machine)}" data-content="${escapeHtml(displayTitle)}">메일 작성</button>
-                </div>
-            </div>
-            <button class="btn-text self-start mt-1 ml-2 hover:!text-red-500" onclick="deleteSingleHistory('${e.id}')">
-                <span class="material-symbols-outlined text-base">close</span>
-            </button>
-        `;
+            `;
+        }
+
         ul.appendChild(li);
     });
 
