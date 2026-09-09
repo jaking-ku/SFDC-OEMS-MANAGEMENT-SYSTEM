@@ -624,17 +624,22 @@
         </div>
 
         <!-- 주요 소모품 교체 설비 현황 (Consumables Fleet View) -->
-        <div class="card-base overflow-hidden rounded-md" id="consumableFleetCard">
-            <div class="px-6 py-4 bg-background border-b border-border flex justify-between items-center flex-wrap gap-3">
+        <div class="card-base overflow-hidden rounded-md accordion-open" id="consumableFleetCard">
+            <button class="w-full px-6 py-4 bg-background border-b border-border flex justify-between items-center hover:opacity-80 transition-opacity text-left cursor-pointer" onclick="this.parentElement.classList.toggle('accordion-open')">
                 <span class="label-base text-text-main !mb-0 flex items-center gap-2">
                     <span class="material-symbols-outlined text-lg text-primary">published_with_changes</span> 주요 소모품 교체 설비 현황
                 </span>
-                <span class="text-xs text-text-muted">품목을 클릭하면 해당 부품을 교체한 설비 목록을 확인할 수 있습니다.</span>
+                <div class="flex items-center gap-3">
+                    <span class="text-xs text-text-muted hidden md:inline">품목을 클릭하면 해당 부품을 교체한 설비 목록을 확인할 수 있습니다.</span>
+                    <span class="material-symbols-outlined accordion-rotate text-text-main">expand_more</span>
+                </div>
+            </button>
+            <div class="accordion-content">
+                <div class="p-4 bg-surface/30 border-b border-border/50">
+                    <div class="flex flex-wrap gap-2" id="consumableFleetChips"></div>
+                </div>
+                <div id="consumableFleetListWrap" class="p-4"></div>
             </div>
-            <div class="p-4 bg-surface/30 border-b border-border/50">
-                <div class="flex flex-wrap gap-2" id="consumableFleetChips"></div>
-            </div>
-            <div id="consumableFleetListWrap" class="p-4"></div>
         </div>
 
         <div class="card-base overflow-hidden rounded-md">
@@ -3635,14 +3640,13 @@ const MAJOR_CONSUMABLE_ITEMS = [
 let selectedFleetConsumableKey = 'laser';
 
 /**
- * 특정 소모품을 교체한 설비 목록 추출 (소모품 DB + 작업 이력 교차 집계)
+ * 특정 소모품을 교체한 설비 목록 추출 (수동 소모품 등록 데이터 전용 집계)
  * @param {string} itemKey MAJOR_CONSUMABLE_ITEMS의 key
  * @returns {Promise<Array>} 교체 이력이 있는 설비 목록 배열
  */
 async function getEquipListByConsumable(itemKey) {
     const equipList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
     const allMaint = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
-    const allHist = typeof getIDBHistory === "function" ? await getIDBHistory() : [];
     
     const results = [];
 
@@ -3650,36 +3654,25 @@ async function getEquipListByConsumable(itemKey) {
         const snKey = (eq.sn || "").trim();
         const nameKey = (eq.name || "").trim();
         const maint = allMaint[snKey] || allMaint[nameKey] || {};
-        
-        // 해당 설비의 작업 이력 필터링
-        const histMatches = allHist.filter(h => !h.isDeleted && (
-            (snKey && h.sn === snKey) ||
-            (nameKey && (h.machine || "").trim() === nameKey)
-        ));
 
         let replaceDates = [];
         let detailNotes = [];
         let extraInfo = "";
 
         if (itemKey === 'laser') {
-            // 1. Laser
+            // 1. Laser: 수동 등록 데이터만 반영
             if (maint.laser) {
                 if (maint.laser.replaceDate) replaceDates.push(maint.laser.replaceDate);
                 (maint.laser.history || []).forEach(h => {
-                    if (!h.isDeleted && h.date) replaceDates.push(h.date);
+                    if (!h.isDeleted && h.date) {
+                        replaceDates.push(h.date);
+                        if (h.headSN) detailNotes.push(`Head: ${h.headSN}`);
+                    }
                 });
                 if (maint.laser.headSN) extraInfo = `Head S/N: ${maint.laser.headSN}`;
             }
-            histMatches.forEach(h => {
-                const text = ((h.content || "") + " " + (h.rawText || "")).toLowerCase();
-                if (text.includes("laser 교체") || text.includes("laser swap") || text.includes("laser replace")) {
-                    const d = h.date ? h.date.replace(/[^0-9.]/g, "").replace(/\./g, "/") : "";
-                    if (d) replaceDates.push(d);
-                    detailNotes.push(h.content || "Laser 교체");
-                }
-            });
         } else if (itemKey === 'scale_head') {
-            // 2. Scale Head
+            // 2. Scale Head: 수동 등록 데이터만 반영
             const axesFound = new Set();
             if (maint.scaleHead) {
                 Object.keys(maint.scaleHead).forEach(ax => {
@@ -3692,23 +3685,16 @@ async function getEquipListByConsumable(itemKey) {
                         if (!h.isDeleted && h.date) {
                             replaceDates.push(h.date);
                             axesFound.add(ax);
+                            if (h.sn) detailNotes.push(`${ax}축 (${h.sn})`);
                         }
                     });
                 });
             }
-            histMatches.forEach(h => {
-                const text = ((h.content || "") + " " + (h.rawText || "")).toLowerCase();
-                if (text.includes("scale head") || text.includes("scalehead") || text.includes("스케일 헤드") || text.includes("스케일헤드")) {
-                    const d = h.date ? h.date.replace(/[^0-9.]/g, "").replace(/\./g, "/") : "";
-                    if (d) replaceDates.push(d);
-                    detailNotes.push(h.content || "Scale Head 교체");
-                }
-            });
             if (axesFound.size > 0) {
                 extraInfo = `교체 축: ${Array.from(axesFound).join(", ")}`;
             }
         } else if (itemKey === 'revolver') {
-            // 3. Revolver
+            // 3. Revolver: 수동 소모품 교환 이력만 반영
             (maint.consumables || []).forEach(c => {
                 if (!c.isDeleted) {
                     const n = (c.name || "").toLowerCase();
@@ -3718,16 +3704,8 @@ async function getEquipListByConsumable(itemKey) {
                     }
                 }
             });
-            histMatches.forEach(h => {
-                const text = ((h.content || "") + " " + (h.rawText || "")).toLowerCase();
-                if (text.includes("revolver") || text.includes("리볼버")) {
-                    const d = h.date ? h.date.replace(/[^0-9.]/g, "").replace(/\./g, "/") : "";
-                    if (d) replaceDates.push(d);
-                    detailNotes.push(h.content || "Revolver 교체");
-                }
-            });
         } else if (itemKey === 'robot') {
-            // 4. Robot
+            // 4. Robot: 수동 소모품 교환 이력만 반영
             (maint.consumables || []).forEach(c => {
                 if (!c.isDeleted) {
                     const n = (c.name || "").toLowerCase();
@@ -3737,16 +3715,8 @@ async function getEquipListByConsumable(itemKey) {
                     }
                 }
             });
-            histMatches.forEach(h => {
-                const text = ((h.content || "") + " " + (h.rawText || "")).toLowerCase();
-                if (text.includes("robot 교체") || text.includes("로봇 교체") || text.includes("robot swap")) {
-                    const d = h.date ? h.date.replace(/[^0-9.]/g, "").replace(/\./g, "/") : "";
-                    if (d) replaceDates.push(d);
-                    detailNotes.push(h.content || "Robot 교체");
-                }
-            });
         } else if (itemKey === 'tdi') {
-            // 5. TDI
+            // 5. TDI: 수동 소모품 교환 이력만 반영
             (maint.consumables || []).forEach(c => {
                 if (!c.isDeleted) {
                     const n = (c.name || "").toLowerCase();
@@ -3756,16 +3726,8 @@ async function getEquipListByConsumable(itemKey) {
                     }
                 }
             });
-            histMatches.forEach(h => {
-                const text = ((h.content || "") + " " + (h.rawText || "")).toLowerCase();
-                if (text.includes("tdi")) {
-                    const d = h.date ? h.date.replace(/[^0-9.]/g, "").replace(/\./g, "/") : "";
-                    if (d) replaceDates.push(d);
-                    detailNotes.push(h.content || "TDI 교체");
-                }
-            });
         } else if (itemKey === 'z_cylinder') {
-            // 6. Z축 낙하방지 Cylinder
+            // 6. Z축 낙하방지 Cylinder: 수동 소모품 교환 이력만 반영
             (maint.consumables || []).forEach(c => {
                 if (!c.isDeleted) {
                     const n = (c.name || "").toLowerCase();
@@ -3775,16 +3737,6 @@ async function getEquipListByConsumable(itemKey) {
                         if (c.date) replaceDates.push(c.date);
                         if (c.note) detailNotes.push(c.note);
                     }
-                }
-            });
-            histMatches.forEach(h => {
-                const text = ((h.content || "") + " " + (h.rawText || "")).toLowerCase();
-                const hasZ = text.includes("z축") || text.includes("z 축") || text.includes("낙하방지");
-                const hasCyl = text.includes("cylinder") || text.includes("실린더");
-                if (hasZ && hasCyl) {
-                    const d = h.date ? h.date.replace(/[^0-9.]/g, "").replace(/\./g, "/") : "";
-                    if (d) replaceDates.push(d);
-                    detailNotes.push(h.content || "Z축 실린더 교체");
                 }
             });
         }
