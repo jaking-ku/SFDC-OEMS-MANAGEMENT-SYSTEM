@@ -997,7 +997,10 @@ async function putIDBHistory(dataArray) {
             }
             store.put(item);
         });
-        tx.oncomplete = () => resolve();
+        tx.oncomplete = () => {
+            if (typeof invalidateHistoryCache === 'function') invalidateHistoryCache();
+            resolve();
+        };
         tx.onerror = () => reject(tx.error);
     });
 }
@@ -1017,7 +1020,10 @@ async function upsertIDBHistoryItems(items) {
             }
             store.put(item);
         });
-        tx.oncomplete = () => resolve();
+        tx.oncomplete = () => {
+            if (typeof invalidateHistoryCache === 'function') invalidateHistoryCache();
+            resolve();
+        };
         tx.onerror = () => reject(tx.error);
     });
 }
@@ -4003,7 +4009,14 @@ async function renderEquipDetailHistory(eq) {
     if (!wrap || !eq) return;
     wrap.innerHTML = '<p class="text-text-muted text-xs">불러오는 중...</p>';
     
-    const raw = await getIDBHistory();
+    // 캐시가 유효하면 메모리 캐시 재사용, 없으면 getIDBHistory 호출
+    let raw = (typeof cachedRawHistory !== 'undefined' && cachedRawHistory && !isHistoryCacheDirty)
+        ? cachedRawHistory
+        : await getIDBHistory();
+    if (typeof cachedRawHistory !== 'undefined' && !cachedRawHistory) {
+        cachedRawHistory = raw;
+        isHistoryCacheDirty = false;
+    }
     const entries = raw
         .filter(e => !e.isDeleted && (e.sn === eq.sn || (!e.sn && e.machine === eq.name)))
         .sort((a, b) => {
@@ -4033,7 +4046,9 @@ async function renderEquipDetailHistory(eq) {
     renderItems.forEach((group, idx) => {
         const li = document.createElement('li'); 
         li.className = 'timeline-item relative flex gap-5 pb-8'; 
-        li.style.animationDelay = `${idx * 50}ms`;
+        li.style.animationDelay = `${idx * 20}ms`;
+        li.style.contentVisibility = 'auto';
+        li.style.containIntrinsicSize = '0 80px';
 
         if (!group.isThread) {
             const e = group.entries[0];
@@ -4220,6 +4235,7 @@ function renderTable() {
     const data = raw.map((item, i) => ({ item, i }))
         .sort((a, b) => a.item.line.localeCompare(b.item.line, 'ko', { numeric: true }) || a.i - b.i); 
     
+    const rowsHtml = [];
     data.forEach(({ item, i }) => { 
         const rawNote = notesMap[item.name];
         const noteText = typeof getNoteText === 'function' ? getNoteText(rawNote) : (typeof rawNote === 'string' ? rawNote : rawNote?.text || "");
@@ -4227,8 +4243,8 @@ function renderTable() {
         const noteBadge = hasNote ? `<span class="material-symbols-outlined text-[15px] text-amber-500 align-middle ml-1" title="특이사항 및 부품차용 등록됨">edit_note</span>` : '';
 
         if (item.isEditing) { 
-            tbody.innerHTML += `
-                <tr class="bg-background/60">
+            rowsHtml.push(`
+                <tr class="bg-background/60" style="content-visibility: auto; contain-intrinsic-size: 0 45px;">
                     <td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editLine_${i}" value="${escapeHtml(item.line)}"></td>
                     <td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editModel_${i}" value="${escapeHtml(item.model)}"></td>
                     <td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editName_${i}" value="${escapeHtml(item.name)}"></td>
@@ -4236,10 +4252,10 @@ function renderTable() {
                     <td class="td-base px-6"><input class="input-base h-8 px-2 rounded" id="editLoc_${i}" value="${escapeHtml(item.location)}"></td>
                     <td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-primary px-3 py-1 text-[10px] rounded" onclick="saveEdit(${i})">Save</button></div></td>
                 </tr>
-            `; 
+            `); 
         } else { 
-            tbody.innerHTML += `
-                <tr class="hover:bg-background/40 transition-colors">
+            rowsHtml.push(`
+                <tr class="hover:bg-background/40 transition-colors" style="content-visibility: auto; contain-intrinsic-size: 0 45px;">
                     <td class="td-base px-6 font-medium">${escapeHtml(item.line)}</td>
                     <td class="td-base px-6 text-text-muted">${escapeHtml(item.model)}</td>
                     <td class="td-base px-6 text-primary font-bold equip-link cursor-pointer hover:underline" data-sn="${escapeHtml(item.sn)}">${escapeHtml(item.name)}${noteBadge}</td>
@@ -4247,9 +4263,10 @@ function renderTable() {
                     <td class="td-base px-6 text-text-muted">${escapeHtml(item.location)}</td>
                     <td class="td-base px-6"><div class="flex items-center justify-end gap-3"><button class="btn-text" onclick="enableEdit(${i})">Edit</button><button class="btn-text hover:!text-red-600" onclick="deleteData(${i})">Del</button></div></td>
                 </tr>
-            `; 
+            `); 
         } 
     }); 
+    tbody.innerHTML = rowsHtml.join(''); 
 
     tbody.querySelectorAll(".equip-link").forEach(el => {
         el.addEventListener("click", () => { 
@@ -4592,7 +4609,8 @@ function toggleHistoryThreadMode() {
             txt.textContent = "쓰레드 묶기 OFF";
         }
     }
-    renderHistory();
+    const sortOrder = document.getElementById("historySortOrder")?.value || "desc";
+    renderHistoryTimeline(sortOrder);
 }
 
 /**
@@ -4629,24 +4647,107 @@ function groupEntriesByThread(entries) {
     }));
 }
 
-/** 🕒 작업 히스토리 타임라인 및 설비 칩 아코디언 렌더링 */
+// 메모리 캐시 변수 (대량 이력 초고속 반응 최적화)
+let cachedRawHistory = null;
+let cachedExpandedHistory = null;
+let cachedLineMap = null;
+let cachedSearchVal = null;
+let isHistoryCacheDirty = true;
+
+/** ⚡ 이력 캐시 무효화 함수 */
+function invalidateHistoryCache() {
+    isHistoryCacheDirty = true;
+    cachedRawHistory = null;
+    cachedExpandedHistory = null;
+    cachedLineMap = null;
+    cachedSearchVal = null;
+}
+
+/** ⚡ 설비 칩 초고속 즉각 전환 (DOM 재생성 없이 타임라인만 부분 렌더링) */
+function selectHistoryEquipChip(machineName, targetChipEl) {
+    selectedChip = machineName;
+    const chipsWrap = document.getElementById("historyEquipChips");
+    if (chipsWrap) {
+        chipsWrap.querySelectorAll("button[data-machine]").forEach(btn => {
+            const isTarget = btn.getAttribute("data-machine") === machineName;
+            btn.className = `px-4 py-2 text-xs font-bold uppercase tracking-widest border transition-all flex items-center gap-2 rounded ${isTarget ? "bg-primary text-white border-primary" : "bg-surface/50 text-text-muted border-border hover:border-primary hover:text-primary"}`;
+            const badge = btn.querySelector(".badge-count");
+            if (badge) {
+                badge.className = `ml-1 ${isTarget ? "bg-surface text-primary" : "bg-background text-text-muted"} text-[9px] font-black px-1.5 py-0.5 rounded badge-count`;
+            }
+        });
+    }
+    const sortOrder = document.getElementById("historySortOrder")?.value || "desc";
+    renderHistoryTimeline(sortOrder);
+}
+
+/** 🕒 작업 히스토리 타임라인 및 설비 칩 아코디언 렌더링 (메모리 캐싱 탑재) */
 async function renderHistory() {
-    const raw = await getIDBHistory();
     const searchVal = (document.getElementById("historySearch")?.value || "").toLowerCase();
     const sortOrder = document.getElementById("historySortOrder")?.value || "desc";
     const chipsWrap = document.getElementById("historyEquipChips");
     const timelineWrap = document.getElementById("historyTimelineWrap");
     const emptyEl = document.getElementById("historyEmpty");
     
-    const filtered = raw.filter(e => !e.isDeleted && (
-        String(e.machine || "").toLowerCase().includes(searchVal) || 
-        String(e.content || "").toLowerCase().includes(searchVal) || 
-        String(getDisplayContent(e)).toLowerCase().includes(searchVal) || 
-        String(e.worker || "").toLowerCase().includes(searchVal) || 
-        String(e.rawText || "").toLowerCase().includes(searchVal)
-    ));
-    
-    if (filtered.length === 0) { 
+    // 1. IndexedDB 캐시 검증
+    if (isHistoryCacheDirty || !cachedRawHistory) {
+        cachedRawHistory = await getIDBHistory();
+        isHistoryCacheDirty = false;
+        cachedExpandedHistory = null;
+    }
+
+    // 2. 검색어 변경 또는 파싱 캐시 부재 시 재파싱
+    if (!cachedExpandedHistory || cachedSearchVal !== searchVal) {
+        cachedSearchVal = searchVal;
+        const raw = cachedRawHistory || [];
+        const filtered = raw.filter(e => !e.isDeleted && (
+            String(e.machine || "").toLowerCase().includes(searchVal) || 
+            String(e.content || "").toLowerCase().includes(searchVal) || 
+            String(getDisplayContent(e)).toLowerCase().includes(searchVal) || 
+            String(e.worker || "").toLowerCase().includes(searchVal) || 
+            String(e.rawText || "").toLowerCase().includes(searchVal)
+        ));
+        
+        if (filtered.length === 0) { 
+            chipsWrap.innerHTML = ""; 
+            timelineWrap.innerHTML = ""; 
+            emptyEl.classList.remove("hidden"); 
+            return; 
+        }
+        emptyEl.classList.add("hidden");
+
+        const expanded = [];
+        filtered.forEach(e => {
+            const targetMachines = typeof parseTargetMachines === "function" ? parseTargetMachines(e.machine, e.rawText) : [e.machine || "미상"];
+            for (const singleM of targetMachines) {
+                const correctLine = typeof getCorrectLineForMachine === "function" ? getCorrectLineForMachine(singleM, e.line) : (e.line || "미상");
+                expanded.push({
+                    ...e,
+                    machine: singleM,
+                    line: correctLine
+                });
+            }
+        });
+
+        const lineMap = {}; 
+        let firstMachine = null;
+        expanded.forEach(e => { 
+            const line = e.line || "미분류"; 
+            const m = (e.machine || "미상").trim();
+            if (!lineMap[line]) lineMap[line] = {}; 
+            if (!lineMap[line][m]) lineMap[line][m] = 0; 
+            lineMap[line][m]++; 
+            if (!firstMachine) firstMachine = m; 
+        });
+
+        cachedExpandedHistory = expanded;
+        cachedLineMap = lineMap;
+    }
+
+    const expandedList = cachedExpandedHistory || [];
+    const lineMap = cachedLineMap || {};
+
+    if (expandedList.length === 0) {
         chipsWrap.innerHTML = ""; 
         timelineWrap.innerHTML = ""; 
         emptyEl.classList.remove("hidden"); 
@@ -4654,31 +4755,14 @@ async function renderHistory() {
     }
     emptyEl.classList.add("hidden");
 
-    // 다중 호기 분개(Fan Out) 및 모델명 오분류 역추적, 라인 자동 교정 적용
-    const expandedList = [];
-    filtered.forEach(e => {
-        const targetMachines = typeof parseTargetMachines === "function" ? parseTargetMachines(e.machine, e.rawText) : [e.machine || "미상"];
-        for (const singleM of targetMachines) {
-            const correctLine = typeof getCorrectLineForMachine === "function" ? getCorrectLineForMachine(singleM, e.line) : (e.line || "미상");
-            expandedList.push({
-                ...e,
-                machine: singleM,
-                line: correctLine
-            });
-        }
-    });
-
-    // 라인별 설비 그룹화
-    const lineMap = {}; 
     let firstMachine = null;
-    expandedList.forEach(e => { 
-        const line = e.line || "미분류"; 
-        const m = (e.machine || "미상").trim();
-        if (!lineMap[line]) lineMap[line] = {}; 
-        if (!lineMap[line][m]) lineMap[line][m] = 0; 
-        lineMap[line][m]++; 
-        if (!firstMachine) firstMachine = m; 
-    });
+    for (let l in lineMap) {
+        for (let m in lineMap[l]) {
+            if (!firstMachine) firstMachine = m;
+            break;
+        }
+        if (firstMachine) break;
+    }
 
     let selectedLine = null; 
     let isSelectedValid = false; 
@@ -4697,7 +4781,7 @@ async function renderHistory() {
         } 
     }
 
-    // 칩 아코디언 렌더링 (8대 정규 라인 순서 우선 정렬)
+    // 3. 칩 아코디언 렌더링 (8대 정규 라인 순서 우선 정렬)
     const stdLines = ["P1D", "P1F", "P2D", "P2F", "P3D", "P3F", "P4D", "P4H"];
     chipsWrap.innerHTML = ""; 
     chipsWrap.className = "flex flex-col gap-2 p-4 w-full";
@@ -4736,12 +4820,13 @@ async function renderHistory() {
         mks.forEach(m => {
             const active = m === selectedChip; 
             const chip = document.createElement("button");
+            chip.setAttribute("data-machine", m);
             chip.className = `px-4 py-2 text-xs font-bold uppercase tracking-widest border transition-all flex items-center gap-2 rounded ${active ? "bg-primary text-white border-primary" : "bg-surface/50 text-text-muted border-border hover:border-primary hover:text-primary"}`;
             chip.innerHTML = `
                 <span class="material-symbols-outlined text-sm">precision_manufacturing</span> ${escapeHtml(m)} 
-                <span class="ml-1 ${active ? 'bg-surface text-primary' : 'bg-background text-text-muted'} text-[9px] font-black px-1.5 py-0.5 rounded">${ms[m]}</span>
+                <span class="ml-1 ${active ? 'bg-surface text-primary' : 'bg-background text-text-muted'} text-[9px] font-black px-1.5 py-0.5 rounded badge-count">${ms[m]}</span>
             `;
-            chip.onclick = () => { selectedChip = m; renderHistory(); }; 
+            chip.onclick = function() { selectHistoryEquipChip(m, this); }; 
             chipsContainer.appendChild(chip);
         });
         
@@ -4751,7 +4836,16 @@ async function renderHistory() {
         chipsWrap.appendChild(groupDiv);
     });
 
-    // 선택된 호기의 타임라인 렌더링 (메일상 기록된 작업일자 기준 정렬)
+    // 4. 타임라인 렌더링 호출
+    renderHistoryTimeline(sortOrder);
+}
+
+/** 🕒 선택된 호기의 타임라인 렌더링 (부분 렌더링 및 가상 렌더링 최적화) */
+function renderHistoryTimeline(sortOrder) {
+    const timelineWrap = document.getElementById("historyTimelineWrap");
+    if (!timelineWrap) return;
+
+    const expandedList = cachedExpandedHistory || [];
     const entries = expandedList.filter(e => (e.machine || "미상").trim() === selectedChip).sort((a, b) => { 
         const dateA = parseEntryDate(a.date, a.savedAt);
         const dateB = parseEntryDate(b.date, b.savedAt);
@@ -4769,10 +4863,10 @@ async function renderHistory() {
     wrap.innerHTML = `
         <div class="px-6 py-4 bg-background/50 border-b border-border flex justify-between items-center">
             <div>
-                <span class="text-sm font-black text-primary uppercase tracking-widest">${escapeHtml(selectedChip)}</span>
+                <span class="text-sm font-black text-primary uppercase tracking-widest">${escapeHtml(selectedChip || "")}</span>
                 <span class="ml-3 text-xs text-text-muted">총 ${entries.length}건 기록</span>
             </div>
-            <button class="btn-text hover:!text-red-600" onclick="deleteEquipHistory('${escapeHtml(selectedChip)}')">
+            <button class="btn-text hover:!text-red-600" onclick="deleteEquipHistory('${escapeHtml(selectedChip || "")}')">
                 <span class="material-symbols-outlined text-sm">delete</span> 삭제
             </button>
         </div>
@@ -4802,10 +4896,10 @@ async function renderHistory() {
     noteDiv.innerHTML = `
         <label class="label-base text-primary mb-2 flex items-center gap-1">
             <span class="material-symbols-outlined text-[16px]">edit_note</span>
-            [${escapeHtml(selectedChip)}] 특이사항 및 부품차용
+            [${escapeHtml(selectedChip || "")}] 특이사항 및 부품차용
             <button onclick="(function(btn){
-                    var rv=document.getElementById('noteReadView_${escapeHtml(selectedChip)}');
-                    var ea=document.getElementById('noteEditArea_${escapeHtml(selectedChip)}');
+                    var rv=document.getElementById('noteReadView_${escapeHtml(selectedChip || "")}');
+                    var ea=document.getElementById('noteEditArea_${escapeHtml(selectedChip || "")}');
                     var isEdit=!ea.classList.contains('hidden');
                     rv.classList.toggle('hidden');
                     ea.classList.toggle('hidden');
@@ -4815,12 +4909,12 @@ async function renderHistory() {
                 편집
             </button>
         </label>
-        <div id="noteReadView_${escapeHtml(selectedChip)}" class="mb-3 max-h-40 overflow-y-auto">
+        <div id="noteReadView_${escapeHtml(selectedChip || "")}" class="mb-3 max-h-40 overflow-y-auto">
             ${noteListHtml}
         </div>
-        <textarea class="input-base h-20 p-3 resize-y rounded hidden" id="noteEditArea_${escapeHtml(selectedChip)}"
-            placeholder="메모 입력\n\n새 항목은 기존 내용 아래에 이어서 작성하세요.\n예) -2026/06/11- [Laser 교체]\n상세 내용"
-            onchange="saveMachineNote('${escapeHtml(selectedChip)}', this.value)">${escapeHtml(noteContent)}</textarea>
+        <textarea class="input-base h-20 p-3 resize-y rounded hidden" id="noteEditArea_${escapeHtml(selectedChip || "")}"
+            placeholder="메모 입력\\n\\n새 항목은 기존 내용 아래에 이어서 작성하세요.\\n예) [Laser 교체]\\n상세 내용"
+            onchange="saveMachineNote('${escapeHtml(selectedChip || "")}', this.value)">${escapeHtml(noteContent)}</textarea>
     `;
     wrap.appendChild(noteDiv);
 
@@ -4836,7 +4930,9 @@ async function renderHistory() {
     renderItems.forEach((group, idx) => {
         const li = document.createElement("li"); 
         li.className = "timeline-item relative flex gap-5 pb-8"; 
-        li.style.animationDelay = `${idx * 50}ms`;
+        li.style.animationDelay = `${idx * 20}ms`;
+        li.style.contentVisibility = "auto";
+        li.style.containIntrinsicSize = "0 80px";
 
         if (!group.isThread) {
             const e = group.entries[0];
@@ -4990,6 +5086,7 @@ async function deleteEquipHistory(m) {
     });
     await putIDBHistory(h); 
     selectedChip = null; 
+    invalidateHistoryCache();
     await updateHistoryBadge(); 
     await renderHistory(); 
     autoMergeAndSave({ scope: 'history', yearMonths: Array.from(affectedMonths) }); 
@@ -5007,8 +5104,10 @@ async function deleteSingleHistory(id) {
         ym = item.yearMonth || getYearMonthFromDate(item.date, item.savedAt);
     }
     await putIDBHistory(h); 
+    invalidateHistoryCache();
     await updateHistoryBadge(); 
-    await renderHistory(); 
+    const sortOrder = document.getElementById("historySortOrder")?.value || "desc";
+    renderHistoryTimeline(sortOrder);
     autoMergeAndSave({ scope: 'history', yearMonths: ym ? [ym] : [] }); 
 }
 
@@ -5026,8 +5125,9 @@ async function clearAllHistory() {
         e.isDeleted = true; 
         e.updatedAt = Date.now(); 
     });
-    await putIDBHistory(h);
+    await putIDBHistory(h); 
     selectedChip = null; 
+    invalidateHistoryCache();
     await updateHistoryBadge(); 
     await renderHistory(); 
     autoMergeAndSave({ scope: 'history' }); 
@@ -5041,6 +5141,7 @@ async function resetAllData() {
     localStorage.setItem("machineNotes", "{}"); 
     localStorage.setItem("equipMaintenance", "{}"); 
     await putIDBHistory([]);
+    invalidateHistoryCache();
     renderTable(); 
     renderRecipientTable(); 
     await updateHistoryBadge(); 
