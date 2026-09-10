@@ -5457,6 +5457,7 @@ function renderHistoryTimeline(sortOrder) {
 /** 새 작업 이력 저장 */
 async function saveHistoryEntry(entry) { 
     let history = await getIDBHistory();
+    entry.date = typeof normalizeEntryDateStr === 'function' ? normalizeEntryDateStr(entry.date || entry.savedAt) : (entry.date || '');
     entry.id = Date.now() + "_" + Math.floor(Math.random() * 1000); 
     entry.updatedAt = Date.now();
     entry.yearMonth = getYearMonthFromDate(entry.date, entry.savedAt);
@@ -5467,7 +5468,29 @@ async function saveHistoryEntry(entry) {
         if (matched && matched.sn) entry.sn = matched.sn;
     }
     
-    if (history.some(e => !e.isDeleted && e.machine === entry.machine && e.date === entry.date && e.content === entry.content)) return; 
+    const normTitle = typeof normalizeHistoryWorkTitle === 'function' ? normalizeHistoryWorkTitle(entry.content) : (entry.content || '').trim().toLowerCase();
+    const raw = String(entry.rawText || '').replace(/\s+/g, ' ').trim();
+    
+    // 동일 설비 + 동일 날짜에서 제목이 유사하거나 본문이 일치하면 중복 저장 차단
+    const isDup = history.some(e => {
+        if (!e.isDeleted && e.machine === entry.machine) {
+            const eDate = typeof normalizeEntryDateStr === 'function' ? normalizeEntryDateStr(e.date || e.savedAt) : (e.date || '');
+            if (eDate !== entry.date) {
+                const eRaw = String(e.rawText || '').replace(/\s+/g, ' ').trim();
+                if (raw && eRaw && raw.length > 100 && raw === eRaw) return true;
+                return false;
+            }
+            
+            const eTitle = typeof normalizeHistoryWorkTitle === 'function' ? normalizeHistoryWorkTitle(e.content) : (e.content || '').trim().toLowerCase();
+            if (normTitle && eTitle && (normTitle === eTitle || normTitle.includes(eTitle) || eTitle.includes(normTitle))) return true;
+            const eRaw = String(e.rawText || '').replace(/\s+/g, ' ').trim();
+            if (raw && eRaw && (raw === eRaw || (raw.length > 40 && eRaw.length > 40 && (raw.includes(eRaw) || eRaw.includes(raw))))) return true;
+            if (e.date === entry.date && e.content === entry.content) return true;
+        }
+        return false;
+    });
+    
+    if (isDup) return;
     history.push(entry); 
     await putIDBHistory(history);
     await updateHistoryBadge(); 
