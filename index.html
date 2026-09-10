@@ -731,7 +731,10 @@
             <div class="flex items-center gap-4">
                 <div class="relative">
                     <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-base">search</span>
-                    <input id="historySearch" class="input-base pl-9 pr-4 py-2 w-64 h-9 rounded" placeholder="설비호기 / 작업내용 검색..." type="text" onkeyup="renderHistory()"/>
+                    <input id="historySearch" class="input-base pl-9 pr-8 py-2 w-64 h-9 rounded" placeholder="설비호기 / 작업내용 검색..." type="text" oninput="onHistorySearchInput(this.value)" onkeydown="if(event.key==='Enter') executeHistorySearch(this.value)"/>
+                    <button id="historySearchClearBtn" class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-primary" onclick="clearHistorySearch()" title="검색어 초기화">
+                        <span class="material-symbols-outlined text-sm">close</span>
+                    </button>
                 </div>
                 <select id="historySortOrder" class="input-base w-32 h-9 px-3 rounded" onchange="renderHistory()">
                     <option value="desc">최신순</option><option value="asc">오래된순</option>
@@ -746,18 +749,24 @@
             </div>
         </div>
 
-        <div class="card-base rounded-md">
+        <!-- 1. 기본 뷰: 설비 선택 칩 아코디언 -->
+        <div id="historyEquipCard" class="card-base rounded-md">
             <div class="px-6 py-3 bg-background border-b border-border rounded-t-md">
                 <span class="label-base !mb-0">설비 선택</span>
             </div>
             <div class="p-4 flex flex-wrap gap-2" id="historyEquipChips"></div>
         </div>
 
+        <!-- 2. 기본 뷰: 선택된 설비 타임라인 -->
         <div id="historyTimelineWrap" class="space-y-0"></div>
 
+        <!-- 3. 검색 전용 뷰: 검색 결과 목록 -->
+        <div id="historySearchResultsWrap" class="hidden space-y-4"></div>
+
+        <!-- 4. 빈 상태 안내 -->
         <div id="historyEmpty" class="hidden card-base p-16 text-center rounded-md">
             <span class="material-symbols-outlined text-5xl text-text-muted block mb-4">history</span>
-            <p class="label-base">작업 기록 없음</p>
+            <p id="historyEmptyText" class="label-base">작업 기록 없음</p>
         </div>
     </section>
 </main>
@@ -839,8 +848,20 @@ let selectedChip = null;                    // 작업 히스토리에서 현재 
  */
 function getYearMonthFromDate(dateStr, fallbackTimestamp) {
     if (dateStr) {
-        const clean = String(dateStr).trim().replace(/[^0-9]/g, '');
-        if (clean.length >= 6) {
+        const s = String(dateStr).trim();
+        const m4 = s.match(/(20\d{2})[./\-](\d{1,2})/);
+        if (m4) {
+            return `${m4[1]}-${m4[2].padStart(2, '0')}`;
+        }
+        const m2 = s.match(/(?:^|[^\d])(2[4-7])[./\-](\d{1,2})/);
+        if (m2) {
+            return `20${m2[1]}-${m2[2].padStart(2, '0')}`;
+        }
+        const clean = s.replace(/[^0-9]/g, '');
+        if (clean.length === 6 && (clean.startsWith('24') || clean.startsWith('25') || clean.startsWith('26') || clean.startsWith('27'))) {
+            return `20${clean.substring(0, 2)}-${clean.substring(2, 4)}`;
+        }
+        if (clean.length >= 6 && clean.startsWith('20')) {
             return `${clean.substring(0, 4)}-${clean.substring(4, 6)}`;
         }
     }
@@ -1146,6 +1167,20 @@ function getTeamEditorName() {
 }
 
 /**
+ * 🛡️ 작업 이력 제목 정규화 헬퍼 (동일 작업 판별용: 괄호, 호기 접두사, '작업' 접미사, 공백/기호 정규화)
+ */
+function normalizeHistoryWorkTitle(title) {
+    if (!title) return "";
+    let t = String(title).trim().toLowerCase();
+    t = t.replace(/\(.*?\)/g, "").replace(/\[.*?\]/g, "");
+    t = t.replace(/^(?:is\d+[a-z]*|mdi[a-z0-9]*)\s+/i, "");
+    t = t.replace(/[a-z0-9]+호기\s*/g, "");
+    t = t.replace(/작업\s*(의\s*건)?$/g, "").trim();
+    t = t.replace(/&/g, "및").replace(/\s+/g, "");
+    return t;
+}
+
+/**
  * 작업 이력 배열 병합 (중복 제거 및 최신 수정 우선)
  */
 function mergeHistory(boxHistory, localHistory) {
@@ -1153,6 +1188,7 @@ function mergeHistory(boxHistory, localHistory) {
     const getLegacyId = (item) => "LEGACY_" + item.date + "_" + item.machine + "_" + (item.content || "").substring(0, 10);
     
     [...(boxHistory || []), ...(localHistory || [])].forEach(item => {
+        if (!item) return;
         const copy = { ...item }; 
         if (!copy.id) copy.id = getLegacyId(copy);
         if (!copy.yearMonth) copy.yearMonth = getYearMonthFromDate(copy.date, copy.savedAt);
@@ -1163,19 +1199,35 @@ function mergeHistory(boxHistory, localHistory) {
         }
     });
 
-    const seen = new Set();
-    return Array.from(map.values())
-        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-        .filter(item => {
-            const cleanMachine = (item.machine || '').trim().toUpperCase();
-            const cleanDate = (item.date || '').replace(/[^0-9]/g, '');
-            const cleanContent = (item.content || '').trim().replace(/\s/g, '');
-            const key = `${cleanMachine}|${cleanDate}|${cleanContent}`;
-            
-            if (seen.has(key)) return false; 
-            seen.add(key); 
-            return true;
-        });
+    const seenKeys = new Set();
+    const result = [];
+    
+    // 원문(rawText)이 더 길고 상세한 것 우선, 이후 최신 수정일 기준 정렬
+    const sorted = Array.from(map.values()).sort((a, b) => {
+        const rawDiff = (String(b.rawText || '').length) - (String(a.rawText || '').length);
+        if (rawDiff !== 0) return rawDiff;
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+    });
+
+    sorted.forEach(item => {
+        const cleanMachine = (item.machine || '').trim().toUpperCase();
+        const cleanDate = (item.date || '').replace(/[^0-9]/g, '');
+        const normTitle = normalizeHistoryWorkTitle(item.content || '');
+        
+        let normDate = cleanDate;
+        if (normDate.length === 6 && (normDate.startsWith('24') || normDate.startsWith('25') || normDate.startsWith('26') || normDate.startsWith('27'))) {
+            normDate = '20' + normDate;
+        }
+
+        const key = `${cleanMachine}|${normDate}|${normTitle}`;
+        if (cleanMachine && cleanMachine !== '미상' && normDate && normTitle) {
+            if (seenKeys.has(key)) return;
+            seenKeys.add(key);
+        }
+        result.push(item);
+    });
+
+    return result.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
 /**
@@ -1538,16 +1590,20 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
             if (items.length > 0) {
                 const ymKey = fname.replace('.json', '');
                 items.forEach((it, idx) => {
-                    if (!it.id || it.id.includes("undefined")) {
-                        it.id = `${Date.now()}_${idx}_${Math.floor(Math.random() * 1000)}`;
-                    }
                     if (!it.yearMonth) {
                         it.yearMonth = getYearMonthFromDate(it.date, it.savedAt) || ymKey;
                     }
+                    if (!it.id || it.id.includes("undefined")) {
+                        const m = (it.machine || "미상").trim();
+                        const d = (it.date || "").replace(/[^0-9]/g, "");
+                        const c = (it.content || "").substring(0, 15).trim();
+                        it.id = `LEGACY_${d}_${m}_${c}_${idx}`;
+                    }
                 });
+                const cleanItems = mergeHistory(items, []);
                 try {
-                    await upsertIDBHistoryItems(items);
-                    totalImportedThisTurn += items.length;
+                    await upsertIDBHistoryItems(cleanItems);
+                    totalImportedThisTurn += cleanItems.length;
                 } catch (err) {
                     console.warn(`[이력 저장 건너뜀] ${fname} 파싱 저장 중 경고:`, err);
                 }
@@ -4506,6 +4562,9 @@ function closeSidebar() {
     document.getElementById('sidebar-overlay').style.display = 'none'; 
 }
 function switchTab(t, e) { 
+    if (t !== 'history' && typeof cancelPendingHistorySearch === 'function') {
+        cancelPendingHistorySearch();
+    }
     document.querySelectorAll('.tab-content').forEach(s => { 
         s.classList.remove('block'); 
         s.classList.add('hidden'); 
@@ -4618,12 +4677,46 @@ function toggleHistoryThreadMode() {
  * @param {Array} entries 정렬된 이력 객체 배열
  * @returns {Array} 그룹화된 이력 객체 배열 [{ isThread, title, entries, count }]
  */
+/**
+ * 정렬된 작업 이력 목록에서 동일 날짜 중복 작업을 단일화하고, 인접한 동일 제목(Setup, Upgrade 등)을 쓰레드로 그룹화
+ * @param {Array} entries 정렬된 이력 객체 배열
+ * @returns {Array} 그룹화된 이력 객체 배열 [{ isThread, title, entries, count }]
+ */
 function groupEntriesByThread(entries) {
     if (!entries || entries.length === 0) return [];
+
+    // 1단계: 동일 날짜 내의 실질적 중복 작업(동일 제목/내용)을 단일 최신 엔트리로 우선 정제
+    const sameDateMap = new Map();
+    const cleanEntries = [];
+
+    entries.forEach(e => {
+        const title = (typeof getDisplayContent === "function" ? getDisplayContent(e) : (e.content || "")).trim();
+        const normTitle = typeof normalizeHistoryWorkTitle === "function" 
+            ? normalizeHistoryWorkTitle(title) 
+            : title.toLowerCase().replace(/\s+/g, "");
+        const d = (e.date || "").replace(/[^0-9]/g, "");
+        const key = `${d}|${normTitle}`;
+
+        if (d && normTitle && normTitle !== "—" && normTitle !== "미상") {
+            if (sameDateMap.has(key)) {
+                const existing = sameDateMap.get(key);
+                if (String(e.rawText || "").length > String(existing.rawText || "").length) {
+                    sameDateMap.set(key, e);
+                    const idx = cleanEntries.indexOf(existing);
+                    if (idx !== -1) cleanEntries[idx] = e;
+                }
+                return;
+            }
+            sameDateMap.set(key, e);
+        }
+        cleanEntries.push(e);
+    });
+
+    // 2단계: 서로 다른 일자의 인접한 동일 작업명들을 쓰레드로 그룹화
     const groups = [];
     let currentGroup = null;
 
-    entries.forEach(e => {
+    cleanEntries.forEach(e => {
         const title = (typeof getDisplayContent === "function" ? getDisplayContent(e) : (e.content || "")).trim();
         const normKey = title.toLowerCase().replace(/\s+/g, " ");
 
@@ -4651,8 +4744,9 @@ function groupEntriesByThread(entries) {
 let cachedRawHistory = null;
 let cachedExpandedHistory = null;
 let cachedLineMap = null;
-let cachedSearchVal = null;
 let isHistoryCacheDirty = true;
+let historySearchDebounceTimer = null;
+let currentSearchToken = 0;
 
 /** ⚡ 이력 캐시 무효화 함수 */
 function invalidateHistoryCache() {
@@ -4660,7 +4754,58 @@ function invalidateHistoryCache() {
     cachedRawHistory = null;
     cachedExpandedHistory = null;
     cachedLineMap = null;
-    cachedSearchVal = null;
+}
+
+/** 🔍 검색창 디바운스 입력 핸들러 (300ms 비차단) */
+function onHistorySearchInput(val) {
+    const clearBtn = document.getElementById("historySearchClearBtn");
+    if (clearBtn) {
+        if (val && val.trim()) clearBtn.classList.remove("hidden");
+        else clearBtn.classList.add("hidden");
+    }
+    if (historySearchDebounceTimer) clearTimeout(historySearchDebounceTimer);
+    historySearchDebounceTimer = setTimeout(() => {
+        renderHistory();
+    }, 300);
+}
+
+/** 🔍 Enter 키 즉시 검색 */
+function executeHistorySearch(val) {
+    if (historySearchDebounceTimer) clearTimeout(historySearchDebounceTimer);
+    renderHistory();
+}
+
+/** 🔍 검색어 초기화 및 기본 뷰 복귀 */
+function clearHistorySearch() {
+    const inp = document.getElementById("historySearch");
+    if (inp) inp.value = "";
+    const clearBtn = document.getElementById("historySearchClearBtn");
+    if (clearBtn) clearBtn.classList.add("hidden");
+    renderHistory();
+}
+
+/** 🛑 진행 중인 비동기 검색 취소 (다른 탭 클릭 시 즉시 탭 전환 보장) */
+function cancelPendingHistorySearch() {
+    if (historySearchDebounceTimer) {
+        clearTimeout(historySearchDebounceTimer);
+        historySearchDebounceTimer = null;
+    }
+    currentSearchToken++;
+}
+
+/** 🎯 검색 결과 카드에서 해당 설비의 전체 타임라인으로 바로 점프 */
+function jumpToEquipTimeline(machineName) {
+    clearHistorySearch();
+    selectedChip = machineName;
+    renderHistory();
+    setTimeout(() => {
+        const chipsWrap = document.getElementById("historyEquipChips");
+        const targetChip = chipsWrap?.querySelector(`button[data-machine="${machineName}"]`);
+        if (targetChip) {
+            selectHistoryEquipChip(machineName, targetChip);
+            targetChip.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }, 60);
 }
 
 /** ⚡ 설비 칩 초고속 즉각 전환 (DOM 재생성 없이 타임라인만 부분 렌더링) */
@@ -4681,43 +4826,196 @@ function selectHistoryEquipChip(machineName, targetChipEl) {
     renderHistoryTimeline(sortOrder);
 }
 
-/** 🕒 작업 히스토리 타임라인 및 설비 칩 아코디언 렌더링 (메모리 캐싱 탑재) */
-async function renderHistory() {
-    const searchVal = (document.getElementById("historySearch")?.value || "").toLowerCase();
-    const sortOrder = document.getElementById("historySortOrder")?.value || "desc";
-    const chipsWrap = document.getElementById("historyEquipChips");
-    const timelineWrap = document.getElementById("historyTimelineWrap");
+/** ⚡ 검색 인덱스 키 사전 생성 (한 번만 계산하여 메모리에 보관) */
+function prepareHistorySearchKeys(raw) {
+    if (!raw) return [];
+    return raw.filter(e => !e.isDeleted).map(e => {
+        if (!e._searchKey) {
+            const disp = typeof getDisplayContent === "function" ? getDisplayContent(e) : (e.content || "");
+            const rawHead = (e.rawText || "").substring(0, 400).replace(/\s+/g, " ");
+            e._searchKey = `${e.machine || ""} ${e.line || ""} ${e.date || ""} ${e.worker || ""} ${e.content || ""} ${disp} ${rawHead}`.toLowerCase();
+        }
+        return e;
+    });
+}
+
+/** 📋 검색 전용 결과 뷰 렌더링 (대용량 비차단 전용 뷰) */
+function renderSearchResults(searchVal, sortOrder) {
+    const searchWrap = document.getElementById("historySearchResultsWrap");
     const emptyEl = document.getElementById("historyEmpty");
-    
+    const emptyText = document.getElementById("historyEmptyText");
+    if (!searchWrap) return;
+
+    searchWrap.innerHTML = "";
+    const raw = cachedRawHistory || [];
+    prepareHistorySearchKeys(raw);
+
+    const query = searchVal.trim().toLowerCase();
+    const queryTokens = query.split(/\s+/).filter(t => t.length > 0);
+
+    const matched = raw.filter(e => {
+        if (e.isDeleted) return false;
+        const key = e._searchKey || "";
+        return queryTokens.every(token => key.includes(token));
+    });
+
+    if (matched.length === 0) {
+        searchWrap.classList.add("hidden");
+        if (emptyEl) {
+            emptyEl.classList.remove("hidden");
+            if (emptyText) emptyText.textContent = `"${searchVal}" 검색어와 일치하는 작업 이력이 없습니다.`;
+        }
+        return;
+    }
+
+    if (emptyEl) emptyEl.classList.add("hidden");
+    searchWrap.classList.remove("hidden");
+
+    matched.sort((a, b) => {
+        const dateA = parseEntryDate(a.date, a.savedAt);
+        const dateB = parseEntryDate(b.date, b.savedAt);
+        if (dateA !== dateB) {
+            return sortOrder === "desc" ? dateB.localeCompare(dateA) : dateA.localeCompare(dateB);
+        }
+        const sa = new Date(a.savedAt || a.updatedAt || 0).getTime();
+        const sb = new Date(b.savedAt || b.updatedAt || 0).getTime();
+        return sortOrder === "desc" ? sb - sa : sa - sb;
+    });
+
+    const headerCard = document.createElement("div");
+    headerCard.className = "card-base p-4 rounded-md flex justify-between items-center bg-background/50 border border-border flex-wrap gap-2";
+    headerCard.innerHTML = `
+        <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-primary text-xl">manage_search</span>
+            <span class="text-sm font-bold text-text-main">
+                검색 결과 <span class="text-primary font-black">${matched.length}건</span>
+                <span class="text-xs text-text-muted ml-1 font-normal">(검색어: "${escapeHtml(searchVal)}")</span>
+            </span>
+        </div>
+        <button onclick="clearHistorySearch()" class="btn-text h-8 px-3 border border-border bg-surface hover:border-primary hover:text-primary rounded text-xs font-bold flex items-center gap-1">
+            <span class="material-symbols-outlined text-sm">arrow_back</span> 전체 설비 목록으로 복귀
+        </button>
+    `;
+    searchWrap.appendChild(headerCard);
+
+    const listWrap = document.createElement("div");
+    listWrap.className = "flex flex-col gap-3";
+
+    const DISPLAY_LIMIT = 100;
+    const displayItems = matched.slice(0, DISPLAY_LIMIT);
+
+    displayItems.forEach((e) => {
+        const card = document.createElement("div");
+        card.className = "card-base p-5 rounded-md border border-border hover:border-primary/50 transition-all shadow-sm";
+        card.style.contentVisibility = "auto";
+        card.style.containIntrinsicSize = "0 100px";
+
+        const dispTitle = typeof getDisplayContent === "function" ? getDisplayContent(e) : (e.content || "—");
+        const dateStr = e.date || (e.savedAt ? e.savedAt.substring(0, 10) : "날짜 미상");
+        const lineStr = e.line || "미분류";
+        const machineStr = e.machine || "미상";
+        const workerStr = e.worker || "미상";
+
+        card.innerHTML = `
+            <div class="flex justify-between items-start flex-wrap gap-2 mb-2">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="bg-primary text-white text-xs font-black px-2.5 py-1 rounded cursor-pointer hover:opacity-90" onclick="jumpToEquipTimeline('${escapeHtml(machineStr)}')" title="해당 설비 타임라인으로 이동">
+                        ${escapeHtml(machineStr)}
+                    </span>
+                    <span class="bg-surface border border-border text-text-muted text-[11px] font-bold px-2 py-0.5 rounded">
+                        ${escapeHtml(lineStr)}
+                    </span>
+                    <span class="text-xs font-bold text-text-main flex items-center gap-1">
+                        <span class="material-symbols-outlined text-sm text-text-muted">calendar_today</span>
+                        ${escapeHtml(dateStr)}
+                    </span>
+                    <span class="text-xs text-text-muted flex items-center gap-1">
+                        <span class="material-symbols-outlined text-sm">person</span>
+                        ${escapeHtml(workerStr)}
+                    </span>
+                </div>
+                <div class="flex items-center gap-2 ml-auto">
+                    <button class="btn-text text-xs text-primary hover:underline flex items-center gap-1 font-bold" onclick="jumpToEquipTimeline('${escapeHtml(machineStr)}')">
+                        <span class="material-symbols-outlined text-sm">timeline</span> 설비 타임라인
+                    </button>
+                    ${typeof handleMailGenClick === "function" ? `
+                    <button class="btn-text text-xs text-text-muted hover:text-primary flex items-center gap-1" onclick="handleMailGenClick('${escapeHtml(e.id || '')}')">
+                        <span class="material-symbols-outlined text-sm">forward_to_inbox</span> 메일
+                    </button>` : ''}
+                </div>
+            </div>
+            <div class="text-sm font-bold text-text-main mt-1 cursor-pointer hover:text-primary transition-colors flex items-center justify-between"
+                 onclick="this.nextElementSibling.classList.toggle('hidden')">
+                <span>${escapeHtml(dispTitle)}</span>
+                <span class="material-symbols-outlined text-base text-text-muted">expand_more</span>
+            </div>
+            <div class="hidden mt-3 p-3 bg-background/50 border border-border/50 rounded text-xs text-text-muted whitespace-pre-wrap max-h-48 overflow-y-auto font-mono">
+                ${escapeHtml(e.rawText || e.content || "상세 원문 내용이 없습니다.")}
+            </div>
+        `;
+        listWrap.appendChild(card);
+    });
+
+    searchWrap.appendChild(listWrap);
+
+    if (matched.length > DISPLAY_LIMIT) {
+        const moreNotice = document.createElement("div");
+        moreNotice.className = "p-4 text-center text-xs text-text-muted bg-background/30 rounded border border-border/50";
+        moreNotice.textContent = `검색 결과 중 상위 ${DISPLAY_LIMIT}건이 표시되었습니다. 더 상세한 검색어를 입력하시면 더욱 신속하게 확인하실 수 있습니다.`;
+        searchWrap.appendChild(moreNotice);
+    }
+}
+
+/** 🕒 작업 히스토리 타임라인 및 설비 칩 아코디언 렌더링 (메모리 캐싱 및 검색 전용 뷰 분기 탑재) */
+async function renderHistory() {
+    const searchVal = (document.getElementById("historySearch")?.value || "").trim();
+    const sortOrder = document.getElementById("historySortOrder")?.value || "desc";
+    const equipCard = document.getElementById("historyEquipCard");
+    const timelineWrap = document.getElementById("historyTimelineWrap");
+    const searchWrap = document.getElementById("historySearchResultsWrap");
+    const emptyEl = document.getElementById("historyEmpty");
+    const emptyText = document.getElementById("historyEmptyText");
+    const chipsWrap = document.getElementById("historyEquipChips");
+
     // 1. IndexedDB 캐시 검증
     if (isHistoryCacheDirty || !cachedRawHistory) {
         cachedRawHistory = await getIDBHistory();
+        prepareHistorySearchKeys(cachedRawHistory);
         isHistoryCacheDirty = false;
         cachedExpandedHistory = null;
     }
 
-    // 2. 검색어 변경 또는 파싱 캐시 부재 시 재파싱
-    if (!cachedExpandedHistory || cachedSearchVal !== searchVal) {
-        cachedSearchVal = searchVal;
+    // 2. 검색어가 존재하는 경우: 검색 전용 결과 뷰 활성화
+    if (searchVal) {
+        if (equipCard) equipCard.classList.add("hidden");
+        if (timelineWrap) timelineWrap.classList.add("hidden");
+        renderSearchResults(searchVal, sortOrder);
+        return;
+    }
+
+    // 3. 검색어가 없는 경우: 기본 설비 칩 및 타임라인 뷰 복원
+    if (searchWrap) searchWrap.classList.add("hidden");
+    if (equipCard) equipCard.classList.remove("hidden");
+    if (timelineWrap) timelineWrap.classList.remove("hidden");
+    if (emptyEl) emptyEl.classList.add("hidden");
+
+    // 파싱 캐시 부재 시 확장 데이터 생성
+    if (!cachedExpandedHistory) {
         const raw = cachedRawHistory || [];
-        const filtered = raw.filter(e => !e.isDeleted && (
-            String(e.machine || "").toLowerCase().includes(searchVal) || 
-            String(e.content || "").toLowerCase().includes(searchVal) || 
-            String(getDisplayContent(e)).toLowerCase().includes(searchVal) || 
-            String(e.worker || "").toLowerCase().includes(searchVal) || 
-            String(e.rawText || "").toLowerCase().includes(searchVal)
-        ));
+        const valid = raw.filter(e => !e.isDeleted);
         
-        if (filtered.length === 0) { 
-            chipsWrap.innerHTML = ""; 
-            timelineWrap.innerHTML = ""; 
-            emptyEl.classList.remove("hidden"); 
-            return; 
+        if (valid.length === 0) {
+            if (equipCard) equipCard.classList.add("hidden");
+            if (timelineWrap) timelineWrap.classList.add("hidden");
+            if (emptyEl) {
+                emptyEl.classList.remove("hidden");
+                if (emptyText) emptyText.textContent = "등록된 작업 기록이 없습니다.";
+            }
+            return;
         }
-        emptyEl.classList.add("hidden");
 
         const expanded = [];
-        filtered.forEach(e => {
+        valid.forEach(e => {
             const targetMachines = typeof parseTargetMachines === "function" ? parseTargetMachines(e.machine, e.rawText) : [e.machine || "미상"];
             for (const singleM of targetMachines) {
                 const correctLine = typeof getCorrectLineForMachine === "function" ? getCorrectLineForMachine(singleM, e.line) : (e.line || "미상");
@@ -4747,14 +5045,6 @@ async function renderHistory() {
     const expandedList = cachedExpandedHistory || [];
     const lineMap = cachedLineMap || {};
 
-    if (expandedList.length === 0) {
-        chipsWrap.innerHTML = ""; 
-        timelineWrap.innerHTML = ""; 
-        emptyEl.classList.remove("hidden"); 
-        return; 
-    }
-    emptyEl.classList.add("hidden");
-
     let firstMachine = null;
     for (let l in lineMap) {
         for (let m in lineMap[l]) {
@@ -4781,62 +5071,63 @@ async function renderHistory() {
         } 
     }
 
-    // 3. 칩 아코디언 렌더링 (8대 정규 라인 순서 우선 정렬)
-    const stdLines = ["P1D", "P1F", "P2D", "P2F", "P3D", "P3F", "P4D", "P4H"];
-    chipsWrap.innerHTML = ""; 
-    chipsWrap.className = "flex flex-col gap-2 p-4 w-full";
-    Object.keys(lineMap).sort((a, b) => {
-        const idxA = stdLines.indexOf(a);
-        const idxB = stdLines.indexOf(b);
-        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-        if (idxA !== -1) return -1;
-        if (idxB !== -1) return 1;
-        return a.localeCompare(b);
-    }).forEach(line => {
-        const ms = lineMap[line];
-        const mks = Object.keys(ms).sort();
-        const isOpen = line === selectedLine;
+    // 칩 아코디언 렌더링 (초기 1회 또는 비어있을 때만)
+    if (chipsWrap && (!chipsWrap.hasChildNodes() || chipsWrap.innerHTML === "")) {
+        const stdLines = ["P1D", "P1F", "P2D", "P2F", "P3D", "P3F", "P4D", "P4H"];
+        chipsWrap.innerHTML = ""; 
+        chipsWrap.className = "flex flex-col gap-2 p-4 w-full";
+        Object.keys(lineMap).sort((a, b) => {
+            const idxA = stdLines.indexOf(a);
+            const idxB = stdLines.indexOf(b);
+            if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+            if (idxA !== -1) return -1;
+            if (idxB !== -1) return 1;
+            return a.localeCompare(b);
+        }).forEach(line => {
+            const ms = lineMap[line];
+            const mks = Object.keys(ms).sort();
+            const isOpen = line === selectedLine;
 
-        const groupDiv = document.createElement("div"); 
-        groupDiv.className = `border border-border/50 rounded overflow-hidden transition-colors ${isOpen ? 'accordion-open' : ''}`;
-        
-        const headerBtn = document.createElement("button"); 
-        headerBtn.className = "w-full px-4 py-3 bg-background/50 flex justify-between items-center hover:opacity-80 text-left";
-        headerBtn.onclick = function() { this.parentElement.classList.toggle('accordion-open'); };
-        headerBtn.innerHTML = `
-            <span class="label-base text-text-main !mb-0 flex items-center gap-2">
-                <span class="material-symbols-outlined text-base text-primary">factory</span> ${escapeHtml(line)} 
-                <span class="bg-primary text-white text-[9px] px-1.5 py-0.5 rounded">${mks.reduce((sum, m) => sum + ms[m], 0)}건</span>
-            </span>
-            <span class="material-symbols-outlined accordion-rotate text-text-main">expand_more</span>
-        `;
-        
-        const contentDiv = document.createElement("div"); 
-        contentDiv.className = "accordion-content bg-surface/50";
-        
-        const chipsContainer = document.createElement("div"); 
-        chipsContainer.className = "p-4 flex flex-wrap gap-2 border-t border-border/50";
-        
-        mks.forEach(m => {
-            const active = m === selectedChip; 
-            const chip = document.createElement("button");
-            chip.setAttribute("data-machine", m);
-            chip.className = `px-4 py-2 text-xs font-bold uppercase tracking-widest border transition-all flex items-center gap-2 rounded ${active ? "bg-primary text-white border-primary" : "bg-surface/50 text-text-muted border-border hover:border-primary hover:text-primary"}`;
-            chip.innerHTML = `
-                <span class="material-symbols-outlined text-sm">precision_manufacturing</span> ${escapeHtml(m)} 
-                <span class="ml-1 ${active ? 'bg-surface text-primary' : 'bg-background text-text-muted'} text-[9px] font-black px-1.5 py-0.5 rounded badge-count">${ms[m]}</span>
+            const groupDiv = document.createElement("div"); 
+            groupDiv.className = `border border-border/50 rounded overflow-hidden transition-colors ${isOpen ? 'accordion-open' : ''}`;
+            
+            const headerBtn = document.createElement("button"); 
+            headerBtn.className = "w-full px-4 py-3 bg-background/50 flex justify-between items-center hover:opacity-80 text-left";
+            headerBtn.onclick = function() { this.parentElement.classList.toggle('accordion-open'); };
+            headerBtn.innerHTML = `
+                <span class="label-base text-text-main !mb-0 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-base text-primary">factory</span> ${escapeHtml(line)} 
+                    <span class="bg-primary text-white text-[9px] px-1.5 py-0.5 rounded">${mks.reduce((sum, m) => sum + ms[m], 0)}건</span>
+                </span>
+                <span class="material-symbols-outlined accordion-rotate text-text-main">expand_more</span>
             `;
-            chip.onclick = function() { selectHistoryEquipChip(m, this); }; 
-            chipsContainer.appendChild(chip);
+            
+            const contentDiv = document.createElement("div"); 
+            contentDiv.className = "accordion-content bg-surface/50";
+            
+            const chipsContainer = document.createElement("div"); 
+            chipsContainer.className = "p-4 flex flex-wrap gap-2 border-t border-border/50";
+            
+            mks.forEach(m => {
+                const active = m === selectedChip; 
+                const chip = document.createElement("button");
+                chip.setAttribute("data-machine", m);
+                chip.className = `px-4 py-2 text-xs font-bold uppercase tracking-widest border transition-all flex items-center gap-2 rounded ${active ? "bg-primary text-white border-primary" : "bg-surface/50 text-text-muted border-border hover:border-primary hover:text-primary"}`;
+                chip.innerHTML = `
+                    <span class="material-symbols-outlined text-sm">precision_manufacturing</span> ${escapeHtml(m)} 
+                    <span class="ml-1 ${active ? 'bg-surface text-primary' : 'bg-background text-text-muted'} text-[9px] font-black px-1.5 py-0.5 rounded badge-count">${ms[m]}</span>
+                `;
+                chip.onclick = function() { selectHistoryEquipChip(m, this); }; 
+                chipsContainer.appendChild(chip);
+            });
+            
+            contentDiv.appendChild(chipsContainer); 
+            groupDiv.appendChild(headerBtn); 
+            groupDiv.appendChild(contentDiv); 
+            chipsWrap.appendChild(groupDiv);
         });
-        
-        contentDiv.appendChild(chipsContainer); 
-        groupDiv.appendChild(headerBtn); 
-        groupDiv.appendChild(contentDiv); 
-        chipsWrap.appendChild(groupDiv);
-    });
+    }
 
-    // 4. 타임라인 렌더링 호출
     renderHistoryTimeline(sortOrder);
 }
 
