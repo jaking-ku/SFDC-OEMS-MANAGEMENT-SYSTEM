@@ -1167,7 +1167,39 @@ function getTeamEditorName() {
 }
 
 /**
- * 🛡️ 작업 이력 제목 정규화 헬퍼 (동일 작업 판별용: 괄호, 호기 접두사, '작업' 접미사, 공백/기호 정규화)
+ * 🛡️ 날짜 문자열 정규화 헬퍼 (2자리 연도, 요일, 구분자 등을 YYYY/MM/DD로 통일)
+ */
+function normalizeEntryDateStr(dateStr) {
+    if (!dateStr) return "";
+    const s = String(dateStr).trim();
+    const digits = s.replace(/[^0-9]/g, '');
+    let normDigits = digits;
+    if (digits.length === 6 && (digits.startsWith('24') || digits.startsWith('25') || digits.startsWith('26') || digits.startsWith('27'))) {
+        normDigits = '20' + digits;
+    }
+    if (normDigits.length >= 8) {
+        return `${normDigits.substring(0, 4)}/${normDigits.substring(4, 6)}/${normDigits.substring(6, 8)}`;
+    }
+    return s;
+}
+
+/**
+ * 🛡️ 날짜 문자열을 일수 정수값으로 변환 (날짜 간격 계산용)
+ */
+function parseDateToDays(dateStr) {
+    const norm = normalizeEntryDateStr(dateStr);
+    const m = norm.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+    if (m) {
+        const y = parseInt(m[1], 10);
+        const mon = parseInt(m[2], 10) - 1;
+        const d = parseInt(m[3], 10);
+        return Math.floor(Date.UTC(y, mon, d) / 86400000);
+    }
+    return 0;
+}
+
+/**
+ * 🛡️ 작업 이력 제목 정규화 헬퍼 (동일 작업 판별용: 괄호, 모델명, 호기 접두사, '작업' 접미사, 공백/기호 정규화)
  */
 function normalizeHistoryWorkTitle(title) {
     if (!title) return "";
@@ -1181,15 +1213,16 @@ function normalizeHistoryWorkTitle(title) {
 }
 
 /**
- * 작업 이력 배열 병합 (중복 제거 및 최신 수정 우선)
+ * 작업 이력 배열 병합 (중복 제거, 날짜 정규화 및 2일 이내 연속 동일 작업 단일화)
  */
 function mergeHistory(boxHistory, localHistory) {
     const map = new Map();
-    const getLegacyId = (item) => "LEGACY_" + item.date + "_" + item.machine + "_" + (item.content || "").substring(0, 10);
+    const getLegacyId = (item) => "LEGACY_" + (item.date || '') + "_" + (item.machine || '') + "_" + (item.content || "").substring(0, 10);
     
     [...(boxHistory || []), ...(localHistory || [])].forEach(item => {
         if (!item) return;
         const copy = { ...item }; 
+        copy.date = normalizeEntryDateStr(copy.date || copy.savedAt);
         if (!copy.id) copy.id = getLegacyId(copy);
         if (!copy.yearMonth) copy.yearMonth = getYearMonthFromDate(copy.date, copy.savedAt);
         
@@ -1199,35 +1232,82 @@ function mergeHistory(boxHistory, localHistory) {
         }
     });
 
-    const seenKeys = new Set();
-    const result = [];
-    
-    // 원문(rawText)이 더 길고 상세한 것 우선, 이후 최신 수정일 기준 정렬
-    const sorted = Array.from(map.values()).sort((a, b) => {
+    const entries = Array.from(map.values()).sort((a, b) => {
         const rawDiff = (String(b.rawText || '').length) - (String(a.rawText || '').length);
         if (rawDiff !== 0) return rawDiff;
         return (b.updatedAt || 0) - (a.updatedAt || 0);
     });
 
-    sorted.forEach(item => {
-        const cleanMachine = (item.machine || '').trim().toUpperCase();
-        const cleanDate = (item.date || '').replace(/[^0-9]/g, '');
-        const normTitle = normalizeHistoryWorkTitle(item.content || '');
-        
-        let normDate = cleanDate;
-        if (normDate.length === 6 && (normDate.startsWith('24') || normDate.startsWith('25') || normDate.startsWith('26') || normDate.startsWith('27'))) {
-            normDate = '20' + normDate;
+    const result = [];
+    const mergedClusterIds = new Set();
+
+    for (let i = 0; i < entries.length; i++) {
+        const item = entries[i];
+        if (mergedClusterIds.has(item.id)) continue;
+
+        const m = String(item.machine || '').trim().toUpperCase();
+        const t = normalizeHistoryWorkTitle(item.content || '');
+        const dDays = parseDateToDays(item.date);
+        const raw = String(item.rawText || '').replace(/\s+/g, ' ').trim();
+
+        // item과 병합될 클러스터 찾기
+        for (let j = i + 1; j < entries.length; j++) {
+            const other = entries[j];
+            if (mergedClusterIds.has(other.id)) continue;
+
+            const otherM = String(other.machine || '').trim().toUpperCase();
+            if (m && otherM && m === otherM) {
+                const otherT = normalizeHistoryWorkTitle(other.content || '');
+                const otherDDays = parseDateToDays(other.date);
+                const otherRaw = String(other.rawText || '').replace(/\s+/g, ' ').trim();
+
+                let shouldMerge = false;
+                // 조건 1: 원문(rawText) 일치 또는 포함
+                if (raw && otherRaw && (raw === otherRaw || (raw.length > 40 && otherRaw.length > 40 && (raw.includes(otherRaw) || otherRaw.includes(raw))))) {
+                    shouldMerge = true;
+                }
+                // 조건 2: 작업명이 동일/유사하고 날짜 간격이 2일 이내 (예: 연속된 New hand 교체, 정기 PM 등)
+                if (t && otherT) {
+                    const isTitleMatch = (t === otherT) || t.includes(otherT) || otherT.includes(t) || (t.includes('pm') && otherT.includes('pm'));
+                    if (isTitleMatch && Math.abs(dDays - otherDDays) <= 2) {
+                        shouldMerge = true;
+                    }
+                }
+
+                if (shouldMerge) {
+                    mergedClusterIds.add(other.id);
+                }
+            }
         }
 
-        const key = `${cleanMachine}|${normDate}|${normTitle}`;
-        if (cleanMachine && cleanMachine !== '미상' && normDate && normTitle) {
-            if (seenKeys.has(key)) return;
-            seenKeys.add(key);
-        }
         result.push(item);
-    });
+    }
 
     return result.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+/**
+ * ⚡ [자가 치료] 브라우저 기저장된 IndexedDB 중복 이력 1회 전수 정제
+ */
+async function selfHealIndexedDBHistory() {
+    const CURRENT_HEAL_REV = "v4_deep";
+    if (localStorage.getItem("idbHealedRev") === CURRENT_HEAL_REV) {
+        return;
+    }
+    try {
+        const raw = await getIDBHistory();
+        if (raw && raw.length > 0) {
+            const healed = mergeHistory(raw, []);
+            if (healed.length < raw.length) {
+                await putIDBHistory(healed);
+                console.log(`🧹 [자가 치료 완료] IndexedDB 내 중복 레코드 ${raw.length - healed.length}건이 성공적으로 정제되었습니다.`);
+            }
+        }
+        localStorage.setItem("idbHealedRev", CURRENT_HEAL_REV);
+        if (typeof invalidateHistoryCache === 'function') invalidateHistoryCache();
+    } catch (e) {
+        console.warn("[자가 치료 건너뜀] IndexedDB 마이그레이션 중 알림:", e);
+    }
 }
 
 /**
@@ -4685,32 +4765,55 @@ function toggleHistoryThreadMode() {
 function groupEntriesByThread(entries) {
     if (!entries || entries.length === 0) return [];
 
-    // 1단계: 동일 날짜 내의 실질적 중복 작업(동일 제목/내용)을 단일 최신 엔트리로 우선 정제
-    const sameDateMap = new Map();
+    // 1단계: 동일 날짜 및 2일 이내 연속 동일 작업(동일 제목/내용)을 단일 최신/상세 엔트리로 우선 정제
     const cleanEntries = [];
+    const mergedIndices = new Set();
 
-    entries.forEach(e => {
+    for (let i = 0; i < entries.length; i++) {
+        if (mergedIndices.has(i)) continue;
+        const e = entries[i];
         const title = (typeof getDisplayContent === "function" ? getDisplayContent(e) : (e.content || "")).trim();
         const normTitle = typeof normalizeHistoryWorkTitle === "function" 
             ? normalizeHistoryWorkTitle(title) 
             : title.toLowerCase().replace(/\s+/g, "");
-        const d = (e.date || "").replace(/[^0-9]/g, "");
-        const key = `${d}|${normTitle}`;
+        const dDays = typeof parseDateToDays === "function" ? parseDateToDays(e.date) : 0;
+        const raw = String(e.rawText || "").replace(/\s+/g, " ").trim();
 
-        if (d && normTitle && normTitle !== "—" && normTitle !== "미상") {
-            if (sameDateMap.has(key)) {
-                const existing = sameDateMap.get(key);
-                if (String(e.rawText || "").length > String(existing.rawText || "").length) {
-                    sameDateMap.set(key, e);
-                    const idx = cleanEntries.indexOf(existing);
-                    if (idx !== -1) cleanEntries[idx] = e;
-                }
-                return;
+        let bestEntry = e;
+
+        for (let j = i + 1; j < entries.length; j++) {
+            if (mergedIndices.has(j)) continue;
+            const other = entries[j];
+            const otherTitle = (typeof getDisplayContent === "function" ? getDisplayContent(other) : (other.content || "")).trim();
+            const otherNormTitle = typeof normalizeHistoryWorkTitle === "function" 
+                ? normalizeHistoryWorkTitle(otherTitle) 
+                : otherTitle.toLowerCase().replace(/\s+/g, "");
+            const otherDDays = typeof parseDateToDays === "function" ? parseDateToDays(other.date) : 0;
+            const otherRaw = String(other.rawText || "").replace(/\s+/g, " ").trim();
+
+            let shouldMerge = false;
+            // 조건 1: 메일 원문 동일 또는 포함
+            if (raw && otherRaw && (raw === otherRaw || (raw.length > 40 && otherRaw.length > 40 && (raw.includes(otherRaw) || otherRaw.includes(raw))))) {
+                shouldMerge = true;
             }
-            sameDateMap.set(key, e);
+            // 조건 2: 작업명이 동일/유사하고 날짜 간격이 2일 이내 (예: 연속된 New hand 교체, 정기 PM 등)
+            if (normTitle && otherNormTitle && normTitle !== "—" && normTitle !== "미상") {
+                const isTitleMatch = (normTitle === otherNormTitle) || normTitle.includes(otherNormTitle) || otherNormTitle.includes(normTitle) || (normTitle.includes("pm") && otherNormTitle.includes("pm"));
+                if (isTitleMatch && Math.abs(dDays - otherDDays) <= 2) {
+                    shouldMerge = true;
+                }
+            }
+
+            if (shouldMerge) {
+                mergedIndices.add(j);
+                if (String(other.rawText || "").length > String(bestEntry.rawText || "").length) {
+                    bestEntry = other;
+                }
+            }
         }
-        cleanEntries.push(e);
-    });
+
+        cleanEntries.push(bestEntry);
+    }
 
     // 2단계: 서로 다른 일자의 인접한 동일 작업명들을 쓰레드로 그룹화
     const groups = [];
@@ -5459,9 +5562,10 @@ window.onload = async function() {
     if (!localStorage.getItem("recipientData")) localStorage.setItem("recipientData", "{}");
     if (!localStorage.getItem("machineNotes")) localStorage.setItem("machineNotes", "{}");
     
-    // 3) 스토리지 마이그레이션 (IndexedDB & S/N 정합성)
+    // 3) 스토리지 마이그레이션 (IndexedDB & S/N 정합성) 및 자가 치료
     await migrateToIndexedDB();
     await migrateEquipmentDataToSN();
+    if (typeof selfHealIndexedDBHistory === 'function') await selfHealIndexedDBHistory();
 
     // 4) UI 테이블 및 배지 렌더링
     renderTable(); 
