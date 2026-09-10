@@ -1262,16 +1262,19 @@ function mergeHistory(boxHistory, localHistory) {
                 const otherRaw = String(other.rawText || '').replace(/\s+/g, ' ').trim();
 
                 let shouldMerge = false;
-                // 조건 1: 원문(rawText) 일치 또는 포함
-                if (raw && otherRaw && (raw === otherRaw || (raw.length > 40 && otherRaw.length > 40 && (raw.includes(otherRaw) || otherRaw.includes(raw))))) {
-                    shouldMerge = true;
-                }
-                // 조건 2: 작업명이 동일/유사하고 날짜 간격이 2일 이내 (예: 연속된 New hand 교체, 정기 PM 등)
-                if (t && otherT) {
-                    const isTitleMatch = (t === otherT) || t.includes(otherT) || otherT.includes(t) || (t.includes('pm') && otherT.includes('pm'));
-                    if (isTitleMatch && Math.abs(dDays - otherDDays) <= 2) {
+                // 조건 1: 동일 날짜 내의 동일/유사 작업 (실제 중복 등록건)
+                if (item.date && other.date && item.date === other.date) {
+                    if (t && otherT) {
+                        const isTitleMatch = (t === otherT) || t.includes(otherT) || otherT.includes(t) || (t.includes('pm') && otherT.includes('pm'));
+                        if (isTitleMatch) shouldMerge = true;
+                    }
+                    if (raw && otherRaw && (raw === otherRaw || (raw.length > 40 && otherRaw.length > 40 && (raw.includes(otherRaw) || otherRaw.includes(raw))))) {
                         shouldMerge = true;
                     }
+                }
+                // 조건 2: 서로 다른 날짜라도 원문 자체가 100% 동일한 완전 복사본 (날짜 오타 등록건)
+                else if (raw && otherRaw && raw.length > 100 && raw === otherRaw) {
+                    shouldMerge = true;
                 }
 
                 if (shouldMerge) {
@@ -4792,16 +4795,21 @@ function groupEntriesByThread(entries) {
             const otherRaw = String(other.rawText || "").replace(/\s+/g, " ").trim();
 
             let shouldMerge = false;
-            // 조건 1: 메일 원문 동일 또는 포함
-            if (raw && otherRaw && (raw === otherRaw || (raw.length > 40 && otherRaw.length > 40 && (raw.includes(otherRaw) || otherRaw.includes(raw))))) {
-                shouldMerge = true;
-            }
-            // 조건 2: 작업명이 동일/유사하고 날짜 간격이 2일 이내 (예: 연속된 New hand 교체, 정기 PM 등)
-            if (normTitle && otherNormTitle && normTitle !== "—" && normTitle !== "미상") {
-                const isTitleMatch = (normTitle === otherNormTitle) || normTitle.includes(otherNormTitle) || otherNormTitle.includes(normTitle) || (normTitle.includes("pm") && otherNormTitle.includes("pm"));
-                if (isTitleMatch && Math.abs(dDays - otherDDays) <= 2) {
+            // 조건 1: 동일 날짜 내의 동일/유사 작업 (실제 중복 등록건)
+            const dStr = typeof normalizeEntryDateStr === "function" ? normalizeEntryDateStr(e.date) : (e.date || "");
+            const otherDStr = typeof normalizeEntryDateStr === "function" ? normalizeEntryDateStr(other.date) : (other.date || "");
+            if (dStr && otherDStr && dStr === otherDStr) {
+                if (normTitle && otherNormTitle && normTitle !== "—" && normTitle !== "미상") {
+                    const isTitleMatch = (normTitle === otherNormTitle) || normTitle.includes(otherNormTitle) || otherNormTitle.includes(normTitle) || (normTitle.includes("pm") && otherNormTitle.includes("pm"));
+                    if (isTitleMatch) shouldMerge = true;
+                }
+                if (raw && otherRaw && (raw === otherRaw || (raw.length > 40 && otherRaw.length > 40 && (raw.includes(otherRaw) || otherRaw.includes(raw))))) {
                     shouldMerge = true;
                 }
+            }
+            // 조건 2: 서로 다른 날짜라도 원문 자체가 100% 동일한 완전 복사본 (날짜 오타 등록건)
+            else if (raw && otherRaw && raw.length > 100 && raw === otherRaw) {
+                shouldMerge = true;
             }
 
             if (shouldMerge) {
