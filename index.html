@@ -3151,11 +3151,9 @@ function extractDongtanMailData(text) {
 }
 
 /**
- * 📩 작업 메일 텍스트 분석 및 정보 추출 (데이터 추출 실행)
+ * 📩 작업 메일 텍스트 분석 및 정보 추출 (데이터 추출 실행 - ⚡ 즉각 반응 최적화)
  */
 async function extractData() {
-    if (!(await ensureFreshTeamDb())) return;
-    
     const text = document.getElementById("mailInput").value; 
     if (!text.trim()) return alert("메일 내용을 입력하세요.");
 
@@ -5964,9 +5962,8 @@ function renderHistoryTimeline(sortOrder) {
     timelineWrap.appendChild(wrap);
 }
 
-/** 새 작업 이력 저장 */
+/** 새 작업 이력 저장 (⚡ 초고속 증분 저장 및 연월 기반 경량 중복 검증) */
 async function saveHistoryEntry(entry) { 
-    let history = await getIDBHistory();
     entry.date = typeof normalizeEntryDateStr === 'function' ? normalizeEntryDateStr(entry.date || entry.savedAt) : (entry.date || '');
     entry.id = Date.now() + "_" + Math.floor(Math.random() * 1000); 
     entry.updatedAt = Date.now();
@@ -5981,8 +5978,15 @@ async function saveHistoryEntry(entry) {
     const normTitle = typeof normalizeHistoryWorkTitle === 'function' ? normalizeHistoryWorkTitle(entry.content) : (entry.content || '').trim().toLowerCase();
     const raw = String(entry.rawText || '').replace(/\s+/g, ' ').trim();
     
-    // 동일 설비 + 동일 날짜에서 제목이 유사하거나 본문이 일치하면 중복 저장 차단
-    const isDup = history.some(e => {
+    // ⚡ 초경량 중복 검사: 2000건 전체가 아닌 메모리 캐시 또는 해당 연월 데이터만 빠르게 점검
+    let checkPool = [];
+    if (typeof cachedRawHistory !== 'undefined' && cachedRawHistory && !isHistoryCacheDirty) {
+        checkPool = cachedRawHistory;
+    } else {
+        checkPool = await getIDBHistoryByMonth(entry.yearMonth);
+    }
+
+    const isDup = checkPool.some(e => {
         if (!e.isDeleted && e.machine === entry.machine) {
             const eDate = typeof normalizeEntryDateStr === 'function' ? normalizeEntryDateStr(e.date || e.savedAt) : (e.date || '');
             if (eDate !== entry.date) {
@@ -6001,8 +6005,19 @@ async function saveHistoryEntry(entry) {
     });
     
     if (isDup) return;
-    history.push(entry); 
-    await putIDBHistory(history);
+
+    // ⚡ 2000건 전체 덮어쓰기 대신 단 1건만 IndexedDB에 즉시 삽입 (1ms 완료)
+    await upsertIDBHistoryItems([entry]);
+
+    if (cachedRawHistory) {
+        cachedRawHistory.unshift(entry);
+        if (typeof prepareHistorySearchKeys === 'function') prepareHistorySearchKeys([entry]);
+        cachedExpandedHistory = null;
+        cachedLineMap = null;
+    } else {
+        if (typeof invalidateHistoryCache === 'function') invalidateHistoryCache();
+    }
+
     await updateHistoryBadge(); 
     autoMergeAndSave({ scope: 'history', yearMonths: [entry.yearMonth] }); 
 }
