@@ -1146,9 +1146,10 @@ async function getSyncState(key) {
 
 /**
  * IndexedDB에서 전체 작업 히스토리를 가져옵니다. (연월 키 자동 보정 포함)
+ * @param {string} [targetDept] 대상 부서 (생략 시 현재 활성 부서)
  */
-async function getIDBHistory() {
-    const db = await initDB();
+async function getIDBHistory(targetDept) {
+    const db = await initDB(targetDept || getCurrentDept());
     return new Promise((resolve, reject) => {
         const tx = db.transaction(HIST_STORE, 'readonly');
         const req = tx.objectStore(HIST_STORE).getAll();
@@ -1167,9 +1168,11 @@ async function getIDBHistory() {
 
 /**
  * 특정 연월(yearMonth)의 작업 히스토리만 선별 조회합니다.
+ * @param {string} yearMonth 조회 연월
+ * @param {string} [targetDept] 대상 부서
  */
-async function getIDBHistoryByMonth(yearMonth) {
-    const db = await initDB();
+async function getIDBHistoryByMonth(yearMonth, targetDept) {
+    const db = await initDB(targetDept || getCurrentDept());
     return new Promise((resolve, reject) => {
         const tx = db.transaction(HIST_STORE, 'readonly');
         const store = tx.objectStore(HIST_STORE);
@@ -1191,9 +1194,12 @@ async function getIDBHistoryByMonth(yearMonth) {
 
 /**
  * IndexedDB의 작업 히스토리를 통째로 덮어씁니다.
+ * @param {Array} dataArray 저장할 데이터 목록
+ * @param {string} [targetDept] 대상 부서
  */
-async function putIDBHistory(dataArray) {
-    const db = await initDB();
+async function putIDBHistory(dataArray, targetDept) {
+    const dept = targetDept || getCurrentDept();
+    const db = await initDB(dept);
     return new Promise((resolve, reject) => {
         const tx = db.transaction(HIST_STORE, 'readwrite');
         const store = tx.objectStore(HIST_STORE);
@@ -1214,10 +1220,13 @@ async function putIDBHistory(dataArray) {
 
 /**
  * 작업 히스토리 목록을 스마트 병합(Upsert)합니다.
+ * @param {Array} items 병합할 데이터 목록
+ * @param {string} [targetDept] 대상 부서
  */
-async function upsertIDBHistoryItems(items) {
+async function upsertIDBHistoryItems(items, targetDept) {
     if (!items || items.length === 0) return;
-    const db = await initDB();
+    const dept = targetDept || getCurrentDept();
+    const db = await initDB(dept);
     return new Promise((resolve, reject) => {
         const tx = db.transaction(HIST_STORE, 'readwrite');
         const store = tx.objectStore(HIST_STORE);
@@ -1254,24 +1263,24 @@ async function clearIDBHistory(targetDept) {
 
 /**
  * 🧹 동탄 Site(평가 5부) IndexedDB 내 잘못 유입된 평택 레거시 데이터 자가 정제
- * Box DB의 dept5/history가 비어있는데 로컬에 평택 라인(P1D, P2D 등) 데이터가 대량 존재하는 경우 즉시 격리 초기화
+ * 신규 사이트 특성상 50건 이상 대량 존재하거나 평택 라인/설비 패턴이 1건이라도 포함된 경우 즉시 0건 초기화
  */
 async function sanitizeDept5HistoryIfNeeded() {
     if (getCurrentDept() !== 'dept5') return;
     try {
-        const raw = await getIDBHistory();
+        const raw = await getIDBHistory('dept5');
         if (!raw || raw.length === 0) return;
 
         // 평택 전용 라인 및 설비 패턴 검사
         const pyeongtaekCount = raw.filter(item => {
             const line = String(item.line || '').toUpperCase();
             const machine = String(item.machine || '').toUpperCase();
-            return /^P\d[A-Z0-9]*$/.test(line) || /P[1-4][DFH]/i.test(line) || /^P[1-4]-/i.test(machine);
+            const content = String(item.content || '').toUpperCase();
+            return /^P\d[A-Z0-9]*$/.test(line) || /P[1-4][DFH]/i.test(line) || /^P[1-4]-/i.test(machine) || /P[1-4]D/i.test(content);
         }).length;
 
-        // 조건 A: 평택 라인/설비 비율이 30% 이상이거나
-        // 조건 B: 데이터가 500건 이상 대량으로 존재하는데 평택 패턴이 10건 이상 발견되는 경우 (명백한 평택 레거시 유출)
-        if (pyeongtaekCount >= 10 && (pyeongtaekCount >= raw.length * 0.3 || raw.length > 500)) {
+        // 조건: 50건 이상 대량 존재하거나 평택 패턴이 1건 이상 발견된 경우 (명백한 평택 유출 오염 데이터)
+        if (raw.length >= 50 || pyeongtaekCount > 0) {
             console.warn(`🧹 [동탄 DB 자가 정제] 평택에서 잘못 유입된 레거시 데이터 ${raw.length}건(평택 식별 ${pyeongtaekCount}건)을 감지하여 안전하게 초기화합니다.`);
             await clearIDBHistory('dept5');
             if (typeof invalidateHistoryCache === 'function') invalidateHistoryCache();
@@ -1750,12 +1759,18 @@ async function autoMigrateLegacyDbTxt(dirHandle) {
 
 /**
  * 📥 차등 분할 PULL: 변경된 파티션 파일만 선택적으로 다운로드 및 병합 (실시간 진행률 콜백 지원)
+ * @param {FileSystemDirectoryHandle} dirHandle 작업 디렉터리 핸들
+ * @param {boolean} [isUserGesture=false] 사용자 제스처 여부
+ * @param {boolean} [isManualButton=false] 수동 클릭 여부
+ * @param {Function} [progressCb=null] 진행률 콜백
+ * @param {string} [boundDept=null] 동기화 고정 바인딩 부서
  */
-async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManualButton = false, progressCb = null) {
+async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManualButton = false, progressCb = null, boundDept = null) {
+    const syncDept = boundDept || getCurrentDept();
     if (progressCb) progressCb(5, '메타데이터 조회', 'Box 폴더의 meta.json 파일을 읽고 있습니다.', '');
     let meta = await readJsonFromDir(dirHandle, 'meta.json', null);
     if (!meta) {
-        if (getCurrentDept() === 'dept5') {
+        if (syncDept === 'dept5') {
             // 🆕 동탄(평가 5부) 초기 독립 데이터베이스 스키마 자동 구성
             const initialMeta = {
                 schemaVersion: 3,
@@ -1944,7 +1959,7 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
                 });
                 const cleanItems = mergeHistory(items, []);
                 try {
-                    await upsertIDBHistoryItems(cleanItems);
+                    await upsertIDBHistoryItems(cleanItems, syncDept);
                     totalImportedThisTurn += cleanItems.length;
                 } catch (err) {
                     console.warn(`[이력 저장 건너뜀] ${fname} 파싱 저장 중 경고:`, err);
@@ -2192,8 +2207,9 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
             return false; 
         }
 
-        // 📂 부서별 격리 작업 디렉터리 핸들(dept4: 루트, dept5: dept5 서브디렉터리) 취득
-        const dirHandle = baseDirHandle ? await getWorkingDirHandle(baseDirHandle, currentDept) : null;
+        // 📂 시작 시점의 부서 고정(Context Pinning): 비동기 실행 도중 부서 전환이 일어나더라도 데이터 교차 오염 방지
+        const syncDept = currentDept;
+        const dirHandle = baseDirHandle ? await getWorkingDirHandle(baseDirHandle, syncDept) : null;
 
 
         isSyncing = true;
@@ -2214,7 +2230,7 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
                 if (isPushSettings) {
                     return await pushPartitionedTeamData(dirHandle, pushScope);
                 } else {
-                    return await pullPartitionedTeamData(dirHandle, isUserGesture, isManualButton, progressCb);
+                    return await pullPartitionedTeamData(dirHandle, isUserGesture, isManualButton, progressCb, syncDept);
                 }
             } else {
                 // 📄 레거시 단일 파일 동기화 폴백 (낙관적 잠금 재시도 루프 적용)
@@ -5040,21 +5056,35 @@ function closeSiteSelectModal() {
  * @param {string} deptCode 'dept4' | 'dept5'
  * @param {boolean} [persist=true] 브라우저 영구 보존 여부
  */
+/**
+ * 🏢 부서/사이트 전환 및 URL 기반 완전 리로드 (Full Hard Reload)
+ * @param {string} deptCode 'dept4' | 'dept5'
+ * @param {boolean} [persist=true] 브라우저 영구 보존 여부
+ */
 async function selectSite(deptCode, persist = true) {
     if (persist) {
         localStorage.setItem('selectedDept', deptCode);
     }
-    currentDept = deptCode;
 
     // ⚡ 1. 메모리 캐시 완전 무효화 (타 사이트 데이터 누출 원천 차단)
     if (typeof invalidateHistoryCache === 'function') {
         invalidateHistoryCache();
     }
 
+    // ⚡ 2. URL 변경 및 페이지 전체 새로고침 (이전 부서 비동기 작업 및 메모리 캐시 100% 완전 제거)
+    const currentUrl = new URL(window.location.href);
+    const currentParam = currentUrl.searchParams.get('dept');
+    if (currentParam !== deptCode) {
+        currentUrl.searchParams.set('dept', deptCode);
+        window.location.href = currentUrl.toString();
+        return;
+    }
+
+    currentDept = deptCode;
     closeSiteSelectModal();
     updateDeptDisplayUI();
 
-    // ⚡ 2. 화면의 기존 히스토리 DOM 컨테이너 초기화
+    // ⚡ 3. 화면의 기존 히스토리 DOM 컨테이너 초기화
     selectedChip = null;
     const timelineWrap = document.getElementById("historyTimelineWrap");
     if (timelineWrap) timelineWrap.innerHTML = "";
@@ -5063,16 +5093,16 @@ async function selectSite(deptCode, persist = true) {
     const badge = document.getElementById("historyBadge");
     if (badge) badge.classList.add("hidden");
 
-    // ⚡ 3. 추출 알고리즘 셀렉트 동기화
+    // ⚡ 4. 추출 알고리즘 셀렉트 동기화
     const algoSel = document.getElementById('extractAlgoDept');
     if (algoSel) algoSel.value = deptCode;
 
-    // ⚡ 4. 동탄 Site 전환 시 오염 캐시 검사 및 자가 정제
+    // ⚡ 5. 동탄 Site 전환 시 오염 캐시 검사 및 자가 정제
     if (deptCode === 'dept5' && typeof sanitizeDept5HistoryIfNeeded === 'function') {
         await sanitizeDept5HistoryIfNeeded();
     }
 
-    // ⚡ 5. UI 테이블 및 이력 배지 갱신
+    // ⚡ 6. UI 테이블 및 이력 배지 갱신
     renderTable();
     renderRecipientTable();
     await updateHistoryBadge();
@@ -5088,7 +5118,7 @@ async function selectSite(deptCode, persist = true) {
     const deptName = (typeof DEPT_INFO !== 'undefined' && DEPT_INFO[deptCode]?.name) || deptCode;
     showToast('사이트 전환 완료', `${deptName} 환경으로 전환되었습니다.`);
 
-    // ⚡ 6. 백그라운드에서 해당 부서 최신 Box DB 동기화 점검
+    // ⚡ 7. 백그라운드에서 해당 부서 최신 Box DB 동기화 점검
     syncWithBox(false, false, false);
 }
 
@@ -6064,17 +6094,31 @@ async function resetAllData() {
 
 /** 애플리케이션 진입점 (Window Load) */
 window.onload = async function() {
-    // 0) URL 파라미터 또는 저장된 부서 설정 로드
+    // 0) URL 경로, 파라미터 및 저장된 부서 설정 동기화
     const urlParams = new URLSearchParams(window.location.search);
-    const deptParam = urlParams.get('dept');
-    if (deptParam === '5' || deptParam === 'dept5') {
-        currentDept = 'dept5';
-        localStorage.setItem('selectedDept', 'dept5');
-    } else if (deptParam === '4' || deptParam === 'dept4') {
-        currentDept = 'dept4';
-        localStorage.setItem('selectedDept', 'dept4');
-    } else if (!localStorage.getItem('selectedDept')) {
-        // 최초 방문자: 부서 선택 모달 노출
+    const deptParam = (urlParams.get('dept') || '').toLowerCase();
+    const currentPath = window.location.pathname.toLowerCase();
+    
+    let resolvedDept = null;
+    if (deptParam === '5' || deptParam === 'dept5' || currentPath.includes('/dept5')) {
+        resolvedDept = 'dept5';
+    } else if (deptParam === '4' || deptParam === 'dept4' || currentPath.includes('/dept4')) {
+        resolvedDept = 'dept4';
+    } else if (localStorage.getItem('selectedDept')) {
+        resolvedDept = localStorage.getItem('selectedDept');
+    }
+
+    if (resolvedDept) {
+        currentDept = resolvedDept;
+        localStorage.setItem('selectedDept', resolvedDept);
+        // URL 쿼리 파라미터가 비어 있다면 브라우저 주소창에 ?dept=... 자동 동기화 (페이지 리로드 없이 깔끔하게 URL 유지)
+        if (!urlParams.get('dept')) {
+            const syncUrl = new URL(window.location.href);
+            syncUrl.searchParams.set('dept', resolvedDept);
+            window.history.replaceState(null, '', syncUrl.toString());
+        }
+    } else {
+        // 최초 방문자 (부서 미지정): 부서 선택 모달 노출
         if (typeof openSiteSelectModal === 'function') openSiteSelectModal();
     }
     if (typeof updateDeptDisplayUI === 'function') updateDeptDisplayUI();
@@ -6094,7 +6138,7 @@ window.onload = async function() {
         await migrateToIndexedDB();
         await migrateEquipmentDataToSN();
         if (typeof selfHealIndexedDBHistory === 'function') await selfHealIndexedDBHistory();
-    } else {
+    } else if (getCurrentDept() === 'dept5') {
         // 동탄 Site: 혹시 평택에서 유입된 오염 캐시가 있다면 자가 정제
         if (typeof sanitizeDept5HistoryIfNeeded === 'function') await sanitizeDept5HistoryIfNeeded();
     }
