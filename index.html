@@ -229,7 +229,7 @@
                 <input type="checkbox" id="rememberSiteCheck" checked class="rounded border-border text-primary focus:ring-0">
                 <span>이 브라우저에서 선택 유지</span>
             </label>
-            <button onclick="closeSiteSelectModal()" class="text-xs text-text-muted hover:text-text-main px-3 py-1.5 rounded transition-colors">닫기</button>
+            <button id="siteSelectCloseBtn" onclick="closeSiteSelectModal()" class="text-xs text-text-muted hover:text-text-main px-3 py-1.5 rounded transition-colors">닫기</button>
         </div>
     </div>
 </div>
@@ -5039,9 +5039,16 @@ function closeSidebar() {
 }
 
 /** 🏢 부서/사이트 선택 모달 제어 */
-function openSiteSelectModal() {
+function openSiteSelectModal(isInitialGate = false) {
     const modal = document.getElementById('siteSelectModal');
-    if (modal) modal.classList.remove('hidden');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+
+    const closeBtn = document.getElementById('siteSelectCloseBtn');
+    if (closeBtn) {
+        if (isInitialGate) closeBtn.classList.add('hidden');
+        else closeBtn.classList.remove('hidden');
+    }
 }
 
 function closeSiteSelectModal() {
@@ -6119,23 +6126,20 @@ window.onload = async function() {
         resolvedDept = 'dept5';
     } else if (deptParam === '4' || deptParam === 'dept4' || currentPath.includes('/dept4')) {
         resolvedDept = 'dept4';
-    } else if (localStorage.getItem('selectedDept')) {
-        resolvedDept = localStorage.getItem('selectedDept');
     }
 
-    if (resolvedDept) {
-        currentDept = resolvedDept;
-        localStorage.setItem('selectedDept', resolvedDept);
-        // URL 쿼리 파라미터가 비어 있다면 브라우저 주소창에 ?dept=... 자동 동기화 (페이지 리로드 없이 깔끔하게 URL 유지)
-        if (!urlParams.get('dept')) {
-            const syncUrl = new URL(window.location.href);
-            syncUrl.searchParams.set('dept', resolvedDept);
-            window.history.replaceState(null, '', syncUrl.toString());
+    // ⚡ URL에 부서 파라미터(?dept=...)가 없는 루트 주소로 접속한 경우:
+    // 이전 저장값으로 바로 건너뛰지 않고, 사용자가 직접 평가 4부(평택) 또는 평가 5부(동탄)를 선택할 수 있도록 선택 모달 표출
+    if (!resolvedDept) {
+        initTheme();
+        if (typeof openSiteSelectModal === 'function') {
+            openSiteSelectModal(true); // 초기 게이트 모드로 표출 (닫기 버튼 숨김)
         }
-    } else {
-        // 최초 방문자 (부서 미지정): 부서 선택 모달 노출
-        if (typeof openSiteSelectModal === 'function') openSiteSelectModal();
+        return; // 사용자가 부서 카드를 선택하여 해당 URL로 이동할 때까지 대기
     }
+
+    currentDept = resolvedDept;
+    localStorage.setItem('selectedDept', resolvedDept);
     if (typeof updateDeptDisplayUI === 'function') updateDeptDisplayUI();
 
     // 1) 최초 Box 동기화 게이트 확인
