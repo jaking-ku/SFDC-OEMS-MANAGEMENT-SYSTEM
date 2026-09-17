@@ -204,10 +204,7 @@
                     <span class="material-symbols-outlined text-text-muted group-hover:text-primary transition-colors">check_circle</span>
                 </div>
                 <h4 class="text-base font-bold text-text-main group-hover:text-primary transition-colors">평가 4부 (평택)</h4>
-                <p class="text-[11px] text-text-muted mt-1 leading-relaxed">평택 사업장 광학 설비(IS/DI) SFDC 관리</p>
-                <div class="mt-3 pt-2 border-t border-border/50 text-[10px] text-text-muted flex items-center gap-1">
-                    <span class="material-symbols-outlined text-xs">database</span> 2,000+ 작업 이력
-                </div>
+
             </div>
 
             <!-- 평가 5부 (동탄) 카드 -->
@@ -217,10 +214,7 @@
                     <span class="material-symbols-outlined text-text-muted group-hover:text-primary transition-colors">check_circle</span>
                 </div>
                 <h4 class="text-base font-bold text-text-main group-hover:text-primary transition-colors">평가 5부 (동탄)</h4>
-                <p class="text-[11px] text-text-muted mt-1 leading-relaxed">동탄 사업장 설비 SFDC 관리 (신규 확장)</p>
-                <div class="mt-3 pt-2 border-t border-border/50 text-[10px] text-text-muted flex items-center gap-1">
-                    <span class="material-symbols-outlined text-xs">speed</span> 독립 격리 DB (초고속)
-                </div>
+
             </div>
         </div>
 
@@ -1041,17 +1035,17 @@ function getYearMonthFromDate(dateStr, fallbackTimestamp) {
  * @param {string} [targetDept] 대상 부서 (생략 시 현재 활성 부서)
  * @returns {Promise<IDBDatabase>}
  */
-function initDB(targetDept) { 
+function initDB(targetDept) {
     const dept = targetDept || getCurrentDept();
     const dbName = (dept === 'dept5') ? 'HitachiSfdcDB_dept5' : DB_N;
-    return new Promise((resolve, reject) => { 
-        const req = indexedDB.open(dbName, 3); 
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(dbName, 3);
         req.onupgradeneeded = (e) => {
             const db = e.target.result;
             if (!db.objectStoreNames.contains(ST_N)) {
                 db.createObjectStore(ST_N);
             }
-            
+
             let histStore;
             if (!db.objectStoreNames.contains(HIST_STORE)) {
                 histStore = db.createObjectStore(HIST_STORE, { keyPath: 'id' });
@@ -1071,35 +1065,35 @@ function initDB(targetDept) {
                 db.createObjectStore(SYNC_STORE, { keyPath: 'key' });
             }
         };
-        req.onsuccess = () => resolve(req.result); 
-        req.onerror = () => reject(req.error); 
-    }); 
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
 }
 
 /**
  * IndexedDB에 파일 또는 디렉터리 핸들을 저장합니다. (Box 핸들은 부서 공용 보존)
  */
-async function saveFileHandle(key, handle) { 
-    const db = await initDB('dept4'); 
-    return new Promise((resolve, reject) => { 
-        const tx = db.transaction(ST_N, 'readwrite'); 
-        tx.objectStore(ST_N).put(handle, key); 
-        tx.oncomplete = resolve; 
-        tx.onerror = () => reject(tx.error); 
-    }); 
+async function saveFileHandle(key, handle) {
+    const db = await initDB('dept4');
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(ST_N, 'readwrite');
+        tx.objectStore(ST_N).put(handle, key);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+    });
 }
 
 /**
  * IndexedDB에서 저장된 파일 또는 디렉터리 핸들을 조회합니다. (Box 핸들은 부서 공용 보존)
  */
-async function getFileHandle(key) { 
-    const db = await initDB('dept4'); 
-    return new Promise((resolve, reject) => { 
-        const tx = db.transaction(ST_N, 'readonly'); 
-        const req = tx.objectStore(ST_N).get(key); 
-        req.onsuccess = () => resolve(req.result); 
-        req.onerror = () => reject(tx.error); 
-    }); 
+async function getFileHandle(key) {
+    const db = await initDB('dept4');
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(ST_N, 'readonly');
+        const req = tx.objectStore(ST_N).get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(tx.error);
+    });
 }
 
 /**
@@ -1353,16 +1347,16 @@ async function getOrCreateSubdir(dirHandle, dirname) {
 /**
  * 파일 또는 폴더 핸들의 접근 권한을 확인하고 필요 시 요청합니다.
  */
-async function verifyPermission(handle, rw, isUserGesture = false) { 
+async function verifyPermission(handle, rw, isUserGesture = false) {
     if (!handle) return false;
-    const options = { mode: rw ? 'readwrite' : 'read' }; 
+    const options = { mode: rw ? 'readwrite' : 'read' };
     try {
         if ((await handle.queryPermission(options)) === 'granted') return true;
-        if (isUserGesture) { 
-            return (await handle.requestPermission(options)) === 'granted'; 
+        if (isUserGesture) {
+            return (await handle.requestPermission(options)) === 'granted';
         }
-    } catch (e) { 
-        return false; 
+    } catch (e) {
+        return false;
     }
     return false;
 }
@@ -1394,7 +1388,7 @@ function rememberTeamMeta(data) {
     localStorage.setItem('teamDbRevision', String(meta.dbRevision));
     localStorage.setItem('teamDbLastUpdatedAt', String(meta.lastUpdatedAt));
     localStorage.setItem('teamDbLastUpdatedBy', meta.lastUpdatedBy);
-    
+
     const label = document.getElementById('autoSyncLabel');
     if (label) {
         const d = meta.lastUpdatedAt ? new Date(meta.lastUpdatedAt) : new Date();
@@ -1463,14 +1457,14 @@ function normalizeHistoryWorkTitle(title) {
 function mergeHistory(boxHistory, localHistory) {
     const map = new Map();
     const getLegacyId = (item) => "LEGACY_" + (item.date || '') + "_" + (item.machine || '') + "_" + (item.content || "").substring(0, 10);
-    
+
     [...(boxHistory || []), ...(localHistory || [])].forEach(item => {
         if (!item) return;
-        const copy = { ...item }; 
+        const copy = { ...item };
         copy.date = normalizeEntryDateStr(copy.date || copy.savedAt);
         if (!copy.id) copy.id = getLegacyId(copy);
         if (!copy.yearMonth) copy.yearMonth = getYearMonthFromDate(copy.date, copy.savedAt);
-        
+
         const old = map.get(copy.id);
         if (!old || (copy.updatedAt || 0) >= (old.updatedAt || 0)) {
             map.set(copy.id, copy);
@@ -1600,10 +1594,10 @@ function getRecipientEmail(val) {
 function mergeEquipment(boxEquipment, localEquipment) {
     const map = new Map();
     const keyOf = (e) => (e.sn || '').trim() || `${(e.line || '').trim()}|${(e.name || '').trim()}`;
-    
+
     (boxEquipment || []).forEach(e => map.set(keyOf(e), { ...e }));
-    (localEquipment || []).forEach(e => { 
-        const copy = { ...e }; 
+    (localEquipment || []).forEach(e => {
+        const copy = { ...e };
         delete copy.isEditing;
         const key = keyOf(copy);
         const existing = map.get(key);
@@ -1611,7 +1605,7 @@ function mergeEquipment(boxEquipment, localEquipment) {
             map.set(key, copy);
         }
     });
-    
+
     return Array.from(map.values());
 }
 
@@ -1687,7 +1681,7 @@ async function autoMigrateLegacyDbTxt(dirHandle) {
             const localRecip = JSON.parse(localStorage.getItem('recipientData') || '{}');
             const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
             const localMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
-            
+
             legacyData = {
                 workHistory: localHist,
                 equipment: localEq,
@@ -1906,7 +1900,7 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
         for (let i = 0; i < totalFiles; i++) {
             const fname = fileList[i];
             const pct = 30 + Math.round(((i + 1) / totalFiles) * 55);
-            
+
             if (progressCb) {
                 progressCb(pct, '작업 이력 동기화', `파일 로드 중: ${fname}`, `${i + 1} / ${totalFiles}`);
                 await new Promise(r => setTimeout(r, 2));
@@ -1914,7 +1908,7 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
 
             // 💡 파일 데이터 추출 및 PowerShell 컬렉션 래퍼([ { value: [ ... ] } ]) 완전 언래핑
             const fileData = await readJsonFromDir(historySubdir, fname, []);
-            
+
             function extractValidEntries(source) {
                 if (!source) return [];
                 const res = [];
@@ -2053,8 +2047,8 @@ async function pushPartitionedTeamData(dirHandle, pushScope = {}) {
         let masterToSave = null;
         if (scope === 'all' || scope === 'master' || scope === 'equipment' || scope === 'recipient') {
             const localEquipment = JSON.parse(localStorage.getItem('equipmentData') || '[]').map(e => {
-                const copy = { ...e }; 
-                delete copy.isEditing; 
+                const copy = { ...e };
+                delete copy.isEditing;
                 return copy;
             });
             const localRecipient = JSON.parse(localStorage.getItem('recipientData') || '{}');
@@ -2184,9 +2178,9 @@ async function pushPartitionedTeamData(dirHandle, pushScope = {}) {
  * 🚀 통합 동기화 디스패처 (폴더 분할 엔진 및 레거시 파일 호환 지원)
  */
 async function syncWithBox(isUserGesture = false, isPushSettings = false, isManualButton = false, pushScope = { scope: 'all' }, progressCb = null) {
-    if (activeSyncPromise) { 
-        if (isPushSettings) pendingPush = true; 
-        return activeSyncPromise; 
+    if (activeSyncPromise) {
+        if (isPushSettings) pendingPush = true;
+        return activeSyncPromise;
     }
 
     activeSyncPromise = (async () => {
@@ -2195,16 +2189,16 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
 
         if (!baseDirHandle && !legacyFileHandle) {
             if (isManualButton) alert("⚠️ 상단의 [DB 폴더 연결] 버튼을 눌러 Box 공용 폴더를 연결해 주세요.");
-            await updateSyncStatusBanner(); 
+            await updateSyncStatusBanner();
             return false;
         }
 
         const handle = baseDirHandle || legacyFileHandle;
         const hasPerm = await verifyPermission(handle, true, isUserGesture);
-        if (!hasPerm) { 
-            if (isManualButton) alert("Box 폴더 접근 권한이 필요합니다."); 
-            await updateSyncStatusBanner(); 
-            return false; 
+        if (!hasPerm) {
+            if (isManualButton) alert("Box 폴더 접근 권한이 필요합니다.");
+            await updateSyncStatusBanner();
+            return false;
         }
 
         // 📂 시작 시점의 부서 고정(Context Pinning): 비동기 실행 도중 부서 전환이 일어나더라도 데이터 교차 오염 방지
@@ -2216,12 +2210,12 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
         const syncIcon = document.getElementById("syncIcon");
         const syncText = document.getElementById("syncText");
         const btn = document.getElementById("syncBtn");
-        
+
         if (btn) btn.classList.remove("text-red-500", "font-black");
-        if (syncIcon && isManualButton) { 
-            syncIcon.classList.add("animate-spin"); 
-            syncText.innerText = "Checking..."; 
-            if (btn) btn.style.opacity = "0.7"; 
+        if (syncIcon && isManualButton) {
+            syncIcon.classList.add("animate-spin");
+            syncText.innerText = "Checking...";
+            if (btn) btn.style.opacity = "0.7";
         }
 
         try {
@@ -2247,7 +2241,7 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
                         const localRecipient = JSON.parse(localStorage.getItem('recipientData') || '{}');
                         const localNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
                         const localMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
-                        
+
                         const merged = {
                             ...boxData,
                             workHistory: mergeHistory(boxData.workHistory, localHistory),
@@ -2279,7 +2273,7 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
                         const allRecip = JSON.parse(localStorage.getItem('recipientData') || '{}');
                         const allNotes = JSON.parse(localStorage.getItem('machineNotes') || '{}');
                         const allMaint = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
-                        
+
                         const merged = {
                             schemaVersion: TEAM_SCHEMA_VERSION,
                             dbRevision: boxMeta.dbRevision + 1,
@@ -2313,7 +2307,7 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
         } catch (error) {
             console.error('동기화 실패:', error);
             if (isManualButton) alert('동기화 중 오류가 발생했습니다. Box 폴더 연결 상태를 확인해주세요.');
-            await updateSyncStatusBanner(); 
+            await updateSyncStatusBanner();
             return false;
         } finally {
             isSyncing = false;
@@ -2323,13 +2317,13 @@ async function syncWithBox(isUserGesture = false, isPushSettings = false, isManu
         }
     })();
 
-    try { 
-        return await activeSyncPromise; 
+    try {
+        return await activeSyncPromise;
     } finally {
         activeSyncPromise = null;
-        if (pendingPush) { 
-            pendingPush = false; 
-            autoMergeAndSave(pushScope); 
+        if (pendingPush) {
+            pendingPush = false;
+            autoMergeAndSave(pushScope);
         }
     }
 }
@@ -2360,10 +2354,10 @@ function combinePushScopes(prevScope, newScope) {
 function autoMergeAndSave(scope = { scope: 'all' }) {
     clearTimeout(_autoSyncDebounceTimer);
     _pendingPushScope = combinePushScopes(_pendingPushScope, scope);
-    _autoSyncDebounceTimer = setTimeout(() => { 
+    _autoSyncDebounceTimer = setTimeout(() => {
         const targetScope = _pendingPushScope || { scope: 'all' };
         _pendingPushScope = null;
-        syncWithBox(true, true, false, targetScope); 
+        syncWithBox(true, true, false, targetScope);
     }, 700);
 }
 
@@ -2382,7 +2376,7 @@ async function ensureFreshTeamDb() {
             console.warn('팀 DB 사전 동기화 실패. 로컬 저장을 계속 진행합니다.');
             showToast('동기화 알림', 'Box 최신 데이터 수신 실패. 로컬에 우선 저장됩니다.');
         }
-    } catch(e) {
+    } catch (e) {
         console.warn('동기화 확인 중 오류:', e);
         showToast('동기화 알림', 'Box 확인 중 오류 발생. 로컬에 우선 저장됩니다.');
     }
@@ -2392,8 +2386,8 @@ async function ensureFreshTeamDb() {
 /**
  * [강제 최신화] 수동 동기화 실행
  */
-function manualSync() { 
-    syncWithBox(true, false, true); 
+function manualSync() {
+    syncWithBox(true, false, true);
 }
 
 /**
@@ -2401,9 +2395,9 @@ function manualSync() {
  */
 async function disconnectDB() {
     if (!confirm("⚠️ 현재 연결된 Box 폴더 설정을 해제하시겠습니까? (로컬 데이터도 초기화됩니다)")) return;
-    indexedDB.deleteDatabase('HitachiSfdcDB'); 
+    indexedDB.deleteDatabase('HitachiSfdcDB');
     localStorage.clear();
-    alert("✅ 연결이 해제되었습니다. 초기 상태로 돌아갑니다."); 
+    alert("✅ 연결이 해제되었습니다. 초기 상태로 돌아갑니다.");
     location.reload();
 }
 
@@ -2481,9 +2475,9 @@ async function linkBoxFile() {
             updateSyncGateProgress(5, '폴더 연결 확인', 'Box 폴더 핸들을 저장하고 권한을 검증합니다...', '');
 
             await saveFileHandle('boxDirectoryHandle', dirHandle);
-            
-            if (navigator.storage && navigator.storage.persist) { 
-                try { await navigator.storage.persist(); } catch (e) {} 
+
+            if (navigator.storage && navigator.storage.persist) {
+                try { await navigator.storage.persist(); } catch (e) { }
             }
 
             updateSyncGateProgress(10, '레거시 호환 점검', '폴더 구조를 점검하고 있습니다...', '');
@@ -2492,12 +2486,12 @@ async function linkBoxFile() {
             const btn = document.getElementById("syncBtn");
             if (btn) btn.classList.remove("text-red-500", "font-black");
             const syncIconElem = document.getElementById("syncIcon");
-            if (syncIconElem) syncIconElem.innerText = "sync"; 
+            if (syncIconElem) syncIconElem.innerText = "sync";
             const syncTextElem = document.getElementById("syncText");
             if (syncTextElem) syncTextElem.innerText = "강제 최신화";
 
             await completeInitialConnect();
-        } catch (e) { 
+        } catch (e) {
             if (e.name !== 'AbortError') {
                 console.error(e);
                 setSyncGateState('error', '폴더 연결에 실패했습니다: ' + (e.message || '접근 권한이 부족합니다.'));
@@ -2527,7 +2521,7 @@ async function linkBoxFile() {
 async function completeInitialConnect() {
     setSyncGateState('progress');
     updateSyncGateProgress(12, '최신 데이터 수신', '팀 공용 Box DB에서 최신 데이터를 불러옵니다...', '');
-    
+
     const onProg = (percent, step, detail, counter) => {
         updateSyncGateProgress(percent, step, detail, counter);
     };
@@ -2557,14 +2551,14 @@ function checkSyncGateOnLoad() {
     if (sessionStorage.getItem('syncGateBypassed') === 'yes') return;
     if (!localStorage.getItem('hasCompletedInitialSync')) showSyncGate();
 }
-function showSyncGate() { 
+function showSyncGate() {
     setSyncGateState('initial');
-    const o = document.getElementById('syncGateOverlay'); 
-    if (o) o.classList.remove('hidden'); 
+    const o = document.getElementById('syncGateOverlay');
+    if (o) o.classList.remove('hidden');
 }
-function hideSyncGate() { 
-    const o = document.getElementById('syncGateOverlay'); 
-    if (o) o.classList.add('hidden'); 
+function hideSyncGate() {
+    const o = document.getElementById('syncGateOverlay');
+    if (o) o.classList.add('hidden');
 }
 async function gateConnect() { await linkBoxFile(); }
 function gateSkip() {
@@ -2582,7 +2576,7 @@ async function updateSyncStatusBanner() {
     if (!banner || !icon || !text) return;
 
     const DANGER = "mb-6 px-4 py-3 rounded-md border flex items-center justify-between gap-3 text-xs border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400";
-    const WARN   = "mb-6 px-4 py-3 rounded-md border flex items-center justify-between gap-3 text-xs border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-400";
+    const WARN = "mb-6 px-4 py-3 rounded-md border flex items-center justify-between gap-3 text-xs border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-400";
 
     const isDesktop = 'showDirectoryPicker' in window || 'showOpenFilePicker' in window;
     const dirHandle = await getFileHandle('boxDirectoryHandle');
@@ -2590,19 +2584,19 @@ async function updateSyncStatusBanner() {
     const activeHandle = dirHandle || fileHandle;
 
     if (isDesktop && !activeHandle) {
-        banner.className = DANGER; 
+        banner.className = DANGER;
         icon.innerText = "folder_off";
         text.innerText = "Box DB 폴더가 연결되어 있지 않습니다. 팀원과 데이터가 어긋날 수 있습니다.";
-        banner.classList.remove('hidden'); 
+        banner.classList.remove('hidden');
         return;
     }
     if (activeHandle) {
         const hasPerm = await verifyPermission(activeHandle, true, false);
         if (!hasPerm) {
-            banner.className = DANGER; 
+            banner.className = DANGER;
             icon.innerText = "error";
             text.innerText = "Box 연결 권한이 끊어졌습니다. [지금 동기화]를 눌러 재연결해주세요.";
-            banner.classList.remove('hidden'); 
+            banner.classList.remove('hidden');
             return;
         }
     }
@@ -2610,10 +2604,10 @@ async function updateSyncStatusBanner() {
     const last = parseInt(localStorage.getItem('lastSyncSuccessAt') || '0');
     const elapsed = Date.now() - last;
     if (!last || elapsed > SYNC_STALE_MS) {
-        banner.className = WARN; 
+        banner.className = WARN;
         icon.innerText = "schedule";
         text.innerText = last ? `마지막 동기화로부터 ${Math.floor(elapsed / 60000)}분 경과했습니다. 최신 데이터를 위해 동기화해주세요.` : "아직 동기화 기록이 없습니다.";
-        banner.classList.remove('hidden'); 
+        banner.classList.remove('hidden');
         return;
     }
 
@@ -2628,18 +2622,18 @@ async function handleMobileDB(event) {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = async function(e) {
+    reader.onload = async function (e) {
         const text = e.target.result;
         try {
             let boxData = text ? JSON.parse(text) : {};
             let boxHistory = boxData.workHistory || [];
             let localHistory = await getIDBHistory();
             let mergedMap = new Map();
-            
+
             const getLegacyId = (item) => "LEGACY_" + item.date + "_" + item.machine + "_" + (item.content || "").substring(0, 10);
-            boxHistory.forEach(item => { 
-                if (!item.id) item.id = getLegacyId(item); 
-                mergedMap.set(item.id, item); 
+            boxHistory.forEach(item => {
+                if (!item.id) item.id = getLegacyId(item);
+                mergedMap.set(item.id, item);
             });
             localHistory.forEach(item => {
                 if (!item.id) item.id = getLegacyId(item);
@@ -2648,21 +2642,21 @@ async function handleMobileDB(event) {
                     mergedMap.set(item.id, item);
                 }
             });
-            
+
             let finalMergedHistory = Array.from(mergedMap.values());
             let uniqueHistory = [];
             let seenContent = new Set();
             finalMergedHistory.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
             finalMergedHistory.forEach(item => {
-                const cleanDate = (item.date || "미상").replace(/[^0-9]/g, ""); 
+                const cleanDate = (item.date || "미상").replace(/[^0-9]/g, "");
                 const cleanMachine = (item.machine || "").trim().toUpperCase();
                 const cleanContent = (item.content || "").trim().replace(/\s/g, "");
                 let uniqueKey = `${cleanMachine}|${cleanDate}|${cleanContent}`;
-                if (!seenContent.has(uniqueKey)) { 
-                    seenContent.add(uniqueKey); 
+                if (!seenContent.has(uniqueKey)) {
+                    seenContent.add(uniqueKey);
                     item.yearMonth = getYearMonthFromDate(item.date, item.savedAt);
-                    uniqueHistory.push(item); 
+                    uniqueHistory.push(item);
                 }
             });
 
@@ -2675,20 +2669,20 @@ async function handleMobileDB(event) {
             boxData.lastUpdatedAt = Date.now();
             boxData.lastUpdatedBy = getTeamEditorName();
 
-            let localEq = JSON.parse(localStorage.getItem("equipmentData") || "[]"); 
+            let localEq = JSON.parse(localStorage.getItem("equipmentData") || "[]");
             let isEditingEq = localEq.some(i => i.isEditing);
-            if (boxData.equipment && !isEditingEq) { 
+            if (boxData.equipment && !isEditingEq) {
                 const mergedEq = mergeEquipment(boxData.equipment, localEq);
                 boxData.equipment = mergedEq;
-                localStorage.setItem("equipmentData", JSON.stringify(mergedEq)); 
-                renderTable(); 
+                localStorage.setItem("equipmentData", JSON.stringify(mergedEq));
+                renderTable();
             }
-            if (boxData.recipient) { 
+            if (boxData.recipient) {
                 const localRecip = JSON.parse(localStorage.getItem("recipientData") || "{}");
                 const mergedRecip = mergeRecipients(boxData.recipient, localRecip);
                 boxData.recipient = mergedRecip;
-                localStorage.setItem("recipientData", JSON.stringify(mergedRecip)); 
-                renderRecipientTable(); 
+                localStorage.setItem("recipientData", JSON.stringify(mergedRecip));
+                renderRecipientTable();
             }
             if (boxData.machineNotes) {
                 const localNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
@@ -2697,7 +2691,7 @@ async function handleMobileDB(event) {
                 localStorage.setItem("machineNotes", JSON.stringify(mergedNotes));
             }
             if (boxData.equipMaintenance) {
-                applyIncomingMaintenance(boxData.equipMaintenance); 
+                applyIncomingMaintenance(boxData.equipMaintenance);
             }
 
             await updateHistoryBadge();
@@ -2706,7 +2700,7 @@ async function handleMobileDB(event) {
             }
 
             alert("✅ Box 데이터 로드 및 로컬 데이터 병합 완료!\n(아이폰은 보안상 파일 자동 저장이 불가능합니다.)");
-            
+
             if (confirm("방금 병합된 최신 데이터를 파일로 다운로드 하시겠습니까?\n다운로드 후 Box 폴더에 직접 덮어쓰시면 팀원들에게도 적용됩니다.")) {
                 const blob = new Blob([JSON.stringify(boxData, null, 2)], { type: "text/plain" });
                 const url = URL.createObjectURL(blob);
@@ -2729,7 +2723,7 @@ async function handleMobileDB(event) {
             console.error(error);
             alert('DB 파일 형식이 올바르지 않거나 오류가 발생했습니다.');
         }
-        event.target.value = ''; 
+        event.target.value = '';
     };
     reader.readAsText(file);
 }
@@ -2740,10 +2734,10 @@ async function handleMobileDB(event) {
 async function executeBackupDownload(isManual = false) {
     try {
         let history = await getIDBHistory();
-        let equipment = JSON.parse(localStorage.getItem("equipmentData") || "[]").map(e => { 
-            let obj = { ...e }; 
-            delete obj.isEditing; 
-            return obj; 
+        let equipment = JSON.parse(localStorage.getItem("equipmentData") || "[]").map(e => {
+            let obj = { ...e };
+            delete obj.isEditing;
+            return obj;
         });
         let recipient = JSON.parse(localStorage.getItem("recipientData") || "{}");
         let machineNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
@@ -2761,13 +2755,13 @@ async function executeBackupDownload(isManual = false) {
         const dataStr = JSON.stringify(backupData, null, 2);
         const blob = new Blob([dataStr], { type: "text/plain" });
         const url = URL.createObjectURL(blob);
-        
+
         const d = new Date();
         const yyyy = d.getFullYear();
         const mm = String(d.getMonth() + 1).padStart(2, '0');
         const dd = String(d.getDate()).padStart(2, '0');
         const dateString = `${yyyy}${mm}${dd}`;
-        
+
         const a = document.createElement('a');
         a.href = url;
         a.download = `SFDC_Backup_${dateString}.txt`;
@@ -2792,7 +2786,7 @@ async function executeBackupDownload(isManual = false) {
 async function autoLocalBackup() {
     const lastBackup = localStorage.getItem('lastBackupDate');
     const now = Date.now();
-    const ONE_WEEK = 7 * 24 * 60 * 60 * 1000; 
+    const ONE_WEEK = 7 * 24 * 60 * 60 * 1000;
 
     if (!lastBackup) {
         localStorage.setItem('lastBackupDate', now.toString());
