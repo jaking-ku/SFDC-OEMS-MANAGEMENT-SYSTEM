@@ -3862,6 +3862,21 @@ function renderLaserSection(name) {
     const totalHours = (auto.days * 24) + auto.hours + totalManualHours;
     const displayDays = Math.floor(totalHours / 24);
     const hasRecord = l.replaceDate || totalManualHours > 0;
+
+    // S/N 표시값: 현재 S/N 우선, 없으면 히스토리 최근 기록에서 fallback
+    let displayHeadSN = l.headSN || '';
+    let displayPsSN = l.psSN || '';
+    let displayDiodeSN = l.diodeSN || '';
+
+    if (!displayHeadSN && !displayPsSN && !displayDiodeSN && l.history && l.history.length > 0) {
+        const activeHist = l.history.filter(h => !h.isDeleted);
+        if (activeHist.length > 0) {
+            const lastH = activeHist[activeHist.length - 1];
+            if (lastH.headSN && lastH.headSN !== '-') displayHeadSN = lastH.headSN;
+            if (lastH.psSN && lastH.psSN !== '-') displayPsSN = lastH.psSN;
+            if (lastH.diodeSN && lastH.diodeSN !== '-') displayDiodeSN = lastH.diodeSN;
+        }
+    }
     
     const wrap = document.getElementById('detailLaserWrap');
     wrap.innerHTML = `
@@ -3883,10 +3898,34 @@ function renderLaserSection(name) {
             </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6 p-4 bg-background border border-border rounded">
-            <div><span class="label-base mb-1">Laser Head S/N</span><input class="input-base h-9 px-2 rounded text-xs" id="laserHeadSN" value="${escapeHtml(l.headSN || '')}" placeholder="Head S/N"></div>
-            <div><span class="label-base mb-1">P/S S/N</span><input class="input-base h-9 px-2 rounded text-xs" id="laserPsSN" value="${escapeHtml(l.psSN || '')}" placeholder="P/S S/N"></div>
-            <div><span class="label-base mb-1">Diode S/N</span><input class="input-base h-9 px-2 rounded text-xs" id="laserDiodeSN" value="${escapeHtml(l.diodeSN || '')}" placeholder="Diode S/N"></div>
+        <!-- 🔍 Laser S/N 정보 입력 및 즉시 저장 영역 -->
+        <div class="mb-6 p-4 bg-background border border-border rounded">
+            <div class="flex items-center justify-between mb-3">
+                <span class="label-base !mb-0 font-bold flex items-center gap-1.5 text-text-main">
+                    <span class="material-symbols-outlined text-base text-primary">qr_code_2</span>
+                    현재 장착 Laser S/N 정보
+                </span>
+                <button type="button" class="btn-primary h-8 px-3 text-xs rounded flex items-center gap-1 shadow-sm" onclick="saveLaserSN('${escapeHtml(name)}')">
+                    <span class="material-symbols-outlined text-sm">save</span> S/N 저장
+                </button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                    <span class="label-base mb-1">Laser Head S/N</span>
+                    <input class="input-base h-9 px-2.5 rounded text-xs w-full" id="laserHeadSN" value="${escapeHtml(displayHeadSN)}" placeholder="Head S/N 입력" onchange="saveLaserSN('${escapeHtml(name)}', true)" onkeypress="if(event.key==='Enter')saveLaserSN('${escapeHtml(name)}')">
+                </div>
+                <div>
+                    <span class="label-base mb-1">P/S S/N</span>
+                    <input class="input-base h-9 px-2.5 rounded text-xs w-full" id="laserPsSN" value="${escapeHtml(displayPsSN)}" placeholder="P/S S/N 입력" onchange="saveLaserSN('${escapeHtml(name)}', true)" onkeypress="if(event.key==='Enter')saveLaserSN('${escapeHtml(name)}')">
+                </div>
+                <div>
+                    <span class="label-base mb-1">Diode S/N</span>
+                    <input class="input-base h-9 px-2.5 rounded text-xs w-full" id="laserDiodeSN" value="${escapeHtml(displayDiodeSN)}" placeholder="Diode S/N 입력" onchange="saveLaserSN('${escapeHtml(name)}', true)" onkeypress="if(event.key==='Enter')saveLaserSN('${escapeHtml(name)}')">
+                </div>
+            </div>
+            <p class="text-[11px] text-text-muted mt-2">
+                * S/N를 입력하시면 포커스 이동 시 자동 저장되며, [S/N 저장] 버튼 클릭 또는 엔터 키 입력으로도 즉시 저장됩니다.
+            </p>
         </div>
 
         <div class="border-t border-border pt-6 mt-6">
@@ -3926,14 +3965,54 @@ function renderLaserSection(name) {
     `;
 }
 
+/** 🛡️ Laser S/N 정보 단독 저장 (자동저장 및 버튼 저장 지원) */
+function saveLaserSN(name, isSilent = false) {
+    const headInput = document.getElementById('laserHeadSN');
+    const psInput = document.getElementById('laserPsSN');
+    const diodeInput = document.getElementById('laserDiodeSN');
+    if (!headInput || !psInput || !diodeInput) return;
+
+    const headSN = headInput.value.trim();
+    const psSN = psInput.value.trim();
+    const diodeSN = diodeInput.value.trim();
+
+    const data = getMaintData(name);
+    const l = data.laser;
+
+    l.headSN = headSN;
+    l.psSN = psSN;
+    l.diodeSN = diodeSN;
+
+    // 만약 현재 교체 이력의 가장 최근 활성 이력의 S/N가 '-'이거나 비어있고 이번에 입력했다면 보정
+    if (l.history && l.history.length > 0) {
+        const activeHist = l.history.filter(h => !h.isDeleted);
+        if (activeHist.length > 0) {
+            const lastH = activeHist[activeHist.length - 1];
+            if ((!lastH.headSN || lastH.headSN === '-') && headSN) lastH.headSN = headSN;
+            if ((!lastH.psSN || lastH.psSN === '-') && psSN) lastH.psSN = psSN;
+            if ((!lastH.diodeSN || lastH.diodeSN === '-') && diodeSN) lastH.diodeSN = diodeSN;
+            lastH.updatedAt = Date.now();
+        }
+    }
+
+    saveMaintData(name, data);
+    
+    if (!isSilent) {
+        showToast("저장 완료", "Laser S/N 정보가 안전하게 저장되었습니다.");
+        renderLaserSection(name);
+    } else {
+        showToast("자동 저장", "입력하신 Laser S/N가 저장되었습니다.");
+    }
+}
+
 function saveLaserOffset(name) {
     const val = parseInt(document.getElementById('laserOffsetInput').value) || 0;
     const data = getMaintData(name);
     data.laser.offsetHours = val;
     data.laser.offsetDays = Math.floor(val / 24);
-    data.laser.headSN = document.getElementById('laserHeadSN').value.trim();
-    data.laser.psSN = document.getElementById('laserPsSN').value.trim();
-    data.laser.diodeSN = document.getElementById('laserDiodeSN').value.trim();
+    if (document.getElementById('laserHeadSN')) data.laser.headSN = document.getElementById('laserHeadSN').value.trim();
+    if (document.getElementById('laserPsSN')) data.laser.psSN = document.getElementById('laserPsSN').value.trim();
+    if (document.getElementById('laserDiodeSN')) data.laser.diodeSN = document.getElementById('laserDiodeSN').value.trim();
     saveMaintData(name, data);
     renderLaserSection(name);
     showToast("저장 완료", "Laser 정보 및 누적 시간이 저장되었습니다.");
