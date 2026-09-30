@@ -4260,7 +4260,7 @@ const MAJOR_CONSUMABLE_ITEMS = [
 let selectedFleetConsumableKey = 'laser';
 
 /**
- * 특정 소모품을 교체한 설비 목록 추출 (수동 소모품 등록 데이터 전용 집계)
+ * 특정 소모품을 교체한 설비 목록 추출 (수동 등록 데이터 + 작업 히스토리 자동 파싱 통합 집계)
  * @param {string} itemKey MAJOR_CONSUMABLE_ITEMS의 key
  * @returns {Promise<Array>} 교체 이력이 있는 설비 목록 배열
  */
@@ -4268,11 +4268,75 @@ async function getEquipListByConsumable(itemKey) {
     const equipList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
     const allMaint = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
     
+    // 🔍 4대 주요 소모품(Revolver, Robot, TDI, Z축 실린더)인 경우 작업 히스토리에서 자동 파싱
+    const histMap = {};
+    if (['revolver', 'robot', 'tdi', 'z_cylinder'].includes(itemKey)) {
+        let allHistory = [];
+        if (typeof cachedRawHistory !== 'undefined' && Array.isArray(cachedRawHistory) && cachedRawHistory.length > 0) {
+            allHistory = cachedRawHistory;
+        } else if (typeof getIDBHistory === 'function') {
+            try {
+                allHistory = await getIDBHistory();
+            } catch (e) {
+                allHistory = [];
+            }
+        }
+
+        const pushToMap = (k, d, c) => {
+            if (!k) return;
+            const normKey = k.trim().toUpperCase();
+            if (!histMap[normKey]) histMap[normKey] = [];
+            histMap[normKey].push({ date: d, content: c });
+        };
+
+        allHistory.forEach(e => {
+            if (e.isDeleted) return;
+            const machine = (e.machine || '').trim();
+            const sn = (e.sn || '').trim();
+            const content = (e.content || '').trim();
+            const raw = (e.rawText || '').slice(0, 300);
+            const date = (e.date || '').trim();
+            if (!date || (!machine && !sn)) return;
+
+            // 교체 또는 교환 키워드 확인
+            const hasReplace = /교체|교환|replace|change/i.test(content) || 
+                               (/교체|교환/i.test(raw) && /revolver|리볼버|tdi|robot|로봇|cylinder|실린더|낙하방지/i.test(content));
+            if (!hasReplace) return;
+
+            let matched = false;
+            if (itemKey === 'revolver') {
+                if (/revolver|revolover|리볼버/i.test(content) || /revolver|리볼버/i.test(raw)) {
+                    matched = true;
+                }
+            } else if (itemKey === 'robot') {
+                if (/robot|로봇/i.test(content)) {
+                    matched = true;
+                }
+            } else if (itemKey === 'tdi') {
+                if (/tdi/i.test(content)) {
+                    matched = true;
+                }
+            } else if (itemKey === 'z_cylinder') {
+                const hasZ = /z축|z\s*축|stage\s*z/i.test(content) || /z축|z\s*축/i.test(raw);
+                const hasCyl = /cylinder|실린더|낙하방지/i.test(content);
+                if ((hasZ && hasCyl) || /낙하방지.*(?:cylinder|실린더)/i.test(content)) {
+                    matched = true;
+                }
+            }
+
+            if (matched) {
+                if (machine) pushToMap(machine, date, content);
+                if (sn && sn !== machine) pushToMap(sn, date, content);
+            }
+        });
+    }
+
     const results = [];
 
     equipList.forEach(eq => {
         const snKey = (eq.sn || "").trim();
         const nameKey = (eq.name || "").trim();
+        const nameUpper = nameKey.toUpperCase();
         const maint = allMaint[snKey] || allMaint[nameKey] || {};
 
         let replaceDates = [];
@@ -4280,7 +4344,7 @@ async function getEquipListByConsumable(itemKey) {
         let extraInfo = "";
 
         if (itemKey === 'laser') {
-            // 1. Laser: 수동 등록 데이터만 반영
+            // 1. Laser: 수동 등록 데이터만 반영 (히스토리 제외)
             if (maint.laser) {
                 if (maint.laser.replaceDate) replaceDates.push(maint.laser.replaceDate);
                 (maint.laser.history || []).forEach(h => {
@@ -4292,7 +4356,7 @@ async function getEquipListByConsumable(itemKey) {
                 if (maint.laser.headSN) extraInfo = `Head S/N: ${maint.laser.headSN}`;
             }
         } else if (itemKey === 'scale_head') {
-            // 2. Scale Head: 수동 등록 데이터만 반영
+            // 2. Scale Head: 수동 등록 데이터만 반영 (히스토리 제외)
             const axesFound = new Set();
             if (maint.scaleHead) {
                 Object.keys(maint.scaleHead).forEach(ax => {
@@ -4314,7 +4378,7 @@ async function getEquipListByConsumable(itemKey) {
                 extraInfo = `교체 축: ${Array.from(axesFound).join(", ")}`;
             }
         } else if (itemKey === 'revolver') {
-            // 3. Revolver: 수동 소모품 교환 이력만 반영
+            // 3. Revolver: 수동 소모품 등록 + 작업 히스토리 자동 파싱 병합
             (maint.consumables || []).forEach(c => {
                 if (!c.isDeleted) {
                     const n = (c.name || "").toLowerCase();
@@ -4324,8 +4388,13 @@ async function getEquipListByConsumable(itemKey) {
                     }
                 }
             });
+            const hList = [...(histMap[nameUpper] || []), ...(snKey ? (histMap[snKey.toUpperCase()] || []) : [])];
+            hList.forEach(h => {
+                if (h.date) replaceDates.push(h.date);
+                if (h.content) detailNotes.push(h.content);
+            });
         } else if (itemKey === 'robot') {
-            // 4. Robot: 수동 소모품 교환 이력만 반영
+            // 4. Robot: 수동 소모품 등록 + 작업 히스토리 자동 파싱 병합
             (maint.consumables || []).forEach(c => {
                 if (!c.isDeleted) {
                     const n = (c.name || "").toLowerCase();
@@ -4335,8 +4404,13 @@ async function getEquipListByConsumable(itemKey) {
                     }
                 }
             });
+            const hList = [...(histMap[nameUpper] || []), ...(snKey ? (histMap[snKey.toUpperCase()] || []) : [])];
+            hList.forEach(h => {
+                if (h.date) replaceDates.push(h.date);
+                if (h.content) detailNotes.push(h.content);
+            });
         } else if (itemKey === 'tdi') {
-            // 5. TDI: 수동 소모품 교환 이력만 반영
+            // 5. TDI: 수동 소모품 등록 + 작업 히스토리 자동 파싱 병합
             (maint.consumables || []).forEach(c => {
                 if (!c.isDeleted) {
                     const n = (c.name || "").toLowerCase();
@@ -4346,8 +4420,13 @@ async function getEquipListByConsumable(itemKey) {
                     }
                 }
             });
+            const hList = [...(histMap[nameUpper] || []), ...(snKey ? (histMap[snKey.toUpperCase()] || []) : [])];
+            hList.forEach(h => {
+                if (h.date) replaceDates.push(h.date);
+                if (h.content) detailNotes.push(h.content);
+            });
         } else if (itemKey === 'z_cylinder') {
-            // 6. Z축 낙하방지 Cylinder: 수동 소모품 교환 이력만 반영
+            // 6. Z축 낙하방지 Cylinder: 수동 소모품 등록 + 작업 히스토리 자동 파싱 병합
             (maint.consumables || []).forEach(c => {
                 if (!c.isDeleted) {
                     const n = (c.name || "").toLowerCase();
@@ -4358,6 +4437,11 @@ async function getEquipListByConsumable(itemKey) {
                         if (c.note) detailNotes.push(c.note);
                     }
                 }
+            });
+            const hList = [...(histMap[nameUpper] || []), ...(snKey ? (histMap[snKey.toUpperCase()] || []) : [])];
+            hList.forEach(h => {
+                if (h.date) replaceDates.push(h.date);
+                if (h.content) detailNotes.push(h.content);
             });
         }
 
