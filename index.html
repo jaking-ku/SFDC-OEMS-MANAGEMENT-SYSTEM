@@ -734,12 +734,21 @@
     </section>
 
 <section id="equipDetail" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
-        <div class="border-b border-border pb-4">
-            <button class="btn-text mb-3 flex items-center gap-1" onclick="closeEquipDetail()">
-                <span class="material-symbols-outlined text-sm">arrow_back</span> 설비 목록으로
-            </button>
-            <h2 class="text-2xl font-bold text-text-main" id="detailTitle">-</h2>
-            <p class="text-sm text-text-muted mt-1" id="detailSubtitle">-</p>
+        <div class="border-b border-border pb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+                <button class="btn-text mb-3 flex items-center gap-1" onclick="closeEquipDetail()">
+                    <span class="material-symbols-outlined text-sm">arrow_back</span> 설비 목록으로
+                </button>
+                <h2 class="text-2xl font-bold text-text-main" id="detailTitle">-</h2>
+                <p class="text-sm text-text-muted mt-1" id="detailSubtitle">-</p>
+            </div>
+            <!-- 🔎 상세 페이지 전용 SFDC 검색창 연동 -->
+            <div class="flex items-center w-full md:w-80">
+                <input type="text" id="detailSfSearchInput" class="input-base h-10 px-4 rounded-l-md rounded-r-none border-r-0 flex-1 text-xs" placeholder="SFDC 검색 창" onkeypress="if(event.key==='Enter')searchSalesforce(null, 'detailSfSearchInput')">
+                <button class="h-10 px-4 bg-[#0070d2] hover:bg-[#005fb2] text-white text-xs font-bold rounded-r-md transition-colors flex items-center gap-1 whitespace-nowrap" onclick="searchSalesforce(null, 'detailSfSearchInput')" title="Salesforce에서 검색">
+                    <span class="material-symbols-outlined text-sm">search</span> 검색
+                </button>
+            </div>
         </div>
 
         <div class="card-base p-6 rounded-md grid grid-cols-2 md:grid-cols-4 gap-6" id="detailInfoGrid"></div>
@@ -4723,12 +4732,34 @@ async function renderEquipDetail(eq) {
     currentDetailEquip = eq;
     document.getElementById('detailTitle').textContent = eq.name;
     document.getElementById('detailSubtitle').textContent = `${eq.line || '-'} Line · ${eq.model || '-'} · ${eq.location || '-'}`;
+
+    let snContentHtml = `<p class="text-sm font-mono text-text-main mt-1">${escapeHtml(eq.sn || '-')}</p>`;
+    if (eq.sn && eq.sn.trim() !== '' && eq.sn !== '-') {
+        const sfdcSearchUrl = getSalesforceSearchUrl(eq.sn);
+        snContentHtml = `
+            <div class="flex items-center gap-2 mt-1 flex-wrap">
+                <span class="text-sm font-mono font-semibold text-text-main">${escapeHtml(eq.sn)}</span>
+                <a href="${sfdcSearchUrl}" target="_blank" rel="noopener noreferrer" 
+                   class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[11px] font-bold bg-[#0070d2]/10 text-[#0070d2] hover:bg-[#0070d2] hover:text-white transition-all shadow-sm" 
+                   title="Salesforce에서 S/N(${escapeHtml(eq.sn)}) 검색 결과 새 창으로 열기">
+                    <span>SFDC 열기</span>
+                    <span class="material-symbols-outlined text-[13px]">open_in_new</span>
+                </a>
+            </div>
+        `;
+    }
+
     document.getElementById('detailInfoGrid').innerHTML = `
         <div><span class="label-base">라인</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.line || '-')}</p></div>
         <div><span class="label-base">모델명</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.model || '-')}</p></div>
-        <div><span class="label-base">S/N</span><p class="text-sm font-mono text-text-main mt-1">${escapeHtml(eq.sn || '-')}</p></div>
+        <div><span class="label-base">S/N</span>${snContentHtml}</div>
         <div><span class="label-base">위치</span><p class="text-sm font-bold text-text-main mt-1">${escapeHtml(eq.location || '-')}</p></div>
     `;
+
+    const detailSfInput = document.getElementById('detailSfSearchInput');
+    if (detailSfInput) {
+        detailSfInput.value = (eq.sn && eq.sn !== '-') ? eq.sn : '';
+    }
     
     renderEquipDetailNotes(eq);
     await renderEquipDetailHistory(eq);
@@ -4971,15 +5002,13 @@ function deleteRecipient(l) {
     } 
 }
 
-/** 🔎 Salesforce Lightning 전용 Base64 URL 검색 생성기 */
-function searchSalesforce() {
-    const query = document.getElementById('sfSearchInput').value.trim();
-    if (!query) { alert("검색어를 입력해주세요."); return; }
-    
+/** 🔎 Salesforce Lightning 전용 검색 URL 생성기 */
+function getSalesforceSearchUrl(query) {
+    if (!query || !query.trim()) return '';
     const sfData = {
         "componentDef": "forceSearch:searchPageDesktop",
         "attributes": {
-            "term": query,
+            "term": query.trim(),
             "scopeMap": { "type": "TOP_RESULTS" },
             "context": {
                 "FILTERS": {},
@@ -4995,9 +5024,25 @@ function searchSalesforce() {
     const jsonString = JSON.stringify(sfData);
     const encodedData = btoa(encodeURIComponent(jsonString).replace(/%([0-9A-F]{2})/g, (match, p1) => String.fromCharCode(parseInt(p1, 16))));
     const targetPath = "/one/one.app#" + encodedData;
-    const sfSearchUrl = "https://hht.my.salesforce.com/?startURL=" + encodeURIComponent(targetPath);
+    return "https://hht.my.salesforce.com/?startURL=" + encodeURIComponent(targetPath);
+}
+
+/** 🔎 Salesforce Lightning 전용 Base64 URL 검색 실행기 */
+function searchSalesforce(customQuery, inputId = 'sfSearchInput') {
+    let query = customQuery;
+    if (!query) {
+        const inputElem = document.getElementById(inputId || 'sfSearchInput');
+        query = inputElem ? inputElem.value.trim() : '';
+    }
+    if (!query) { 
+        alert("검색어를 입력해주세요."); 
+        return; 
+    }
     
-    window.open(sfSearchUrl, "_blank");
+    const sfSearchUrl = getSalesforceSearchUrl(query);
+    if (sfSearchUrl) {
+        window.open(sfSearchUrl, "_blank");
+    }
 }
 
 
