@@ -3371,7 +3371,14 @@ function applyExtractedMaintenance(machine, category, mailDate) {
             if (shDate) {
                 const target = data.scaleHead[a.key];
                 if (target.replaceDate) {
-                    target.history.push({ date: target.replaceDate, sn: target.sn || "-" });
+                    const nowTs = Date.now();
+                    target.history.push({ 
+                        id: 'SH_' + a.key + '_' + nowTs.toString(36) + Math.random().toString(36).slice(2, 6),
+                        date: target.replaceDate, 
+                        sn: target.sn || '없음',
+                        isDeleted: false,
+                        updatedAt: nowTs
+                    });
                 }
                 target.replaceDate = shDate;
                 if (shSn) target.sn = shSn;
@@ -3710,12 +3717,12 @@ function mergeMaintDataObjects(target, source) {
     SCALE_AXES.forEach(a => {
         const sa = source.scaleHead[a.key]; 
         const ta = target.scaleHead[a.key];
-        ta.history = dedupeHistoryArray([...ta.history, ...sa.history]);
-        const activeHist = ta.history.filter(h => !h.isDeleted);
-        if (activeHist.length) { 
-            const last = activeHist[activeHist.length - 1]; 
-            ta.replaceDate = last.date; 
-            ta.sn = last.sn || ta.sn; 
+        ta.history = dedupeHistoryArray([...(ta.history || []), ...(sa.history || [])]);
+        if (sa.replaceDate && (!ta.replaceDate || new Date(sa.replaceDate) > new Date(ta.replaceDate))) {
+            ta.replaceDate = sa.replaceDate;
+            ta.sn = sa.sn || ta.sn;
+        } else if (!ta.sn && sa.sn) {
+            ta.sn = sa.sn;
         }
     });
 
@@ -4074,53 +4081,132 @@ function deleteLaserHistory(name, idOrDate) {
     showToast("삭제 완료", "교체 이력이 삭제되었습니다.");
 }
 
-/** Scale Head 5개 축 유지보수 섹션 렌더링 */
+/** Scale Head 5개 축 유지보수 섹션 토글 */
 function toggleScaleHeadHistory(key) { 
-    document.getElementById(`scaleHeadHist_${key}`).classList.toggle('hidden'); 
+    const el = document.getElementById(`scaleHeadHist_${key}`);
+    if (el) el.classList.toggle('hidden'); 
 }
 
-function saveScaleHeadAxisDate(name, key, value) {
+/** 현재 장착 중인 Scale Head 정보 단순 보정 저장 (오타 수정용, 이력 이동 없음) */
+function saveScaleHeadAxisDate(name, key, value, isSilent = false) {
     const data = getMaintData(name);
-    data.scaleHead[key].replaceDate = value || null;
+    const dateInput = document.getElementById(`scaleHeadDate_${key}`);
     const snInput = document.getElementById(`scaleHeadSn_${key}`);
+    
+    const dateVal = value !== undefined ? value : (dateInput ? dateInput.value : data.scaleHead[key].replaceDate);
+    data.scaleHead[key].replaceDate = dateVal || null;
     if (snInput) data.scaleHead[key].sn = snInput.value.trim();
+    
     saveMaintData(name, data);
     renderScaleHeadSection(name);
-    showToast("저장 완료", `Scale Head [${key}] 축 교체일이 저장되었습니다.`);
+    if (!isSilent) {
+        showToast("보정 저장 완료", `Scale Head [${key}] 축 현재 장착 정보가 수정되었습니다.`);
+    }
 }
 
+/** Scale Head 5개 축 유지보수 섹션 렌더링 (방안 1: 현재 정보 및 새 교체 분리 UI) */
 function renderScaleHeadSection(name) {
     const data = getMaintData(name);
     const wrap = document.getElementById('detailScaleHeadWrap');
+    if (!wrap) return;
+
     wrap.innerHTML = `
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             ${SCALE_AXES.map(a => {
                 const item = data.scaleHead[a.key] || { replaceDate: null, history: [] };
                 const activeHist = (item.history || []).filter(h => !h.isDeleted);
                 const days = daysSince(item.replaceDate);
-                const hasDate = !!item.replaceDate;
+                const hasDate = Boolean(item.replaceDate);
                 const histCount = activeHist.length;
+                const todayStr = new Date().toISOString().slice(0, 10);
+
                 return `
-                    <div class="card-base p-4 rounded-md border border-border bg-background/50 flex flex-col justify-between">
+                    <div class="card-base p-4 rounded-md border border-border bg-background/50 flex flex-col justify-between space-y-3">
                         <div>
-                            <div class="flex items-center justify-between mb-2">
-                                <span class="text-sm font-black text-primary">${a.label} 축</span>
-                                <span class="text-xs font-bold ${hasDate ? 'text-primary' : 'text-text-muted'}">${hasDate ? `${days}일 사용 중` : '기록 없음'}</span>
+                            <div class="flex items-center justify-between pb-2 border-b border-border/40">
+                                <span class="text-sm font-black text-primary flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-base">straighten</span>
+                                    ${a.label} 축
+                                </span>
+                                <span class="text-xs font-bold ${hasDate ? 'text-primary' : 'text-text-muted'}">
+                                    ${hasDate ? `${days}일 사용 중` : '장착 기록 없음'}
+                                </span>
                             </div>
-                            <div class="space-y-2 mb-3">
-                                <div><label class="label-base mb-1 text-[10px]">교체일자</label><input type="date" class="input-base h-8 px-2 text-xs rounded" id="scaleHeadDate_${a.key}" value="${item.replaceDate || ''}" onchange="saveScaleHeadAxisDate('${escapeHtml(name)}', '${a.key}', this.value)"></div>
-                                <div><label class="label-base mb-1 text-[10px]">Scale Head S/N</label><input class="input-base h-8 px-2 text-xs rounded" id="scaleHeadSn_${a.key}" value="${escapeHtml(item.sn || '')}" placeholder="S/N" onchange="saveScaleHeadAxisDate('${escapeHtml(name)}', '${a.key}', document.getElementById('scaleHeadDate_${a.key}').value)"></div>
+
+                            <!-- 1. 현재 장착 정보 (조회 및 단순 오타 보정) -->
+                            <div class="mt-3 bg-surface/60 p-3 rounded border border-border/60 space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[11px] font-bold text-text-main flex items-center gap-1">
+                                        <span class="material-symbols-outlined text-[14px] text-emerald-500">check_circle</span>
+                                        현재 장착 정보
+                                    </span>
+                                    <button type="button" class="btn-text text-[10px] text-primary hover:underline flex items-center gap-0.5" 
+                                            onclick="saveScaleHeadAxisDate('${escapeHtml(name)}', '${a.key}')" title="오타 수정 후 저장">
+                                        <span class="material-symbols-outlined text-[13px]">save</span>
+                                        정보 저장
+                                    </button>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="label-base mb-1 text-[10px]">현재 교체일</label>
+                                        <input type="date" class="input-base h-8 px-2 text-xs rounded" id="scaleHeadDate_${a.key}" 
+                                               value="${item.replaceDate || ''}" 
+                                               onchange="saveScaleHeadAxisDate('${escapeHtml(name)}', '${a.key}', this.value, true)">
+                                    </div>
+                                    <div>
+                                        <label class="label-base mb-1 text-[10px]">현재 S/N</label>
+                                        <input class="input-base h-8 px-2 text-xs rounded" id="scaleHeadSn_${a.key}" 
+                                               value="${escapeHtml(item.sn || '')}" placeholder="현재 S/N" 
+                                               onchange="saveScaleHeadAxisDate('${escapeHtml(name)}', '${a.key}', document.getElementById('scaleHeadDate_${a.key}').value, true)">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 2. 새 Scale Head 교체 등록 (기존 기록 이력 자동 보관 후 신규 등록) -->
+                            <div class="mt-3 bg-primary/5 p-3 rounded border border-primary/20 space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[11px] font-bold text-primary flex items-center gap-1">
+                                        <span class="material-symbols-outlined text-[14px]">autorenew</span>
+                                        새 Scale Head 교체
+                                    </span>
+                                    <span class="text-[10px] text-primary/80 font-medium">기존 기록 자동 이력 보관</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="label-base mb-1 text-[10px]">새 교체일</label>
+                                        <input type="date" class="input-base h-8 px-2 text-xs rounded bg-surface" id="newScaleHeadDate_${a.key}" value="${todayStr}">
+                                    </div>
+                                    <div>
+                                        <label class="label-base mb-1 text-[10px]">새 S/N</label>
+                                        <input class="input-base h-8 px-2 text-xs rounded bg-surface" id="newScaleHeadSn_${a.key}" placeholder="신규 부품 S/N" 
+                                               onkeypress="if(event.key==='Enter') completeScaleHeadReplace('${escapeHtml(name)}', '${a.key}')">
+                                    </div>
+                                </div>
+                                <button type="button" class="btn-primary w-full h-8 text-[11px] rounded flex items-center justify-center gap-1.5 font-bold shadow-sm" 
+                                        onclick="completeScaleHeadReplace('${escapeHtml(name)}', '${a.key}')">
+                                    <span class="material-symbols-outlined text-[14px]">archive</span>
+                                    이력 보관 및 교체완료
+                                </button>
                             </div>
                         </div>
-                        <div class="border-t border-border/50 pt-2 flex items-center justify-between">
-                            <button class="btn-text text-[10px]" onclick="toggleScaleHeadHistory('${a.key}')">이력 (${histCount}건)</button>
-                            <button class="btn-text text-[10px] text-primary hover:underline" onclick="completeScaleHeadReplace('${escapeHtml(name)}', '${a.key}')">교체완료</button>
-                        </div>
-                        <div id="scaleHeadHist_${a.key}" class="hidden mt-2 pt-2 border-t border-border/50 text-[10px] space-y-1">
-                            ${histCount > 0 ? activeHist.slice().reverse().map((h) => {
-                                const hId = h.id || h.date;
-                                return `<div class="flex justify-between items-center text-text-muted"><span>${escapeHtml(h.date)} (${escapeHtml(h.sn || '-')})</span><button class="text-red-500 hover:underline" onclick="deleteScaleHeadHistory('${escapeHtml(name)}', '${a.key}', '${escapeHtml(hId)}')">삭제</button></div>`;
-                            }).join('') : '<p class="text-text-muted">이전 이력 없음</p>'}
+
+                        <!-- 3. 교체 히스토리 토글 -->
+                        <div class="pt-2 border-t border-border/50">
+                            <button type="button" class="btn-text text-[11px] w-full flex items-center justify-between text-text-muted hover:text-text-main py-1" onclick="toggleScaleHeadHistory('${a.key}')">
+                                <span class="font-bold">교체 히스토리 (${histCount}건)</span>
+                                <span class="material-symbols-outlined text-sm">history</span>
+                            </button>
+                            <div id="scaleHeadHist_${a.key}" class="hidden mt-2 pt-2 border-t border-border/40 text-[10px] space-y-1.5 max-h-40 overflow-y-auto">
+                                ${histCount > 0 ? activeHist.slice().reverse().map((h) => {
+                                    const hId = h.id || h.date;
+                                    return `
+                                        <div class="flex justify-between items-center text-text-muted bg-surface/40 px-2 py-1.5 rounded border border-border/30">
+                                            <span class="font-mono">${escapeHtml(h.date)} <span class="text-text-main font-bold">(${escapeHtml(h.sn || '없음')})</span></span>
+                                            <button type="button" class="text-red-500 hover:underline font-bold text-[10px]" onclick="deleteScaleHeadHistory('${escapeHtml(name)}', '${a.key}', '${escapeHtml(hId)}')">삭제</button>
+                                        </div>
+                                    `;
+                                }).join('') : '<p class="text-text-muted text-[10px] py-1 text-center">이전 교체 이력이 없습니다.</p>'}
+                            </div>
                         </div>
                     </div>
                 `;
@@ -4129,31 +4215,40 @@ function renderScaleHeadSection(name) {
     `;
 }
 
+/** 새 Scale Head 교체 완료 처리 (기존 기록 이력 보관 및 새 정보 갱신) */
 function completeScaleHeadReplace(name, key) {
-    const input = document.getElementById(`scaleHeadDate_${key}`);
-    const snInput = document.getElementById(`scaleHeadSn_${key}`);
-    const dateVal = input ? input.value : '';
-    const snVal = snInput ? snInput.value.trim() : '';
-    if (!dateVal) { showToast("오류", "교체일자를 먼저 선택해주세요."); return; }
+    const newDateInput = document.getElementById(`newScaleHeadDate_${key}`);
+    const newSnInput = document.getElementById(`newScaleHeadSn_${key}`);
+    const newDateVal = newDateInput ? newDateInput.value : '';
+    const newSnVal = newSnInput ? newSnInput.value.trim() : '';
+
+    if (!newDateVal) { 
+        showToast("오류", "새 교체일자를 입력해주세요."); 
+        return; 
+    }
     
     const data = getMaintData(name);
     const target = data.scaleHead[key];
     const nowTs = Date.now();
+
+    // 기존 등록된 교체일이 있다면 안전하게 이전 이력(history)에 보관
     if (target.replaceDate) {
         target.history.push({ 
             id: 'SH_' + key + '_' + nowTs.toString(36) + Math.random().toString(36).slice(2, 6),
             date: target.replaceDate, 
-            sn: target.sn || '-',
+            sn: target.sn || '없음',
             isDeleted: false,
             updatedAt: nowTs
         });
     }
-    const today = new Date().toISOString().slice(0, 10);
-    target.replaceDate = today;
-    if (snVal) target.sn = snVal;
+
+    // 새 교체 일자와 새 S/N로 현재 장착 정보 갱신
+    target.replaceDate = newDateVal;
+    target.sn = newSnVal;
+
     saveMaintData(name, data);
     renderScaleHeadSection(name);
-    showToast("교체 완료", `[${key}] 축이 오늘(${today}) 일자로 갱신되었습니다.`);
+    showToast("교체 완료", `[${key}] 축 교체가 완료되었습니다. 기존 기록은 이력에 보관되었습니다.`);
 }
 
 function deleteScaleHeadHistory(name, key, idOrDate) {
