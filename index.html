@@ -696,15 +696,28 @@
 
         <!-- 주요 소모품 교체 설비 현황 (Consumables Fleet View) -->
         <div class="card-base overflow-hidden rounded-md" id="consumableFleetCard">
-            <button class="w-full px-6 py-4 bg-background border-b border-border flex justify-between items-center hover:opacity-80 transition-opacity text-left cursor-pointer" onclick="this.parentElement.classList.toggle('accordion-open')">
+            <div class="w-full px-6 py-4 bg-background border-b border-border flex justify-between items-center text-left">
                 <span class="label-base text-text-main !mb-0 flex items-center gap-2">
                     <span class="material-symbols-outlined text-lg text-primary">published_with_changes</span> 주요 소모품 교체 설비 현황
                 </span>
-                <div class="flex items-center gap-3">
-                    <span class="text-xs text-text-muted hidden md:inline">품목을 클릭하면 해당 부품을 교체한 설비 목록을 확인할 수 있습니다.</span>
-                    <span class="material-symbols-outlined accordion-rotate text-text-main">expand_more</span>
+                <div class="flex items-center gap-2 md:gap-3 flex-wrap justify-end">
+                    <button type="button" class="btn-primary h-8 px-3 text-xs rounded flex items-center gap-1.5 font-bold shadow-xs hover:brightness-110 transition-all" onclick="openConsumableMatrixModal()" title="전체 설비 호기(Y축)와 8대 주요 소모품(X축) 종합 교체 매트릭스 상세페이지 열기">
+                        <span class="material-symbols-outlined text-sm">grid_on</span>
+                        <span>종합 현황 매트릭스</span>
+                    </button>
+                    <div class="flex items-center bg-surface p-0.5 rounded border border-border text-xs">
+                        <button type="button" id="fleetSortRecentBtn" class="px-2.5 py-1 text-[11px] font-bold rounded transition-all bg-primary text-white" onclick="setFleetSortMode('recent')" title="최근 교체일자 순 정렬">
+                            최신순
+                        </button>
+                        <button type="button" id="fleetSortLineBtn" class="px-2.5 py-1 text-[11px] font-bold rounded transition-all text-text-muted hover:text-text-main" onclick="setFleetSortMode('line')" title="라인 및 설비 호기 순 정렬">
+                            라인별
+                        </button>
+                    </div>
+                    <button type="button" class="text-text-muted hover:text-text-main p-1 cursor-pointer" onclick="document.getElementById('consumableFleetCard').classList.toggle('accordion-open')">
+                        <span class="material-symbols-outlined accordion-rotate text-text-main align-middle">expand_more</span>
+                    </button>
                 </div>
-            </button>
+            </div>
             <div class="accordion-content">
                 <div class="p-4 bg-surface/30 border-b border-border/50">
                     <div class="flex flex-wrap gap-2" id="consumableFleetChips"></div>
@@ -866,6 +879,72 @@
         </div>
     </div>
 </footer>
+
+<!-- 📊 전체 설비 주요 소모품 교체 종합 매트릭스 상세 모달 -->
+<div id="consumableMatrixModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 md:p-6 animate-[fadeIn_0.2s_ease-out]">
+    <div class="bg-surface border border-border w-full max-w-[96vw] xl:max-w-[1500px] h-[92vh] rounded-xl shadow-2xl flex flex-col overflow-hidden">
+        <!-- 1. 헤더 -->
+        <div class="px-6 py-4 bg-background border-b border-border flex items-center justify-between shrink-0">
+            <div class="flex items-center gap-3">
+                <span class="p-2 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                    <span class="material-symbols-outlined text-2xl">grid_on</span>
+                </span>
+                <div>
+                    <h3 class="text-base md:text-lg font-black text-text-main flex items-center gap-2">
+                        전체 설비 주요 소모품 교체 종합 매트릭스
+                        <span class="text-xs px-2 py-0.5 rounded font-normal bg-primary/10 text-primary border border-primary/20" id="matrixEquipCountBadge">총 0대</span>
+                    </h3>
+                    <p class="text-xs text-text-muted mt-0.5">라인별 설비 호기(Y축)와 8대 주요 소모품(X축)의 최종 교체일 및 교체 현황을 한눈에 조회합니다.</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <button type="button" class="btn-text h-9 px-3 border border-border rounded flex items-center gap-1.5 text-xs text-text-muted hover:text-text-main" onclick="exportConsumableMatrixCsv()">
+                    <span class="material-symbols-outlined text-base">download</span>
+                    CSV 내보내기
+                </button>
+                <button type="button" class="btn-text h-9 w-9 rounded-lg hover:bg-background flex items-center justify-center text-text-muted hover:text-text-main" onclick="closeConsumableMatrixModal()">
+                    <span class="material-symbols-outlined text-xl">close</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 2. 필터 툴바 & 품목 요약 통계 -->
+        <div class="px-6 py-3 bg-surface/50 border-b border-border flex flex-wrap items-center justify-between gap-3 shrink-0">
+            <div class="flex items-center gap-3 flex-wrap">
+                <!-- 라인 필터 -->
+                <div class="flex items-center gap-1.5 text-xs">
+                    <span class="text-text-muted font-bold">라인:</span>
+                    <select id="matrixLineFilter" class="input-base h-8 px-2 text-xs rounded w-28" onchange="renderConsumableMatrixContent()">
+                        <option value="ALL">전체 라인</option>
+                    </select>
+                </div>
+                <!-- 호기/모델 검색 -->
+                <div class="relative w-48 md:w-60">
+                    <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted text-sm">search</span>
+                    <input id="matrixSearchFilter" class="input-base h-8 pl-8 pr-3 text-xs rounded w-full" placeholder="설비명 또는 모델 검색..." oninput="renderConsumableMatrixContent()">
+                </div>
+                <!-- 교체 여부 필터 -->
+                <div class="flex items-center gap-1.5 text-xs">
+                    <span class="text-text-muted font-bold">상태:</span>
+                    <select id="matrixStatusFilter" class="input-base h-8 px-2 text-xs rounded w-32" onchange="renderConsumableMatrixContent()">
+                        <option value="ALL">전체 설비</option>
+                        <option value="HAS_REPLACE">교체 이력 있음</option>
+                        <option value="NO_REPLACE">전체 미교체</option>
+                    </select>
+                </div>
+            </div>
+            <!-- 품목별 통계 칩 바 -->
+            <div class="flex items-center gap-2 overflow-x-auto text-[11px]" id="matrixItemSummaryChips"></div>
+        </div>
+
+        <!-- 3. 매트릭스 테이블 본문 -->
+        <div class="flex-1 overflow-auto p-4 bg-background/30" id="matrixTableContainer">
+            <div class="text-center py-12 text-text-muted text-xs">
+                데이터를 분석하고 매트릭스를 불러오는 중입니다...
+            </div>
+        </div>
+    </div>
+</div>
 
 <div class="fixed bottom-10 right-10 bg-surface border border-border p-6 shadow-2xl flex items-center gap-4 z-[60] transform translate-y-32 opacity-0 transition-all duration-300 rounded-lg" id="toast">
     <div class="h-10 w-10 bg-primary flex items-center justify-center text-white rounded"><span class="material-symbols-outlined">check</span></div>
@@ -4342,17 +4421,37 @@ function deleteConsumableEntry(name, id) {
     showToast("삭제 완료", "소모품 교환 이력이 삭제되었습니다.");
 }
 
-/** 주요 6대 소모품 품목 정의 */
+/** 주요 8대 소모품 품목 정의 (New Hand 교환, Ionizer 탈착 추가) */
 const MAJOR_CONSUMABLE_ITEMS = [
     { key: 'laser', label: 'Laser', icon: 'bolt' },
     { key: 'scale_head', label: 'Scale Head', icon: 'straighten' },
     { key: 'revolver', label: 'Revolver', icon: 'sync' },
     { key: 'robot', label: 'Robot', icon: 'precision_manufacturing' },
     { key: 'tdi', label: 'TDI', icon: 'videocam' },
-    { key: 'z_cylinder', label: 'Z축 낙하방지 Cylinder', icon: 'height' }
+    { key: 'z_cylinder', label: 'Z축 Cylinder', icon: 'height' },
+    { key: 'new_hand', label: 'New Hand', icon: 'front_hand' },
+    { key: 'ionizer', label: 'Ionizer', icon: 'mode_fan' }
 ];
 
 let selectedFleetConsumableKey = 'laser';
+let fleetSortMode = 'recent'; // 'recent' (최신순) | 'line' (라인별)
+
+/** 정렬 모드 변경 (최신순 vs 라인별) */
+function setFleetSortMode(mode) {
+    fleetSortMode = mode;
+    const recentBtn = document.getElementById('fleetSortRecentBtn');
+    const lineBtn = document.getElementById('fleetSortLineBtn');
+    if (recentBtn && lineBtn) {
+        if (mode === 'recent') {
+            recentBtn.className = "px-2.5 py-1 text-[11px] font-bold rounded transition-all bg-primary text-white";
+            lineBtn.className = "px-2.5 py-1 text-[11px] font-bold rounded transition-all text-text-muted hover:text-text-main";
+        } else {
+            recentBtn.className = "px-2.5 py-1 text-[11px] font-bold rounded transition-all text-text-muted hover:text-text-main";
+            lineBtn.className = "px-2.5 py-1 text-[11px] font-bold rounded transition-all bg-primary text-white";
+        }
+    }
+    renderConsumableFleetSection();
+}
 
 /**
  * 특정 소모품을 교체한 설비 목록 추출 (수동 등록 데이터 + 작업 히스토리 자동 파싱 통합 집계)
@@ -4363,9 +4462,9 @@ async function getEquipListByConsumable(itemKey) {
     const equipList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
     const allMaint = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
     
-    // 🔍 4대 주요 소모품(Revolver, Robot, TDI, Z축 실린더)인 경우 작업 히스토리에서 자동 파싱
+    // 작업 히스토리 자동 파싱 대상 품목
     const histMap = {};
-    if (['revolver', 'robot', 'tdi', 'z_cylinder'].includes(itemKey)) {
+    if (['revolver', 'robot', 'tdi', 'z_cylinder', 'new_hand', 'ionizer'].includes(itemKey)) {
         let allHistory = [];
         if (typeof cachedRawHistory !== 'undefined' && Array.isArray(cachedRawHistory) && cachedRawHistory.length > 0) {
             allHistory = cachedRawHistory;
@@ -4389,39 +4488,62 @@ async function getEquipListByConsumable(itemKey) {
             const machine = (e.machine || '').trim();
             const sn = (e.sn || '').trim();
             const content = (e.content || '').trim();
-            const raw = (e.rawText || '').slice(0, 300);
+            const raw = (e.rawText || '').slice(0, 500);
             const date = (e.date || '').trim();
             if (!date || (!machine && !sn)) return;
 
-            // 교체 또는 교환 키워드 확인
-            const hasReplace = /교체|교환|replace|change/i.test(content) || 
-                               (/교체|교환/i.test(raw) && /revolver|리볼버|tdi|robot|로봇|cylinder|실린더|낙하방지/i.test(content));
-            if (!hasReplace) return;
-
             let matched = false;
+            let noteContent = content;
+
             if (itemKey === 'revolver') {
-                if (/revolver|revolover|리볼버/i.test(content) || /revolver|리볼버/i.test(raw)) {
+                const hasReplace = /교체|교환|replace|change/i.test(content) || /교체|교환/i.test(raw);
+                if (hasReplace && (/revolver|revolover|리볼버/i.test(content) || /revolver|리볼버/i.test(raw))) {
                     matched = true;
                 }
             } else if (itemKey === 'robot') {
-                if (/robot|로봇/i.test(content)) {
+                const hasReplace = /교체|교환|replace|change/i.test(content) || /교체|교환/i.test(raw);
+                if (hasReplace && (/robot|로봇/i.test(content) || /robot|로봇/i.test(raw))) {
                     matched = true;
                 }
             } else if (itemKey === 'tdi') {
-                if (/tdi/i.test(content)) {
+                const hasReplace = /교체|교환|replace|change/i.test(content) || /교체|교환/i.test(raw);
+                if (hasReplace && (/tdi/i.test(content) || /tdi/i.test(raw))) {
                     matched = true;
                 }
             } else if (itemKey === 'z_cylinder') {
                 const hasZ = /z축|z\s*축|stage\s*z/i.test(content) || /z축|z\s*축/i.test(raw);
-                const hasCyl = /cylinder|실린더|낙하방지/i.test(content);
-                if ((hasZ && hasCyl) || /낙하방지.*(?:cylinder|실린더)/i.test(content)) {
+                const hasCyl = /cylinder|실린더|낙하방지/i.test(content) || /cylinder|실린더|낙하방지/i.test(raw);
+                const hasReplace = /교체|교환|replace|change/i.test(content) || /교체|교환/i.test(raw);
+                if ((hasZ && hasCyl) || (/낙하방지.*(?:cylinder|실린더)/i.test(content) && hasReplace)) {
                     matched = true;
+                }
+            } else if (itemKey === 'new_hand') {
+                const nhPart = /new\s*hand|뉴\s*핸드|뉴핸드/i;
+                const nhAct = /교체|교환|개조|신규|설치|replace|change/i;
+                if ((nhPart.test(content) && nhAct.test(content)) || (nhPart.test(content) && nhAct.test(raw)) || (nhPart.test(raw) && nhAct.test(raw))) {
+                    matched = true;
+                }
+            } else if (itemKey === 'ionizer') {
+                const ionPart = /ionizer|아이오나이저|이오나이저/i;
+                const ionAct = /탈착|탈거|제거|해체|분리|철거|무효화|교체|교환|remove|detach/i;
+                if (ionPart.test(content) && ionAct.test(content)) {
+                    matched = true;
+                } else if (ionPart.test(raw)) {
+                    const rawLines = raw.split('\n');
+                    for (const line of rawLines) {
+                        if (/고정|스펀지|지그|운송/i.test(line)) continue;
+                        if (ionPart.test(line) && ionAct.test(line)) {
+                            matched = true;
+                            noteContent = line.trim();
+                            break;
+                        }
+                    }
                 }
             }
 
             if (matched) {
-                if (machine) pushToMap(machine, date, content);
-                if (sn && sn !== machine) pushToMap(sn, date, content);
+                if (machine) pushToMap(machine, date, noteContent);
+                if (sn && sn !== machine) pushToMap(sn, date, noteContent);
             }
         });
     }
@@ -4439,7 +4561,6 @@ async function getEquipListByConsumable(itemKey) {
         let extraInfo = "";
 
         if (itemKey === 'laser') {
-            // 1. Laser: 수동 등록 데이터만 반영 (히스토리 제외)
             if (maint.laser) {
                 if (maint.laser.replaceDate) replaceDates.push(maint.laser.replaceDate);
                 (maint.laser.history || []).forEach(h => {
@@ -4451,7 +4572,6 @@ async function getEquipListByConsumable(itemKey) {
                 if (maint.laser.headSN) extraInfo = `Head S/N: ${maint.laser.headSN}`;
             }
         } else if (itemKey === 'scale_head') {
-            // 2. Scale Head: 수동 등록 데이터만 반영 (히스토리 제외)
             const axesFound = new Set();
             if (maint.scaleHead) {
                 Object.keys(maint.scaleHead).forEach(ax => {
@@ -4473,7 +4593,6 @@ async function getEquipListByConsumable(itemKey) {
                 extraInfo = `교체 축: ${Array.from(axesFound).join(", ")}`;
             }
         } else if (itemKey === 'revolver') {
-            // 3. Revolver: 수동 소모품 등록 + 작업 히스토리 자동 파싱 병합
             (maint.consumables || []).forEach(c => {
                 if (!c.isDeleted) {
                     const n = (c.name || "").toLowerCase();
@@ -4489,7 +4608,6 @@ async function getEquipListByConsumable(itemKey) {
                 if (h.content) detailNotes.push(h.content);
             });
         } else if (itemKey === 'robot') {
-            // 4. Robot: 수동 소모품 등록 + 작업 히스토리 자동 파싱 병합
             (maint.consumables || []).forEach(c => {
                 if (!c.isDeleted) {
                     const n = (c.name || "").toLowerCase();
@@ -4505,7 +4623,6 @@ async function getEquipListByConsumable(itemKey) {
                 if (h.content) detailNotes.push(h.content);
             });
         } else if (itemKey === 'tdi') {
-            // 5. TDI: 수동 소모품 등록 + 작업 히스토리 자동 파싱 병합
             (maint.consumables || []).forEach(c => {
                 if (!c.isDeleted) {
                     const n = (c.name || "").toLowerCase();
@@ -4521,13 +4638,42 @@ async function getEquipListByConsumable(itemKey) {
                 if (h.content) detailNotes.push(h.content);
             });
         } else if (itemKey === 'z_cylinder') {
-            // 6. Z축 낙하방지 Cylinder: 수동 소모품 등록 + 작업 히스토리 자동 파싱 병합
             (maint.consumables || []).forEach(c => {
                 if (!c.isDeleted) {
                     const n = (c.name || "").toLowerCase();
                     const hasZ = n.includes("z축") || n.includes("z 축") || n.includes("stage z");
                     const hasCyl = n.includes("cylinder") || n.includes("실린더") || n.includes("낙하방지");
                     if (hasZ && hasCyl) {
+                        if (c.date) replaceDates.push(c.date);
+                        if (c.note) detailNotes.push(c.note);
+                    }
+                }
+            });
+            const hList = [...(histMap[nameUpper] || []), ...(snKey ? (histMap[snKey.toUpperCase()] || []) : [])];
+            hList.forEach(h => {
+                if (h.date) replaceDates.push(h.date);
+                if (h.content) detailNotes.push(h.content);
+            });
+        } else if (itemKey === 'new_hand') {
+            (maint.consumables || []).forEach(c => {
+                if (!c.isDeleted) {
+                    const n = (c.name || "").toLowerCase();
+                    if (n.includes("new hand") || n.includes("newhand") || n.includes("뉴핸드") || (n.includes("핸드") && n.includes("교체"))) {
+                        if (c.date) replaceDates.push(c.date);
+                        if (c.note) detailNotes.push(c.note);
+                    }
+                }
+            });
+            const hList = [...(histMap[nameUpper] || []), ...(snKey ? (histMap[snKey.toUpperCase()] || []) : [])];
+            hList.forEach(h => {
+                if (h.date) replaceDates.push(h.date);
+                if (h.content) detailNotes.push(h.content);
+            });
+        } else if (itemKey === 'ionizer') {
+            (maint.consumables || []).forEach(c => {
+                if (!c.isDeleted) {
+                    const n = (c.name || "").toLowerCase();
+                    if (n.includes("ionizer") || n.includes("아이오나이저") || n.includes("이오나이저")) {
                         if (c.date) replaceDates.push(c.date);
                         if (c.note) detailNotes.push(c.note);
                     }
@@ -4564,11 +4710,19 @@ async function getEquipListByConsumable(itemKey) {
         }
     });
 
-    // 경과일수가 적은 순(최신 교체순)으로 정렬
-    return results.sort((a, b) => {
-        if (a.daysSince !== b.daysSince) return a.daysSince - b.daysSince;
-        return a.equip.name.localeCompare(b.equip.name, 'ko', { numeric: true });
-    });
+    // 선택된 정렬 모드에 따라 정렬
+    if (fleetSortMode === 'line') {
+        return results.sort((a, b) => {
+            const lineCompare = (a.equip.line || '').localeCompare(b.equip.line || '', 'ko', { numeric: true });
+            if (lineCompare !== 0) return lineCompare;
+            return a.equip.name.localeCompare(b.equip.name, 'ko', { numeric: true });
+        });
+    } else {
+        return results.sort((a, b) => {
+            if (a.daysSince !== b.daysSince) return a.daysSince - b.daysSince;
+            return a.equip.name.localeCompare(b.equip.name, 'ko', { numeric: true });
+        });
+    }
 }
 
 /** 주요 소모품 교체 설비 현황 렌더링 */
@@ -4590,7 +4744,7 @@ async function renderConsumableFleetSection(activeKey) {
         const isActive = item.key === selectedFleetConsumableKey;
         const count = counts[item.key] || 0;
         return `
-            <button class="px-3.5 py-1.5 text-xs font-bold rounded flex items-center gap-2 border transition-all ${
+            <button type="button" class="px-3.5 py-1.5 text-xs font-bold rounded flex items-center gap-2 border transition-all ${
                 isActive 
                     ? 'bg-primary text-white border-primary shadow-xs' 
                     : 'bg-surface/80 text-text-muted border-border hover:border-primary hover:text-primary'
@@ -4636,7 +4790,7 @@ async function renderConsumableFleetSection(activeKey) {
                     </span>
                     <span class="ml-1.5 px-1.5 py-0.5 text-[9px] font-bold bg-surface border border-border text-text-muted rounded">${escapeHtml(eq.line || '라인 미상')}</span>
                 </td>
-                <td class="td-base text-text-muted text-xs">${escapeHtml(eq.model || '—')}</td>
+                <td class="td-base text-text-muted text-xs">${escapeHtml(eq.model || '없음')}</td>
                 <td class="td-base font-mono text-xs">${escapeHtml(item.latestDate)}</td>
                 <td class="td-base">
                     <span class="px-2 py-0.5 text-[10px] font-black rounded border ${dayBadgeClass}">
@@ -4666,6 +4820,8 @@ async function renderConsumableFleetSection(activeKey) {
         `;
     }).join("");
 
+    const sortLabel = fleetSortMode === 'line' ? '라인별 정렬' : '최근 교체순 정렬';
+
     listWrap.innerHTML = `
         <div class="border border-border rounded overflow-hidden">
             <div class="px-4 py-2.5 bg-background/60 border-b border-border flex justify-between items-center text-xs font-bold text-text-main">
@@ -4674,7 +4830,7 @@ async function renderConsumableFleetSection(activeKey) {
                     [${escapeHtml(selectedItem.label)}] 교체 설비 목록
                     <span class="text-text-muted font-normal ml-1">(총 ${equipList.length}대)</span>
                 </span>
-                <span class="text-[10px] text-text-muted font-normal">최근 교체순 정렬</span>
+                <span class="text-[10px] text-text-muted font-normal">${sortLabel}</span>
             </div>
             <div class="overflow-x-auto max-h-[360px] overflow-y-auto">
                 <table class="w-full text-left text-xs">
@@ -4697,8 +4853,258 @@ async function renderConsumableFleetSection(activeKey) {
     `;
 }
 
+/** 📊 전체 설비 소모품 교체 종합 매트릭스 데이터 생성 및 모달 관리 */
+let cachedMatrixData = null;
 
-// ==============================================================================
+async function buildFleetConsumableMatrix() {
+    const equipList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+    
+    // 8개 품목별로 getEquipListByConsumable(itemKey) 실행하여 맵 구성
+    const itemMap = {};
+    for (const item of MAJOR_CONSUMABLE_ITEMS) {
+        const list = await getEquipListByConsumable(item.key);
+        const mapBySn = {};
+        list.forEach(res => {
+            const sn = (res.equip.sn || '').trim();
+            const name = (res.equip.name || '').trim().toUpperCase();
+            if (sn) mapBySn[sn] = res;
+            if (name) mapBySn[name] = res;
+        });
+        itemMap[item.key] = mapBySn;
+    }
+
+    // 각 설비별로 8개 품목 결과 병합
+    const matrix = equipList.map(eq => {
+        const sn = (eq.sn || '').trim();
+        const name = (eq.name || '').trim().toUpperCase();
+        
+        const row = {
+            equip: eq,
+            items: {}
+        };
+
+        MAJOR_CONSUMABLE_ITEMS.forEach(it => {
+            const hit = itemMap[it.key][sn] || itemMap[it.key][name] || null;
+            row.items[it.key] = hit;
+        });
+
+        return row;
+    });
+
+    // 라인별 오름차순, 동일 라인 내 호기명 오름차순 정렬
+    return matrix.sort((a, b) => {
+        const lineCompare = (a.equip.line || '').localeCompare(b.equip.line || '', 'ko', { numeric: true });
+        if (lineCompare !== 0) return lineCompare;
+        return a.equip.name.localeCompare(b.equip.name, 'ko', { numeric: true });
+    });
+}
+
+async function openConsumableMatrixModal() {
+    const modal = document.getElementById('consumableMatrixModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    document.body.classList.add('overflow-hidden');
+
+    const container = document.getElementById('matrixTableContainer');
+    if (container) {
+        container.innerHTML = `
+            <div class="flex flex-col items-center justify-center py-20 text-text-muted">
+                <span class="material-symbols-outlined text-4xl animate-spin text-primary mb-3">sync</span>
+                <p class="text-sm font-bold text-text-main">설비별 8대 소모품 교체 이력을 취합하고 있습니다...</p>
+                <p class="text-xs text-text-muted mt-1">작업 히스토리와 유지보수 데이터베이스를 매핑 중입니다.</p>
+            </div>
+        `;
+    }
+
+    cachedMatrixData = await buildFleetConsumableMatrix();
+
+    // 라인 필터 옵션 채우기
+    const lineSelect = document.getElementById('matrixLineFilter');
+    if (lineSelect) {
+        const lines = Array.from(new Set(cachedMatrixData.map(r => r.equip.line || '기타'))).sort((a, b) => a.localeCompare(b, 'ko', { numeric: true }));
+        lineSelect.innerHTML = `<option value="ALL">전체 라인 (${cachedMatrixData.length}대)</option>` + 
+            lines.map(l => `<option value="${escapeHtml(l)}">${escapeHtml(l)} Line</option>`).join('');
+    }
+
+    renderConsumableMatrixContent();
+}
+
+function closeConsumableMatrixModal() {
+    const modal = document.getElementById('consumableMatrixModal');
+    if (modal) modal.classList.add('hidden');
+    document.body.classList.remove('overflow-hidden');
+}
+
+/** 종합 매트릭스 콘텐츠 렌더링 */
+function renderConsumableMatrixContent() {
+    if (!cachedMatrixData) return;
+    const container = document.getElementById('matrixTableContainer');
+    const lineFilter = document.getElementById('matrixLineFilter')?.value || 'ALL';
+    const searchFilter = (document.getElementById('matrixSearchFilter')?.value || '').trim().toLowerCase();
+    const statusFilter = document.getElementById('matrixStatusFilter')?.value || 'ALL';
+
+    const filtered = cachedMatrixData.filter(row => {
+        const eq = row.equip;
+        if (lineFilter !== 'ALL' && (eq.line || '기타') !== lineFilter) return false;
+        if (searchFilter) {
+            const matchName = (eq.name || '').toLowerCase().includes(searchFilter);
+            const matchModel = (eq.model || '').toLowerCase().includes(searchFilter);
+            const matchSn = (eq.sn || '').toLowerCase().includes(searchFilter);
+            if (!matchName && !matchModel && !matchSn) return false;
+        }
+        if (statusFilter === 'HAS_REPLACE') {
+            const hasAny = Object.values(row.items).some(it => it !== null);
+            if (!hasAny) return false;
+        } else if (statusFilter === 'NO_REPLACE') {
+            const hasAny = Object.values(row.items).some(it => it !== null);
+            if (hasAny) return false;
+        }
+        return true;
+    });
+
+    const countBadge = document.getElementById('matrixEquipCountBadge');
+    if (countBadge) countBadge.textContent = `총 ${filtered.length}대 / ${cachedMatrixData.length}대`;
+
+    const chipsContainer = document.getElementById('matrixItemSummaryChips');
+    if (chipsContainer) {
+        chipsContainer.innerHTML = MAJOR_CONSUMABLE_ITEMS.map(it => {
+            const count = filtered.filter(r => r.items[it.key] !== null).length;
+            return `
+                <span class="px-2 py-0.5 bg-surface border border-border rounded flex items-center gap-1 shrink-0 text-text-main">
+                    <span class="material-symbols-outlined text-[13px] text-primary">${it.icon}</span>
+                    <span class="font-bold">${it.label}:</span>
+                    <span class="text-primary font-mono font-black">${count}대</span>
+                </span>
+            `;
+        }).join('');
+    }
+
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="py-16 text-center text-text-muted text-xs bg-surface/30 rounded-lg border border-border/50">
+                <span class="material-symbols-outlined text-4xl mb-2 text-text-muted/60 block">search_off</span>
+                선택한 필터 조건에 부합하는 설비가 없습니다.
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="border border-border rounded-lg overflow-hidden shadow-xs bg-surface">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs border-collapse">
+                    <thead class="sticky top-0 bg-background border-b border-border z-10 shadow-xs">
+                        <tr>
+                            <th class="th-base py-3 px-3 min-w-[70px] text-center">라인</th>
+                            <th class="th-base py-3 px-4 min-w-[120px]">설비호기 (모델)</th>
+                            ${MAJOR_CONSUMABLE_ITEMS.map(it => `
+                                <th class="th-base py-3 px-3 min-w-[125px] text-center border-l border-border/40">
+                                    <div class="flex items-center justify-center gap-1">
+                                        <span class="material-symbols-outlined text-[14px] text-primary">${it.icon}</span>
+                                        <span>${escapeHtml(it.label)}</span>
+                                    </div>
+                                </th>
+                            `).join('')}
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-border/60">
+                        ${filtered.map(row => {
+                            const eq = row.equip;
+                            return `
+                                <tr class="hover:bg-primary/5 transition-colors">
+                                    <td class="td-base py-2.5 px-3 text-center font-bold text-text-muted">
+                                        <span class="px-2 py-0.5 rounded bg-background border border-border text-[11px]">${escapeHtml(eq.line || '미상')}</span>
+                                    </td>
+                                    <td class="td-base py-2.5 px-4 font-bold">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="text-primary hover:underline cursor-pointer font-bold text-sm" onclick="closeConsumableMatrixModal(); openEquipDetail('${escapeHtml(eq.sn)}')">
+                                                ${escapeHtml(eq.name)}
+                                            </span>
+                                            <span class="text-[10px] text-text-muted font-normal">(${escapeHtml(eq.model || '없음')})</span>
+                                        </div>
+                                    </td>
+                                    ${MAJOR_CONSUMABLE_ITEMS.map(it => {
+                                        const hit = row.items[it.key];
+                                        if (!hit) {
+                                            return `
+                                                <td class="td-base py-2 px-3 text-center border-l border-border/30 bg-background/20">
+                                                    <span class="text-[10px] text-text-muted/50 px-2 py-0.5 rounded bg-surface/50 border border-border/30">
+                                                        미교체
+                                                    </span>
+                                                </td>
+                                            `;
+                                        }
+
+                                        const days = hit.daysSince;
+                                        let badgeColor = "bg-emerald-500/10 text-emerald-600 border-emerald-500/30";
+                                        if (days > 180) {
+                                            badgeColor = "bg-red-500/10 text-red-600 border-red-500/30";
+                                        } else if (days > 90) {
+                                            badgeColor = "bg-amber-500/10 text-amber-600 border-amber-500/30";
+                                        }
+
+                                        return `
+                                            <td class="td-base py-2 px-3 text-center border-l border-border/30 hover:bg-surface/80" title="${escapeHtml(hit.notes || hit.latestDate)}">
+                                                <div class="font-mono text-xs font-bold text-text-main">${escapeHtml(hit.latestDate)}</div>
+                                                <div class="flex items-center justify-center gap-1 mt-0.5">
+                                                    <span class="px-1.5 py-0.2 text-[9px] font-bold rounded border ${badgeColor}">
+                                                        ${days}일 전
+                                                    </span>
+                                                    ${hit.count > 1 ? `<span class="text-[9px] text-text-muted font-bold">(${hit.count}회)</span>` : ''}
+                                                </div>
+                                            </td>
+                                        `;
+                                    }).join('')}
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
+/** CSV 다운로드 (utf 8 sig 인코딩으로 한글 완벽 호환) */
+function exportConsumableMatrixCsv() {
+    if (!cachedMatrixData || cachedMatrixData.length === 0) {
+        showToast("오류", "내보낼 매트릭스 데이터가 없습니다.");
+        return;
+    }
+
+    const headers = ['라인', '설비호기', '모델명', 'S/N', ...MAJOR_CONSUMABLE_ITEMS.map(it => it.label)];
+    const rows = [headers];
+
+    cachedMatrixData.forEach(r => {
+        const eq = r.equip;
+        const row = [
+            eq.line || '',
+            eq.name || '',
+            eq.model || '',
+            eq.sn || ''
+        ];
+        MAJOR_CONSUMABLE_ITEMS.forEach(it => {
+            const hit = r.items[it.key];
+            if (hit) {
+                row.push(`${hit.latestDate} (${hit.daysSince}일 전)`);
+            } else {
+                row.push('미교체');
+            }
+        });
+        rows.push(row);
+    });
+
+    const quoteChar = String.fromCharCode(34);
+    const doubleQuote = quoteChar + quoteChar;
+    const csvLines = rows.map(row => row.map(v => quoteChar + String(v).split(quoteChar).join(doubleQuote) + quoteChar).join(','));
+    const csvContent = '\uFEFF' + csvLines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `SFDC_OEMS_소모품_종합_매트릭스_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    showToast("CSV 다운로드", "전체 설비 소모품 매트릭스가 CSV로 저장되었습니다.");
+}
 
 // [Module: database.js]
 // 6. [Business: Management] 설비 마스터 데이터, 수신처 목록 및 SFDC 검색 연동
