@@ -926,8 +926,10 @@
                 <!-- 교체 여부 필터 -->
                 <div class="flex items-center gap-1.5 text-xs">
                     <span class="text-text-muted font-bold">상태:</span>
-                    <select id="matrixStatusFilter" class="input-base h-8 px-2 text-xs rounded w-32" onchange="renderConsumableMatrixContent()">
+                    <select id="matrixStatusFilter" class="input-base h-8 px-2 text-xs rounded w-36" onchange="renderConsumableMatrixContent()">
                         <option value="ALL">전체 설비</option>
+                        <option value="SCALE_ALL">Scale 5축 전체완료</option>
+                        <option value="SCALE_PARTIAL">Scale 부분완료</option>
                         <option value="HAS_REPLACE">교체 이력 있음</option>
                         <option value="NO_REPLACE">전체 미교체</option>
                     </select>
@@ -4854,10 +4856,26 @@ async function renderConsumableFleetSection(activeKey) {
 }
 
 /** 📊 전체 설비 소모품 교체 종합 매트릭스 데이터 생성 및 모달 관리 */
+/** 날짜 경과일 계산 헬퍼 (밀리초 기반) */
+function calcMatrixDaysSince(dateStr) {
+    if (!dateStr) return 0;
+    const digits = String(dateStr).replace(/[^0-9]/g, "");
+    if (digits.length < 8) return 0;
+    const y = parseInt(digits.substring(0, 4), 10);
+    const m = parseInt(digits.substring(4, 6), 10) - 1;
+    const d = parseInt(digits.substring(6, 8), 10);
+    const past = new Date(y, m, d);
+    const today = new Date();
+    const diff = today.getTime() - past.getTime();
+    return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
+}
+
+/** 전체 설비 소모품 교체 종합 매트릭스 데이터 생성 및 모달 관리 */
 let cachedMatrixData = null;
 
 async function buildFleetConsumableMatrix() {
     const equipList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
+    const allMaint = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
     
     // 8개 품목별로 getEquipListByConsumable(itemKey) 실행하여 맵 구성
     const itemMap = {};
@@ -4873,14 +4891,78 @@ async function buildFleetConsumableMatrix() {
         itemMap[item.key] = mapBySn;
     }
 
-    // 각 설비별로 8개 품목 결과 병합
+    // Scale Head 5개 표시 축 정의 (사용자 지정 5축 표기)
+    const scaleAxesDef = [
+        { key: 'X', label: 'X' },
+        { key: 'Y1', label: 'YL' },
+        { key: 'Y2', label: 'YR' },
+        { key: 'Z1', label: 'ZL' },
+        { key: 'Z2', label: 'ZR' }
+    ];
+
+    // 각 설비별로 8개 품목 결과 및 Scale Head 5축 세부 상태 병합
     const matrix = equipList.map(eq => {
         const sn = (eq.sn || '').trim();
         const name = (eq.name || '').trim().toUpperCase();
-        
+        const maint = allMaint[sn] || allMaint[name] || {};
+        const scaleHeadData = maint.scaleHead || {};
+
+        // Scale Head 5개 축별 상태 수집
+        let scaleReplacedCount = 0;
+        const scaleAxes = scaleAxesDef.map(axDef => {
+            const axItem = scaleHeadData[axDef.key] || {};
+            const dates = [];
+            if (axItem.replaceDate) dates.push(axItem.replaceDate);
+            (axItem.history || []).forEach(h => {
+                if (!h.isDeleted && h.date) dates.push(h.date);
+            });
+
+            const cleanDates = Array.from(new Set(dates.map(d => {
+                const num = String(d).replace(/[^0-9]/g, "");
+                if (num.length >= 8) {
+                    return `${num.substring(0, 4)}/${num.substring(4, 6)}/${num.substring(6, 8)}`;
+                }
+                return String(d).replace(/[.]/g, "/");
+            }).filter(Boolean))).sort().reverse();
+
+            if (cleanDates.length > 0) {
+                scaleReplacedCount++;
+                const latest = cleanDates[0];
+                const days = calcMatrixDaysSince(latest);
+                return {
+                    key: axDef.key,
+                    label: axDef.label,
+                    replaced: true,
+                    latestDate: latest,
+                    daysSince: days,
+                    sn: axItem.sn || '',
+                    count: cleanDates.length
+                };
+            } else {
+                return {
+                    key: axDef.key,
+                    label: axDef.label,
+                    replaced: false,
+                    latestDate: null,
+                    daysSince: null,
+                    sn: axItem.sn || '',
+                    count: 0
+                };
+            }
+        });
+
+        const scaleAxesStatus = {
+            axes: scaleAxes,
+            replacedCount: scaleReplacedCount,
+            isAllReplaced: scaleReplacedCount === 5,
+            isPartiallyReplaced: scaleReplacedCount > 0 && scaleReplacedCount < 5,
+            isNoneReplaced: scaleReplacedCount === 0
+        };
+
         const row = {
             equip: eq,
-            items: {}
+            items: {},
+            scaleAxesStatus: scaleAxesStatus
         };
 
         MAJOR_CONSUMABLE_ITEMS.forEach(it => {
@@ -4952,11 +5034,15 @@ function renderConsumableMatrixContent() {
             const matchSn = (eq.sn || '').toLowerCase().includes(searchFilter);
             if (!matchName && !matchModel && !matchSn) return false;
         }
-        if (statusFilter === 'HAS_REPLACE') {
-            const hasAny = Object.values(row.items).some(it => it !== null);
+        if (statusFilter === 'SCALE_ALL') {
+            if (!row.scaleAxesStatus || !row.scaleAxesStatus.isAllReplaced) return false;
+        } else if (statusFilter === 'SCALE_PARTIAL') {
+            if (!row.scaleAxesStatus || !row.scaleAxesStatus.isPartiallyReplaced) return false;
+        } else if (statusFilter === 'HAS_REPLACE') {
+            const hasAny = Object.values(row.items).some(it => it !== null) || (row.scaleAxesStatus && row.scaleAxesStatus.replacedCount > 0);
             if (!hasAny) return false;
         } else if (statusFilter === 'NO_REPLACE') {
-            const hasAny = Object.values(row.items).some(it => it !== null);
+            const hasAny = Object.values(row.items).some(it => it !== null) || (row.scaleAxesStatus && row.scaleAxesStatus.replacedCount > 0);
             if (hasAny) return false;
         }
         return true;
@@ -4968,14 +5054,28 @@ function renderConsumableMatrixContent() {
     const chipsContainer = document.getElementById('matrixItemSummaryChips');
     if (chipsContainer) {
         chipsContainer.innerHTML = MAJOR_CONSUMABLE_ITEMS.map(it => {
-            const count = filtered.filter(r => r.items[it.key] !== null).length;
-            return `
-                <span class="px-2 py-0.5 bg-surface border border-border rounded flex items-center gap-1 shrink-0 text-text-main">
-                    <span class="material-symbols-outlined text-[13px] text-primary">${it.icon}</span>
-                    <span class="font-bold">${it.label}:</span>
-                    <span class="text-primary font-mono font-black">${count}대</span>
-                </span>
-            `;
+            if (it.key === 'scale_head') {
+                const fullCount = filtered.filter(r => r.scaleAxesStatus?.isAllReplaced).length;
+                const partialCount = filtered.filter(r => r.scaleAxesStatus?.isPartiallyReplaced).length;
+                const anyCount = fullCount + partialCount;
+                return `
+                    <span class="px-2 py-0.5 bg-surface border border-border rounded flex items-center gap-1 shrink-0 text-text-main" title="5축 전체완료 ${fullCount}대, 부분교체 ${partialCount}대">
+                        <span class="material-symbols-outlined text-[13px] text-primary">${it.icon}</span>
+                        <span class="font-bold">${it.label}:</span>
+                        <span class="text-primary font-mono font-black">${anyCount}대</span>
+                        <span class="text-[10px] text-emerald-600 font-bold ml-0.5">(전체완료 ${fullCount}대)</span>
+                    </span>
+                `;
+            } else {
+                const count = filtered.filter(r => r.items[it.key] !== null).length;
+                return `
+                    <span class="px-2 py-0.5 bg-surface border border-border rounded flex items-center gap-1 shrink-0 text-text-main">
+                        <span class="material-symbols-outlined text-[13px] text-primary">${it.icon}</span>
+                        <span class="font-bold">${it.label}:</span>
+                        <span class="text-primary font-mono font-black">${count}대</span>
+                    </span>
+                `;
+            }
         }).join('');
     }
 
@@ -4997,14 +5097,19 @@ function renderConsumableMatrixContent() {
                         <tr>
                             <th class="th-base py-3 px-3 min-w-[70px] text-center">라인</th>
                             <th class="th-base py-3 px-4 min-w-[120px]">설비호기 (모델)</th>
-                            ${MAJOR_CONSUMABLE_ITEMS.map(it => `
-                                <th class="th-base py-3 px-3 min-w-[125px] text-center border-l border-border/40">
-                                    <div class="flex items-center justify-center gap-1">
-                                        <span class="material-symbols-outlined text-[14px] text-primary">${it.icon}</span>
-                                        <span>${escapeHtml(it.label)}</span>
-                                    </div>
-                                </th>
-                            `).join('')}
+                            ${MAJOR_CONSUMABLE_ITEMS.map(it => {
+                                const isScale = it.key === 'scale_head';
+                                const widthClass = isScale ? 'min-w-[195px]' : 'min-w-[125px]';
+                                return `
+                                    <th class="th-base py-3 px-3 ${widthClass} text-center border-l border-border/40">
+                                        <div class="flex items-center justify-center gap-1">
+                                            <span class="material-symbols-outlined text-[14px] text-primary">${it.icon}</span>
+                                            <span>${escapeHtml(it.label)}</span>
+                                        </div>
+                                        ${isScale ? `<div class="text-[9px] text-text-muted font-normal mt-0.5">5축 세로 현황</div>` : ''}
+                                    </th>
+                                `;
+                            }).join('')}
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-border/60">
@@ -5024,6 +5129,79 @@ function renderConsumableMatrixContent() {
                                         </div>
                                     </td>
                                     ${MAJOR_CONSUMABLE_ITEMS.map(it => {
+                                        if (it.key === 'scale_head') {
+                                            const scaleStatus = row.scaleAxesStatus;
+                                            if (!scaleStatus || scaleStatus.isNoneReplaced) {
+                                                return `
+                                                    <td class="td-base py-2.5 px-2 text-center border-l border-border/30 bg-background/20 align-top">
+                                                        <div class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface/50 border border-border/30 text-[10px] text-text-muted/60 mb-1.5 font-bold">
+                                                            <span class="material-symbols-outlined text-[11px]">horizontal_rule</span>
+                                                            전체 미교체 (0/5)
+                                                        </div>
+                                                        <div class="space-y-0.5">
+                                                            ${(scaleStatus?.axes || []).map(ax => `
+                                                                <div class="flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded bg-surface/20 border border-border/20 text-text-muted/40 font-mono">
+                                                                    <span class="font-bold text-text-muted/60 w-5 text-left">${ax.label}</span>
+                                                                    <span>미교체</span>
+                                                                    <span>―</span>
+                                                                </div>
+                                                            `).join('')}
+                                                        </div>
+                                                    </td>
+                                                `;
+                                            }
+
+                                            let topBadgeClass = "bg-emerald-500/10 text-emerald-600 border-emerald-500/30";
+                                            let topBadgeIcon = "check_circle";
+                                            let topBadgeText = "5축 전체 완료 (5/5)";
+
+                                            if (scaleStatus.isPartiallyReplaced) {
+                                                topBadgeClass = "bg-amber-500/10 text-amber-600 border-amber-500/30";
+                                                topBadgeIcon = "warning";
+                                                topBadgeText = `부분 완료 (${scaleStatus.replacedCount}/5)`;
+                                            }
+
+                                            return `
+                                                <td class="td-base py-2.5 px-2 border-l border-border/30 hover:bg-surface/60 align-top">
+                                                    <div class="flex justify-center mb-1.5">
+                                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-black ${topBadgeClass}">
+                                                            <span class="material-symbols-outlined text-[12px]">${topBadgeIcon}</span>
+                                                            ${topBadgeText}
+                                                        </span>
+                                                    </div>
+                                                    <div class="space-y-1">
+                                                        ${scaleStatus.axes.map(ax => {
+                                                            if (ax.replaced) {
+                                                                let badgeColor = "bg-emerald-500/10 text-emerald-600 border-emerald-500/30";
+                                                                if (ax.daysSince > 180) {
+                                                                    badgeColor = "bg-red-500/10 text-red-600 border-red-500/30";
+                                                                } else if (ax.daysSince > 90) {
+                                                                    badgeColor = "bg-amber-500/10 text-amber-600 border-amber-500/30";
+                                                                }
+                                                                return `
+                                                                    <div class="flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded bg-background border border-border/60 hover:border-primary/40 transition-colors shadow-2xs font-mono" title="${ax.label}축 최신 교체: ${ax.latestDate} (${ax.daysSince}일 전)${ax.sn ? ' / S/N: ' + escapeHtml(ax.sn) : ''}">
+                                                                        <span class="font-black text-primary w-6 text-left shrink-0">${ax.label}</span>
+                                                                        <span class="text-text-main font-bold truncate mx-1">${escapeHtml(ax.latestDate)}</span>
+                                                                        <span class="px-1 py-0.2 rounded border font-bold shrink-0 text-[9px] ${badgeColor}">
+                                                                            ${ax.daysSince}일 전
+                                                                        </span>
+                                                                    </div>
+                                                                `;
+                                                            } else {
+                                                                return `
+                                                                    <div class="flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded bg-surface/20 border border-border/20 text-text-muted/40 font-mono">
+                                                                        <span class="font-bold text-text-muted/50 w-6 text-left shrink-0">${ax.label}</span>
+                                                                        <span class="text-text-muted/40">미교체</span>
+                                                                        <span class="text-[9px] text-text-muted/30">―</span>
+                                                                    </div>
+                                                                `;
+                                                            }
+                                                        }).join('')}
+                                                    </div>
+                                                </td>
+                                            `;
+                                        }
+
                                         const hit = row.items[it.key];
                                         if (!hit) {
                                             return `
@@ -5084,11 +5262,27 @@ function exportConsumableMatrixCsv() {
             eq.sn || ''
         ];
         MAJOR_CONSUMABLE_ITEMS.forEach(it => {
-            const hit = r.items[it.key];
-            if (hit) {
-                row.push(`${hit.latestDate} (${hit.daysSince}일 전)`);
+            if (it.key === 'scale_head') {
+                const sc = r.scaleAxesStatus;
+                if (!sc || sc.isNoneReplaced) {
+                    row.push('미교체 (0/5축)');
+                } else {
+                    const axesSummary = sc.axes.map(ax => {
+                        if (ax.replaced) {
+                            return `${ax.label}: ${ax.latestDate} (${ax.daysSince}일 전)`;
+                        } else {
+                            return `${ax.label}: 미교체`;
+                        }
+                    }).join(' | ');
+                    row.push(`[${sc.replacedCount}/5축 완료] ${axesSummary}`);
+                }
             } else {
-                row.push('미교체');
+                const hit = r.items[it.key];
+                if (hit) {
+                    row.push(`${hit.latestDate} (${hit.daysSince}일 전)`);
+                } else {
+                    row.push('미교체');
+                }
             }
         });
         rows.push(row);
