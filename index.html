@@ -5640,9 +5640,11 @@ async function renderGeneralConsumableQuickEditView(bodyEl, eq, itemDef, maint) 
 
 /** 2. Laser 퀵 수정 뷰 */
 function renderLaserQuickEditView(bodyEl, eq, maint) {
-    const laser = maint.laser || { replaceDate: null, headSN: '', offsetDays: 0, history: [] };
+    const laser = maint.laser || { replaceDate: null, headSN: '', psSN: '', diodeSN: '', offsetDays: 0, history: [] };
     const curDate = laser.replaceDate ? laser.replaceDate.replace(/\//g, String.fromCharCode(45)) : '';
-    const curSn = laser.headSN || '';
+    const curHeadSn = laser.headSN || '';
+    const curPsSn = laser.psSN || '';
+    const curDiodeSn = laser.diodeSN || '';
     const curDays = laser.replaceDate ? calcMatrixDaysSince(laser.replaceDate) : 0;
     const totalManualHours = laser.offsetHours !== undefined ? Number(laser.offsetHours) : (laser.offsetDays ? Number(laser.offsetDays) * 24 : 0);
     const curHours = (curDays * 24) + totalManualHours;
@@ -5651,31 +5653,44 @@ function renderLaserQuickEditView(bodyEl, eq, maint) {
     bodyEl.innerHTML = `
         <div class="p-3.5 rounded-lg border border-border bg-background/60 flex flex-wrap items-center justify-between gap-3">
             <div>
-                <span class="text-[11px] text-text-muted font-bold block mb-0.5">현재 Laser Head 상태</span>
-                <div class="flex items-center gap-2">
+                <span class="text-[11px] text-text-muted font-bold block mb-0.5">현재 장착 Laser 정보</span>
+                <div class="flex items-center gap-2 flex-wrap">
                     <span class="text-base font-black font-mono text-text-main">${laser.replaceDate || '미교체'}</span>
                     ${laser.replaceDate ? `<span class="px-2 py-0.5 text-xs font-bold rounded border bg-primary/10 text-primary border-primary/20 font-mono">${curDays}일 / ${Number(curHours).toLocaleString()}시간 사용 중</span>` : ''}
-                    ${curSn ? `<span class="px-2 py-0.5 text-xs font-bold rounded bg-surface border border-border text-text-muted">Head: ${escapeHtml(curSn)}</span>` : ''}
+                    ${curHeadSn ? `<span class="px-2 py-0.5 text-xs font-bold rounded bg-surface border border-border text-text-muted font-mono">Head: ${escapeHtml(curHeadSn)}</span>` : ''}
+                    ${curPsSn ? `<span class="px-2 py-0.5 text-xs font-bold rounded bg-surface border border-border text-text-muted font-mono">P/S: ${escapeHtml(curPsSn)}</span>` : ''}
+                    ${curDiodeSn ? `<span class="px-2 py-0.5 text-xs font-bold rounded bg-surface border border-border text-text-muted font-mono">Diode: ${escapeHtml(curDiodeSn)}</span>` : ''}
                 </div>
             </div>
         </div>
 
         <div class="p-4 rounded-lg border border-primary/30 bg-primary/5 space-y-3">
-            <span class="text-xs font-black text-text-main flex items-center gap-1.5">
-                <span class="material-symbols-outlined text-sm text-primary">bolt</span>
-                Laser 교체 정보 수정
-            </span>
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-black text-text-main flex items-center gap-1.5">
+                    <span class="material-symbols-outlined text-sm text-primary">bolt</span>
+                    Laser 교체 정보 수정 및 신규 등록
+                </span>
+                <span class="text-[10px] text-text-muted">교체일 변경 시 기존 기록은 이력으로 자동 보관됩니다.</span>
+            </div>
             <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                <div class="md:col-span-5">
+                <div class="md:col-span-3">
                     <label class="label-base text-[10px] text-text-muted mb-1 block">교체 일자</label>
                     <input type="date" id="quickLaserDate" class="input-base h-9 px-2 text-xs rounded w-full bg-surface" value="${curDate}">
                 </div>
-                <div class="md:col-span-4">
-                    <label class="label-base text-[10px] text-text-muted mb-1 block">Laser Head S/N</label>
-                    <input type="text" id="quickLaserSn" class="input-base h-9 px-3 text-xs rounded w-full bg-surface" value="${escapeHtml(curSn)}" placeholder="예: LH 2026 01">
-                </div>
                 <div class="md:col-span-3">
-                    <button type="button" class="btn-primary h-9 px-4 text-xs font-bold rounded w-full flex items-center justify-center gap-1 shadow-xs hover:brightness-110 transition-all" onclick="saveLaserQuickRecord('${escapeHtml(eq.sn)}')">
+                    <label class="label-base text-[10px] text-text-muted mb-1 block">Laser Head S/N</label>
+                    <input type="text" id="quickLaserHeadSn" class="input-base h-9 px-2.5 text-xs rounded w-full bg-surface font-mono" value="${escapeHtml(curHeadSn)}" placeholder="Head S/N 입력">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="label-base text-[10px] text-text-muted mb-1 block">P/S S/N</label>
+                    <input type="text" id="quickLaserPsSn" class="input-base h-9 px-2.5 text-xs rounded w-full bg-surface font-mono" value="${escapeHtml(curPsSn)}" placeholder="P/S S/N 입력">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="label-base text-[10px] text-text-muted mb-1 block">Diode S/N</label>
+                    <input type="text" id="quickLaserDiodeSn" class="input-base h-9 px-2.5 text-xs rounded w-full bg-surface font-mono" value="${escapeHtml(curDiodeSn)}" placeholder="Diode S/N 입력">
+                </div>
+                <div class="md:col-span-2">
+                    <button type="button" class="btn-primary h-9 px-3 text-xs font-bold rounded w-full flex items-center justify-center gap-1 shadow-xs hover:brightness-110 transition-all" onclick="saveLaserQuickRecord('${escapeHtml(eq.sn)}')">
                         <span class="material-symbols-outlined text-sm">save</span>
                         <span>저장</span>
                     </button>
@@ -5694,16 +5709,22 @@ function renderLaserQuickEditView(bodyEl, eq, maint) {
                         <thead class="bg-background text-[11px] border-b border-border text-text-muted">
                             <tr>
                                 <th class="py-2 px-3">교체일자</th>
-                                <th class="py-2 px-3">Head S/N</th>
-                                <th class="py-2 px-3">경과일</th>
+                                <th class="py-2 px-2.5">Head S/N</th>
+                                <th class="py-2 px-2.5">P/S S/N</th>
+                                <th class="py-2 px-2.5">Diode S/N</th>
+                                <th class="py-2 px-3">사용시간</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-border">
                             ${historyList.slice().reverse().map(h => `
-                                <tr class="hover:bg-background/40">
-                                    <td class="py-2 px-3 font-mono font-bold">${escapeHtml(h.date)}</td>
-                                    <td class="py-2 px-3 font-mono text-text-muted">${escapeHtml(h.headSN || '―')}</td>
-                                    <td class="py-2 px-3 font-mono text-[11px] text-primary">${calcMatrixDaysSince(h.date)}일 전</td>
+                                <tr class="hover:bg-background/40 font-mono">
+                                    <td class="py-2 px-3 font-bold">${escapeHtml(h.date)}</td>
+                                    <td class="py-2 px-2.5 text-text-muted">${escapeHtml(h.headSN || '―')}</td>
+                                    <td class="py-2 px-2.5 text-text-muted">${escapeHtml(h.psSN || '―')}</td>
+                                    <td class="py-2 px-2.5 text-text-muted">${escapeHtml(h.diodeSN || '―')}</td>
+                                    <td class="py-2 px-3 text-[11px] text-primary font-bold">
+                                        ${h.usedDays !== undefined ? `${h.usedDays}일 (${h.usedHours}시간)` : `${calcMatrixDaysSince(h.date)}일 전`}
+                                    </td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -5902,11 +5923,18 @@ async function toggleIgnoreMailHistory(equipSn, itemKey, dateStr, contentStr) {
 /** 8. Laser 퀵 수정 저장 */
 async function saveLaserQuickRecord(equipSn) {
     const dateInput = document.getElementById('quickLaserDate');
-    const snInput = document.getElementById('quickLaserSn');
+    const headInput = document.getElementById('quickLaserHeadSn');
+    const psInput = document.getElementById('quickLaserPsSn');
+    const diodeInput = document.getElementById('quickLaserDiodeSn');
     if (!dateInput || !dateInput.value) {
         showToast("오류", "교체 일자를 입력해주세요.");
         return;
     }
+
+    const newDate = dateInput.value;
+    const newHeadSN = headInput ? headInput.value.trim() : '';
+    const newPsSN = psInput ? psInput.value.trim() : '';
+    const newDiodeSN = diodeInput ? diodeInput.value.trim() : '';
 
     const equipList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
     const eq = equipList.find(e => (e.sn || '').trim() === equipSn || (e.name || '').trim().toUpperCase() === equipSn.toUpperCase());
@@ -5914,9 +5942,36 @@ async function saveLaserQuickRecord(equipSn) {
     const nameKey = eq ? eq.name : equipSn;
 
     const maint = getMaintData(snKey || nameKey);
-    maint.laser = maint.laser || { replaceDate: null, offsetDays: 0, history: [] };
-    maint.laser.replaceDate = dateInput.value;
-    if (snInput) maint.laser.headSN = snInput.value.trim();
+    maint.laser = maint.laser || { replaceDate: null, headSN: '', psSN: '', diodeSN: '', offsetDays: 0, history: [] };
+    maint.laser.history = maint.laser.history || [];
+
+    const oldDate = maint.laser.replaceDate ? maint.laser.replaceDate.replace(/\//g, String.fromCharCode(45)) : '';
+
+    // 핵심: 기존 교체일이 존재하고 입력한 새 교체일과 다르면 이전 장착 정보를 누적 이력에 자동 보관
+    if (oldDate && oldDate !== newDate) {
+        const curDays = calcMatrixDaysSince(oldDate);
+        const manualHours = maint.laser.offsetHours !== undefined ? Number(maint.laser.offsetHours) : (maint.laser.offsetDays ? Number(maint.laser.offsetDays) * 24 : 0);
+        const totalHours = (curDays * 24) + manualHours;
+        const nowTs = Date.now();
+        maint.laser.history.push({
+            id: 'LASER_' + nowTs.toString(36) + Math.random().toString(36).slice(2, 6),
+            date: oldDate,
+            usedDays: curDays,
+            usedHours: totalHours,
+            headSN: maint.laser.headSN || '―',
+            psSN: maint.laser.psSN || '―',
+            diodeSN: maint.laser.diodeSN || '―',
+            isDeleted: false,
+            updatedAt: nowTs
+        });
+        maint.laser.offsetHours = 0;
+        maint.laser.offsetDays = 0;
+    }
+
+    maint.laser.replaceDate = newDate;
+    maint.laser.headSN = newHeadSN;
+    maint.laser.psSN = newPsSN;
+    maint.laser.diodeSN = newDiodeSN;
 
     saveMaintData(snKey, maint);
     if (nameKey && nameKey !== snKey) saveMaintData(nameKey, maint);
@@ -5924,7 +5979,12 @@ async function saveLaserQuickRecord(equipSn) {
     cachedMatrixData = await buildFleetConsumableMatrix();
     renderConsumableMatrixContent();
     await openConsumableEditModal(snKey, 'laser');
-    showToast("저장 완료", "Laser 교체 정보가 수정되었습니다.");
+    
+    if (oldDate && oldDate !== newDate) {
+        showToast("교체 등록 완료", "새 Laser 교체일이 반영되고 이전 기록은 교체 히스토리에 자동 보관되었습니다.");
+    } else {
+        showToast("저장 완료", "Laser 교체 정보(Head/PS/Diode S/N 및 일자)가 수정되었습니다.");
+    }
 }
 
 /** 9. Scale Head 축 퀵 수정 저장 */
@@ -5939,14 +5999,30 @@ async function saveScaleHeadAxisQuickRecord(equipSn, axisKey) {
 
     const maint = getMaintData(snKey || nameKey);
     maint.scaleHead = maint.scaleHead || {};
-    maint.scaleHead[axisKey] = maint.scaleHead[axisKey] || { replaceDate: null, history: [] };
+    maint.scaleHead[axisKey] = maint.scaleHead[axisKey] || { replaceDate: null, sn: '', history: [] };
+    maint.scaleHead[axisKey].history = maint.scaleHead[axisKey].history || [];
 
-    if (dateInput && dateInput.value) {
-        maint.scaleHead[axisKey].replaceDate = dateInput.value;
+    const newDate = dateInput && dateInput.value ? dateInput.value : '';
+    const newSn = snInput ? snInput.value.trim() : '';
+    const oldItem = maint.scaleHead[axisKey];
+    const oldDate = oldItem.replaceDate ? oldItem.replaceDate.replace(/\//g, String.fromCharCode(45)) : '';
+
+    // 핵심: 기존 교체일이 존재하고 입력한 새 교체일과 다르면 이전 장착 정보를 해당 축 이력에 자동 보관
+    if (oldDate && newDate && oldDate !== newDate) {
+        const curDays = calcMatrixDaysSince(oldDate);
+        const nowTs = Date.now();
+        maint.scaleHead[axisKey].history.push({
+            id: 'SCALE_' + axisKey + '_' + nowTs.toString(36) + Math.random().toString(36).slice(2, 6),
+            date: oldDate,
+            usedDays: curDays,
+            sn: oldItem.sn || '―',
+            isDeleted: false,
+            updatedAt: nowTs
+        });
     }
-    if (snInput) {
-        maint.scaleHead[axisKey].sn = snInput.value.trim();
-    }
+
+    if (newDate) maint.scaleHead[axisKey].replaceDate = newDate;
+    maint.scaleHead[axisKey].sn = newSn;
 
     saveMaintData(snKey, maint);
     if (nameKey && nameKey !== snKey) saveMaintData(nameKey, maint);
@@ -5954,7 +6030,12 @@ async function saveScaleHeadAxisQuickRecord(equipSn, axisKey) {
     cachedMatrixData = await buildFleetConsumableMatrix();
     renderConsumableMatrixContent();
     await openConsumableEditModal(snKey, 'scale_head');
-    showToast("보정 저장 완료", `Scale Head [${axisKey}] 축 교체 정보가 수정되었습니다.`);
+    
+    if (oldDate && newDate && oldDate !== newDate) {
+        showToast("교체 등록 완료", `[${axisKey}] 축의 이전 기록이 이력에 보관되고 새 교체 정보가 등록되었습니다.`);
+    } else {
+        showToast("보정 저장 완료", `Scale Head [${axisKey}] 축 교체 정보가 수정되었습니다.`);
+    }
 }
 
 // [Module: database.js]
