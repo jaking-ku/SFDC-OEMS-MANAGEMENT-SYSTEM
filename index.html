@@ -940,7 +940,7 @@
         </div>
 
         <!-- 3. 매트릭스 테이블 본문 -->
-        <div class="flex-1 overflow-auto p-4 bg-background/30" id="matrixTableContainer">
+        <div class="flex-1 min-h-0 flex flex-col p-4 bg-background/30 overflow-hidden" id="matrixTableContainer">
             <div class="text-center py-12 text-text-muted text-xs">
                 데이터를 분석하고 매트릭스를 불러오는 중입니다...
             </div>
@@ -4970,6 +4970,13 @@ async function buildFleetConsumableMatrix() {
 
         MAJOR_CONSUMABLE_ITEMS.forEach(it => {
             const hit = itemMap[it.key][sn] || itemMap[it.key][name] || null;
+            if (hit && it.key === 'laser') {
+                const laserData = maint.laser || {};
+                const totalManualHours = laserData.offsetHours !== undefined ? Number(laserData.offsetHours) : (laserData.offsetDays ? Number(laserData.offsetDays) * 24 : 0);
+                const totalHours = (hit.daysSince * 24) + totalManualHours;
+                hit.totalHours = totalHours;
+                hit.manualHours = totalManualHours;
+            }
             row.items[it.key] = hit;
         });
 
@@ -5093,163 +5100,171 @@ function renderConsumableMatrixContent() {
     }
 
     container.innerHTML = `
-        <div class="border border-border rounded-lg overflow-hidden shadow-xs bg-surface">
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-xs border-collapse">
-                    <thead class="sticky top-0 bg-background border-b border-border z-10 shadow-xs">
-                        <tr>
-                            <th class="th-base py-3 px-3 min-w-[70px] text-center">라인</th>
-                            <th class="th-base py-3 px-4 min-w-[120px]">설비호기 (모델)</th>
-                            ${MAJOR_CONSUMABLE_ITEMS.map(it => {
-                                const isScale = it.key === 'scale_head';
-                                const widthClass = isScale ? 'min-w-[195px]' : 'min-w-[125px]';
-                                return `
-                                    <th class="th-base py-3 px-3 ${widthClass} text-center border-l border-border/40">
-                                        <div class="flex items-center justify-center gap-1">
-                                            <span class="material-symbols-outlined text-[14px] text-primary">${it.icon}</span>
-                                            <span>${escapeHtml(it.label)}</span>
-                                        </div>
-                                        ${isScale ? `<div class="text-[9px] text-text-muted font-normal mt-0.5">5축 세로 현황</div>` : ''}
-                                    </th>
-                                `;
-                            }).join('')}
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-border/60">
-                        ${filtered.map(row => {
-                            const eq = row.equip;
+        <div class="flex-1 min-h-0 overflow-auto border border-border rounded-lg shadow-xs bg-surface relative">
+            <table class="w-full text-left text-xs border-collapse">
+                <thead class="sticky top-0 z-20 bg-surface shadow-xs">
+                    <tr class="border-b border-border bg-surface">
+                        <th class="th-base sticky top-0 z-20 bg-surface py-3 px-3 min-w-[70px] text-center shadow-xs">라인</th>
+                        <th class="th-base sticky top-0 z-20 bg-surface py-3 px-4 min-w-[120px] shadow-xs">설비호기 (모델)</th>
+                        ${MAJOR_CONSUMABLE_ITEMS.map(it => {
+                            const isScale = it.key === 'scale_head';
+                            const widthClass = isScale ? 'min-w-[195px]' : 'min-w-[130px]';
                             return `
-                                <tr class="hover:bg-primary/5 transition-colors">
-                                    <td class="td-base py-2.5 px-3 text-center font-bold text-text-muted">
-                                        <span class="px-2 py-0.5 rounded bg-background border border-border text-[11px]">${escapeHtml(eq.line || '미상')}</span>
-                                    </td>
-                                    <td class="td-base py-2.5 px-4 font-bold">
-                                        <div class="flex items-center gap-1.5">
-                                            <span class="text-primary hover:underline cursor-pointer font-bold text-sm" onclick="closeConsumableMatrixModal(); openEquipDetail('${escapeHtml(eq.sn)}')">
-                                                ${escapeHtml(eq.name)}
-                                            </span>
-                                            <span class="text-[10px] text-text-muted font-normal">(${escapeHtml(eq.model || '없음')})</span>
-                                        </div>
-                                    </td>
-                                    ${MAJOR_CONSUMABLE_ITEMS.map(it => {
-                                        if (it.key === 'scale_head') {
-                                            const scaleStatus = row.scaleAxesStatus;
-                                            if (!scaleStatus || scaleStatus.isNoneReplaced) {
-                                                return `
-                                                    <td class="td-base py-2.5 px-2 text-center border-l border-border/30 bg-background/20 align-top">
-                                                        <div class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface/50 border border-border/30 text-[10px] text-text-muted/60 mb-1.5 font-bold">
-                                                            <span class="material-symbols-outlined text-[11px]">horizontal_rule</span>
-                                                            전체 미교체 (0/5)
-                                                        </div>
-                                                        <div class="space-y-0.5">
-                                                            ${(scaleStatus?.axes || []).map(ax => `
-                                                                <div class="flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded bg-surface/20 border border-border/20 text-text-muted/40 font-mono">
-                                                                    <span class="font-bold text-text-muted/60 w-5 text-left">${ax.label}</span>
-                                                                    <span>미교체</span>
-                                                                    <span>―</span>
-                                                                </div>
-                                                            `).join('')}
-                                                        </div>
-                                                    </td>
-                                                `;
-                                            }
-
-                                            let topBadgeClass = "bg-emerald-500/10 text-emerald-600 border-emerald-500/30";
-                                            let topBadgeIcon = "check_circle";
-                                            let topBadgeText = "5축 전체 완료 (5/5)";
-
-                                            if (scaleStatus.isPartiallyReplaced) {
-                                                topBadgeClass = "bg-amber-500/10 text-amber-600 border-amber-500/30";
-                                                topBadgeIcon = "warning";
-                                                topBadgeText = `부분 완료 (${scaleStatus.replacedCount}/5)`;
-                                            }
-
+                                <th class="th-base sticky top-0 z-20 bg-surface py-3 px-3 ${widthClass} text-center border-l border-border/40 shadow-xs">
+                                    <div class="flex items-center justify-center gap-1">
+                                        <span class="material-symbols-outlined text-[14px] text-primary">${it.icon}</span>
+                                        <span>${escapeHtml(it.label)}</span>
+                                    </div>
+                                    ${isScale ? `<div class="text-[9px] text-text-muted font-normal mt-0.5">5축 세로 현황</div>` : ''}
+                                </th>
+                            `;
+                        }).join('')}
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-border/60">
+                    ${filtered.map(row => {
+                        const eq = row.equip;
+                        return `
+                            <tr class="hover:bg-primary/5 transition-colors">
+                                <td class="td-base py-2.5 px-3 text-center font-bold text-text-muted">
+                                    <span class="px-2 py-0.5 rounded bg-background border border-border text-[11px]">${escapeHtml(eq.line || '미상')}</span>
+                                </td>
+                                <td class="td-base py-2.5 px-4 font-bold">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="text-primary hover:underline cursor-pointer font-bold text-sm" onclick="closeConsumableMatrixModal(); openEquipDetail('${escapeHtml(eq.sn)}')">
+                                            ${escapeHtml(eq.name)}
+                                        </span>
+                                        <span class="text-[10px] text-text-muted font-normal">(${escapeHtml(eq.model || '없음')})</span>
+                                    </div>
+                                </td>
+                                ${MAJOR_CONSUMABLE_ITEMS.map(it => {
+                                    if (it.key === 'scale_head') {
+                                        const scaleStatus = row.scaleAxesStatus;
+                                        if (!scaleStatus || scaleStatus.isNoneReplaced) {
                                             return `
-                                                <td class="td-base py-2.5 px-2 border-l border-border/30 hover:bg-surface/80 align-top cursor-pointer hover:border-primary/50 transition-all group" onclick="openConsumableEditModal('${escapeHtml(eq.sn)}', 'scale_head')" title="클릭하여 Scale Head 5축 교체 이력 수정 및 등록">
-                                                    <div class="flex justify-center mb-1.5">
-                                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-black ${topBadgeClass}">
-                                                            <span class="material-symbols-outlined text-[12px]">${topBadgeIcon}</span>
-                                                            ${topBadgeText}
-                                                        </span>
-                                                    </div>
-                                                    <div class="space-y-1">
-                                                        ${scaleStatus.axes.map(ax => {
-                                                            if (ax.replaced) {
-                                                                let badgeColor = "bg-emerald-500/10 text-emerald-600 border-emerald-500/30";
-                                                                if (ax.daysSince > 180) {
-                                                                    badgeColor = "bg-red-500/10 text-red-600 border-red-500/30";
-                                                                } else if (ax.daysSince > 90) {
-                                                                    badgeColor = "bg-amber-500/10 text-amber-600 border-amber-500/30";
-                                                                }
-                                                                return `
-                                                                    <div class="flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded bg-background border border-border/60 hover:border-primary/40 transition-colors shadow-2xs font-mono" title="${ax.label}축 최신 교체: ${ax.latestDate} (${ax.daysSince}일 전)${ax.sn ? ' / S/N: ' + escapeHtml(ax.sn) : ''}">
-                                                                        <span class="font-black text-primary w-6 text-left shrink-0">${ax.label}</span>
-                                                                        <span class="text-text-main font-bold truncate mx-1">${escapeHtml(ax.latestDate)}</span>
-                                                                        <span class="px-1 py-0.2 rounded border font-bold shrink-0 text-[9px] ${badgeColor}">
-                                                                            ${ax.daysSince}일 전
-                                                                        </span>
-                                                                    </div>
-                                                                `;
-                                                            } else {
-                                                                return `
-                                                                    <div class="flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded bg-surface/20 border border-border/20 text-text-muted/40 font-mono">
-                                                                        <span class="font-bold text-text-muted/50 w-6 text-left shrink-0">${ax.label}</span>
-                                                                        <span class="text-text-muted/40">미교체</span>
-                                                                        <span class="text-[9px] text-text-muted/30">―</span>
-                                                                    </div>
-                                                                `;
-                                                            }
-                                                        }).join('')}
-                                                    </div>
-                                                </td>
-                                            `;
-                                        }
-
-                                        const hit = row.items[it.key];
-                                        if (!hit) {
-                                            return `
-                                                <td class="td-base py-2 px-3 text-center border-l border-border/30 bg-background/20 hover:bg-primary/10 cursor-pointer transition-colors group" onclick="openConsumableEditModal('${escapeHtml(eq.sn)}', '${it.key}')" title="클릭하여 ${escapeHtml(it.label)} 교체 이력 직접 등록">
-                                                    <span class="text-[10px] text-text-muted/50 px-2 py-0.5 rounded bg-surface/50 border border-border/30 group-hover:border-primary/50 group-hover:text-primary transition-colors flex items-center justify-center gap-1">
-                                                        <span>미교체</span>
+                                                <td class="td-base py-2.5 px-2 text-center border-l border-border/30 bg-background/20 hover:bg-surface/80 align-top cursor-pointer hover:border-primary/50 transition-all group" onclick="openConsumableEditModal('${escapeHtml(eq.sn)}', 'scale_head')" title="클릭하여 Scale Head 5축 교체 이력 수정 및 등록">
+                                                    <div class="inline-flex items-center justify-center gap-1 px-2 py-0.5 rounded bg-surface/50 border border-border/30 text-[10px] text-text-muted/60 mb-1.5 font-bold group-hover:border-primary/40 group-hover:text-primary transition-colors">
+                                                        <span class="material-symbols-outlined text-[11px]">horizontal_rule</span>
+                                                        <span>전체 미교체 (0/5)</span>
                                                         <span class="material-symbols-outlined text-[11px] opacity-0 group-hover:opacity-100 text-primary transition-opacity">edit_calendar</span>
-                                                    </span>
+                                                    </div>
+                                                    <div class="space-y-0.5">
+                                                        ${(scaleStatus?.axes || []).map(ax => `
+                                                            <div class="flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded bg-surface/20 border border-border/20 text-text-muted/40 font-mono">
+                                                                <span class="font-bold text-text-muted/60 w-5 text-left">${ax.label}</span>
+                                                                <span>미교체</span>
+                                                                <span>―</span>
+                                                            </div>
+                                                        `).join('')}
+                                                    </div>
                                                 </td>
                                             `;
                                         }
 
-                                        const days = hit.daysSince;
-                                        let badgeColor = "bg-emerald-500/10 text-emerald-600 border-emerald-500/30";
-                                        if (days > 180) {
-                                            badgeColor = "bg-red-500/10 text-red-600 border-red-500/30";
-                                        } else if (days > 90) {
-                                            badgeColor = "bg-amber-500/10 text-amber-600 border-amber-500/30";
+                                        let topBadgeClass = "bg-emerald-500/10 text-emerald-600 border-emerald-500/30";
+                                        let topBadgeIcon = "check_circle";
+                                        let topBadgeText = "5축 전체 완료 (5/5)";
+
+                                        if (scaleStatus.isPartiallyReplaced) {
+                                            topBadgeClass = "bg-amber-500/10 text-amber-600 border-amber-500/30";
+                                            topBadgeIcon = "warning";
+                                            topBadgeText = `부분 완료 (${scaleStatus.replacedCount}/5)`;
                                         }
 
                                         return `
-                                            <td class="td-base py-2 px-3 text-center border-l border-border/30 hover:bg-primary/10 cursor-pointer transition-colors group" onclick="openConsumableEditModal('${escapeHtml(eq.sn)}', '${it.key}')" title="${escapeHtml(hit.notes || hit.latestDate)} (클릭하여 이력 수정/관리)">
-                                                <div class="font-mono text-xs font-bold text-text-main flex items-center justify-center gap-1">
-                                                    <span>${escapeHtml(hit.latestDate)}</span>
-                                                    <span class="material-symbols-outlined text-[12px] opacity-0 group-hover:opacity-100 text-primary transition-opacity">edit</span>
-                                                </div>
-                                                <div class="flex items-center justify-center gap-1 mt-0.5">
-                                                    <span class="px-1.5 py-0.2 text-[9px] font-bold rounded border ${badgeColor}">
-                                                        ${days}일 전
+                                            <td class="td-base py-2.5 px-2 border-l border-border/30 hover:bg-surface/80 align-top cursor-pointer hover:border-primary/50 transition-all group" onclick="openConsumableEditModal('${escapeHtml(eq.sn)}', 'scale_head')" title="클릭하여 Scale Head 5축 교체 이력 수정 및 등록">
+                                                <div class="flex justify-center mb-1.5">
+                                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-black ${topBadgeClass}">
+                                                        <span class="material-symbols-outlined text-[12px]">${topBadgeIcon}</span>
+                                                        ${topBadgeText}
                                                     </span>
-                                                    ${hit.originType === 'manual' ? 
-                                                        `<span class="px-1 py-0.2 text-[8px] font-bold rounded bg-blue-500/10 text-blue-600 border border-blue-500/30" title="수동 등록 및 보정 완료">수동</span>` : 
-                                                        `<span class="px-1 py-0.2 text-[8px] font-bold rounded bg-purple-500/10 text-purple-600 border border-purple-500/30" title="메일 작업 히스토리 자동 감지">메일</span>`
-                                                    }
-                                                    ${hit.count > 1 ? `<span class="text-[9px] text-text-muted font-bold">(${hit.count}회)</span>` : ''}
+                                                </div>
+                                                <div class="space-y-1">
+                                                    ${scaleStatus.axes.map(ax => {
+                                                        if (ax.replaced) {
+                                                            let badgeColor = "bg-emerald-500/10 text-emerald-600 border-emerald-500/30";
+                                                            if (ax.daysSince > 180) {
+                                                                badgeColor = "bg-red-500/10 text-red-600 border-red-500/30";
+                                                            } else if (ax.daysSince > 90) {
+                                                                badgeColor = "bg-amber-500/10 text-amber-600 border-amber-500/30";
+                                                            }
+                                                            return `
+                                                                <div class="flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded bg-background border border-border/60 hover:border-primary/40 transition-colors shadow-2xs font-mono" title="${ax.label}축 최신 교체: ${ax.latestDate} (${ax.daysSince}일 전)${ax.sn ? ' / S/N: ' + escapeHtml(ax.sn) : ''}">
+                                                                    <span class="font-black text-primary w-6 text-left shrink-0">${ax.label}</span>
+                                                                    <span class="text-text-main font-bold truncate mx-1">${escapeHtml(ax.latestDate)}</span>
+                                                                    <span class="px-1 py-0.2 rounded border font-bold shrink-0 text-[9px] ${badgeColor}">
+                                                                        ${ax.daysSince}일 전
+                                                                    </span>
+                                                                </div>
+                                                            `;
+                                                        } else {
+                                                            return `
+                                                                <div class="flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded bg-surface/20 border border-border/20 text-text-muted/40 font-mono">
+                                                                    <span class="font-bold text-text-muted/50 w-6 text-left shrink-0">${ax.label}</span>
+                                                                    <span class="text-text-muted/40">미교체</span>
+                                                                    <span class="text-[9px] text-text-muted/30">―</span>
+                                                                </div>
+                                                            `;
+                                                        }
+                                                    }).join('')}
                                                 </div>
                                             </td>
                                         `;
-                                    }).join('')}
-                                </tr>
-                            `;
-                        }).join('')}
-                    </tbody>
-                </table>
-            </div>
+                                    }
+
+                                    const hit = row.items[it.key];
+                                    if (!hit) {
+                                        return `
+                                            <td class="td-base py-2 px-3 text-center border-l border-border/30 bg-background/20 hover:bg-primary/10 cursor-pointer transition-colors group" onclick="openConsumableEditModal('${escapeHtml(eq.sn)}', '${it.key}')" title="클릭하여 ${escapeHtml(it.label)} 교체 이력 직접 등록">
+                                                <span class="text-[10px] text-text-muted/50 px-2 py-0.5 rounded bg-surface/50 border border-border/30 group-hover:border-primary/50 group-hover:text-primary transition-colors flex items-center justify-center gap-1">
+                                                    <span>미교체</span>
+                                                    <span class="material-symbols-outlined text-[11px] opacity-0 group-hover:opacity-100 text-primary transition-opacity">edit_calendar</span>
+                                                </span>
+                                            </td>
+                                        `;
+                                    }
+
+                                    const days = hit.daysSince;
+                                    let badgeColor = "bg-emerald-500/10 text-emerald-600 border-emerald-500/30";
+                                    if (days > 180) {
+                                        badgeColor = "bg-red-500/10 text-red-600 border-red-500/30";
+                                    } else if (days > 90) {
+                                        badgeColor = "bg-amber-500/10 text-amber-600 border-amber-500/30";
+                                    }
+
+                                    const isLaser = it.key === 'laser';
+                                    const laserHours = isLaser ? (hit.totalHours !== undefined ? hit.totalHours : (days * 24)) : 0;
+                                    const usageBadgeText = isLaser 
+                                        ? `${days}일 / ${Number(laserHours).toLocaleString()}시간` 
+                                        : `${days}일 전`;
+                                    const cellHoverTitle = isLaser 
+                                        ? `Laser 교체: ${escapeHtml(hit.latestDate)} (${days}일 / ${Number(laserHours).toLocaleString()}시간 사용 중 / 클릭하여 이력 수정)` 
+                                        : `${escapeHtml(hit.notes || hit.latestDate)} (클릭하여 이력 수정/관리)`;
+
+                                    return `
+                                        <td class="td-base py-2 px-3 text-center border-l border-border/30 hover:bg-primary/10 cursor-pointer transition-colors group" onclick="openConsumableEditModal('${escapeHtml(eq.sn)}', '${it.key}')" title="${cellHoverTitle}">
+                                            <div class="font-mono text-xs font-bold text-text-main flex items-center justify-center gap-1">
+                                                <span>${escapeHtml(hit.latestDate)}</span>
+                                                <span class="material-symbols-outlined text-[12px] opacity-0 group-hover:opacity-100 text-primary transition-opacity">edit</span>
+                                            </div>
+                                            <div class="flex items-center justify-center gap-1 mt-0.5 flex-wrap">
+                                                <span class="px-1.5 py-0.2 text-[9px] font-bold rounded border ${badgeColor}">
+                                                    ${usageBadgeText}
+                                                </span>
+                                                ${hit.originType === 'manual' ? 
+                                                    `<span class="px-1 py-0.2 text-[8px] font-bold rounded bg-blue-500/10 text-blue-600 border border-blue-500/30" title="수동 등록 및 보정 완료">수동</span>` : 
+                                                    `<span class="px-1 py-0.2 text-[8px] font-bold rounded bg-purple-500/10 text-purple-600 border border-purple-500/30" title="메일 작업 히스토리 자동 감지">메일</span>`
+                                                }
+                                                ${hit.count > 1 ? `<span class="text-[9px] text-text-muted font-bold">(${hit.count}회)</span>` : ''}
+                                            </div>
+                                        </td>
+                                    `;
+                                }).join('')}
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
         </div>
     `;
 }
@@ -5291,7 +5306,12 @@ function exportConsumableMatrixCsv() {
                 const hit = r.items[it.key];
                 if (hit) {
                     const tag = hit.originType === 'manual' ? '[수동]' : '[메일]';
-                    row.push(`${tag} ${hit.latestDate} (${hit.daysSince}일 전)`);
+                    if (it.key === 'laser') {
+                        const lHours = hit.totalHours !== undefined ? hit.totalHours : (hit.daysSince * 24);
+                        row.push(`${tag} ${hit.latestDate} (${hit.daysSince}일 / ${Number(lHours).toLocaleString()}시간)`);
+                    } else {
+                        row.push(`${tag} ${hit.latestDate} (${hit.daysSince}일 전)`);
+                    }
                 } else {
                     row.push('미교체');
                 }
@@ -5624,6 +5644,8 @@ function renderLaserQuickEditView(bodyEl, eq, maint) {
     const curDate = laser.replaceDate ? laser.replaceDate.replace(/\//g, String.fromCharCode(45)) : '';
     const curSn = laser.headSN || '';
     const curDays = laser.replaceDate ? calcMatrixDaysSince(laser.replaceDate) : 0;
+    const totalManualHours = laser.offsetHours !== undefined ? Number(laser.offsetHours) : (laser.offsetDays ? Number(laser.offsetDays) * 24 : 0);
+    const curHours = (curDays * 24) + totalManualHours;
     const historyList = (laser.history || []).filter(h => !h.isDeleted);
 
     bodyEl.innerHTML = `
@@ -5632,7 +5654,7 @@ function renderLaserQuickEditView(bodyEl, eq, maint) {
                 <span class="text-[11px] text-text-muted font-bold block mb-0.5">현재 Laser Head 상태</span>
                 <div class="flex items-center gap-2">
                     <span class="text-base font-black font-mono text-text-main">${laser.replaceDate || '미교체'}</span>
-                    ${laser.replaceDate ? `<span class="px-2 py-0.5 text-xs font-bold rounded border bg-primary/10 text-primary border-primary/20 font-mono">${curDays}일 전</span>` : ''}
+                    ${laser.replaceDate ? `<span class="px-2 py-0.5 text-xs font-bold rounded border bg-primary/10 text-primary border-primary/20 font-mono">${curDays}일 / ${Number(curHours).toLocaleString()}시간 사용 중</span>` : ''}
                     ${curSn ? `<span class="px-2 py-0.5 text-xs font-bold rounded bg-surface border border-border text-text-muted">Head: ${escapeHtml(curSn)}</span>` : ''}
                 </div>
             </div>
