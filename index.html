@@ -963,41 +963,48 @@
             </div>
 
             <!-- 🔄 스왑(맞교환) 전용 입력 폼 (미등록 설비도 즉시 자동 태그화하여 스왑) -->
-            <div id="swapActionForm" class="hidden grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-primary/5 p-4 rounded border border-primary/20">
-                <div class="md:col-span-2">
-                    <label class="label-base mb-1.5 flex items-center justify-between">
-                        <span>스왑 작업일 *</span>
-                        <button type="button" onclick="resetAssetDateToToday('inpSwapDate')" class="text-[9px] text-primary hover:underline font-bold">오늘</button>
-                    </label>
-                    <input type="date" id="inpSwapDate" class="input-base h-10 px-2.5 rounded font-mono text-xs">
-                    <p class="text-[10px] text-transparent mt-1 select-none">-</p>
+            <div id="swapActionForm" class="hidden space-y-3 bg-primary/5 p-4 rounded border border-primary/20">
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                    <div class="md:col-span-2">
+                        <label class="label-base mb-1.5 flex items-center justify-between">
+                            <span>스왑 작업일 *</span>
+                            <button type="button" onclick="resetAssetDateToToday('inpSwapDate')" class="text-[9px] text-primary hover:underline font-bold">오늘</button>
+                        </label>
+                        <input type="date" id="inpSwapDate" class="input-base h-10 px-2.5 rounded font-mono text-xs">
+                        <p class="text-[10px] text-transparent mt-1 select-none">-</p>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="label-base mb-1.5 text-primary">스왑 부품명 *</label>
+                        <input type="text" id="inpSwapPartName" list="dlCommonParts" class="input-base h-10 px-3 rounded font-bold" 
+                               placeholder="예: MSPF, AF Board" oninput="updateSwapPreview()">
+                        <p class="text-[10px] text-text-muted mt-1 truncate">교환할 부품 품목</p>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="label-base mb-1.5 text-primary">대상 1 (설비호기 / 태그) *</label>
+                        <input type="text" id="inpSwapTargetA" list="dlSwapTargets" class="input-base h-10 px-3 rounded font-mono font-bold" 
+                               placeholder="예: MDI0002" oninput="updateSwapPreview()">
+                        <div class="text-[10px] mt-1 truncate" id="swapLocPreviewA">호기 입력 시 자동 해석</div>
+                    </div>
+                    <div class="md:col-span-1 flex items-center justify-center pb-6">
+                        <span class="material-symbols-outlined text-2xl text-primary font-bold">swap_horiz</span>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="label-base mb-1.5 text-primary">대상 2 (설비호기 / 신품 / 태그) *</label>
+                        <input type="text" id="inpSwapTargetB" list="dlSwapTargets" class="input-base h-10 px-3 rounded font-mono font-bold" 
+                               placeholder="예: NEW 또는 MDI0001" oninput="updateSwapPreview()">
+                        <div class="text-[10px] mt-1 truncate" id="swapLocPreviewB">호기 입력 시 자동 해석</div>
+                    </div>
+                    <div class="md:col-span-3">
+                        <label class="label-base mb-1.5">스왑 사유 / 메모</label>
+                        <input type="text" id="inpSwapMemo" class="input-base h-10 px-3 rounded" 
+                               placeholder="예: 불량 의심 상호 맞교환" onkeydown="if(event.key==='Enter') submitAssetAction()">
+                        <p class="text-[10px] text-transparent mt-1 select-none">-</p>
+                    </div>
                 </div>
-                <div class="md:col-span-2">
-                    <label class="label-base mb-1.5 text-primary">스왑 부품명 *</label>
-                    <input type="text" id="inpSwapPartName" list="dlCommonParts" class="input-base h-10 px-3 rounded font-bold" 
-                           placeholder="예: AF Board" oninput="updateSwapPreview()">
-                    <p class="text-[10px] text-text-muted mt-1 truncate">교환할 부품 종류</p>
-                </div>
-                <div class="md:col-span-2">
-                    <label class="label-base mb-1.5 text-primary">대상 1 (호기 또는 태그) *</label>
-                    <input type="text" id="inpSwapTargetA" list="dlSwapTargets" class="input-base h-10 px-3 rounded font-mono font-bold" 
-                           placeholder="예: MDI3716" oninput="updateSwapPreview()">
-                    <p class="text-[10px] text-primary font-mono mt-1 truncate" id="swapLocPreviewA">호기 입력 시 자동태그</p>
-                </div>
-                <div class="md:col-span-1 flex items-center justify-center pb-6">
-                    <span class="material-symbols-outlined text-2xl text-primary font-bold">swap_horiz</span>
-                </div>
-                <div class="md:col-span-2">
-                    <label class="label-base mb-1.5 text-primary">대상 2 (호기 또는 태그) *</label>
-                    <input type="text" id="inpSwapTargetB" list="dlSwapTargets" class="input-base h-10 px-3 rounded font-mono font-bold" 
-                           placeholder="예: MDI3719" oninput="updateSwapPreview()">
-                    <p class="text-[10px] text-primary font-mono mt-1 truncate" id="swapLocPreviewB">호기 입력 시 자동태그</p>
-                </div>
-                <div class="md:col-span-3">
-                    <label class="label-base mb-1.5">스왑 사유 / 메모</label>
-                    <input type="text" id="inpSwapMemo" class="input-base h-10 px-3 rounded" 
-                           placeholder="예: MDI3716 에러 발생하여 Swap" onkeydown="if(event.key==='Enter') submitAssetAction()">
-                    <p class="text-[10px] text-transparent mt-1 select-none">-</p>
+
+                <!-- 🔍 [신규] 스왑 대상 실시간 지능형 해석 및 교차 시뮬레이션 카드 -->
+                <div id="swapExchangeMatrix" class="hidden p-3.5 bg-surface rounded border border-primary/30 space-y-2.5 text-xs animate-[fadeIn_0.15s_ease-out]">
+                    <!-- 동적 자바스크립트로 주입됨 -->
                 </div>
             </div>
 
@@ -6984,8 +6991,8 @@ function searchSalesforce(customQuery, inputId = 'sfSearchInput') {
     }
 }
 
-
 // ==============================================================================
+
 // [Module: asset_tracker.js]
 // 설비호기/커스텀 태그(Board#MDIB701, #New 등) 기반 이동경로 + 자동 스왑 + 수정(Edit) 엔진
 // ==============================================================================
@@ -7237,17 +7244,31 @@ function onAssetTagInput(val) {
     }
 }
 
+/** 🎯 대상 입력칸에 태그 바로 주입 (원클릭 전환 헬퍼) */
+function setSwapTargetInput(targetKey, val) {
+    const el = document.getElementById(targetKey === 'A' ? 'inpSwapTargetA' : 'inpSwapTargetB');
+    if (el) {
+        el.value = val;
+        updateSwapPreview();
+        showToast('스왑 대상 전환', `대상 ${targetKey}이(가) [${val}] 태그로 전환되었습니다.`);
+    }
+}
+
 /**
- * 🔍 스왑(Swap) 대상 자동 해석기
- * 사용자가 설비호기('MDI3716')만 입력하든, 전체 태그('AF Board#MDI3716')를 입력하든
- * 1) 등록된 태그 확인 -> 2) 해당 설비에 장착된 동일 품목 확인 -> 3) 없으면 '부품명#설비호기'로 즉시 자동 생성!
+ * 🔍 스왑(Swap) 대상 정밀 해석기 (설비 호기 vs 부품 태그 완벽 구분)
+ * 1) 태그 직접 입력 (# 포함 또는 등록된 태그명): 특정 실물 부품 태그 기준 지정
+ * 2) 신품/보관 키워드 (NEW, 신품, 창고 등): 보관/신품 기준 지정
+ * 3) 설비 호기 입력 (예: MDI0002):
+ *    - 현재 그 설비에 실제로 꽂혀 있는 해당 부품(예: MSPF#MDI0001)을 자동 감지!
+ *    - 과거 스왑으로 원래 호기 태그와 다를 경우 isSwappedBefore 감지 및 대안 태그 제공
+ * 4) 미등록 상태: '부품명#설비호기'로 자동 생성 예약
  */
 function resolveSwapSide(partNameInput, rawTargetInput, masterList) {
     const cleanTarget = (rawTargetInput || '').trim();
     let cleanPart = (partNameInput || '').trim();
     if (!cleanTarget) return null;
 
-    // 만약 대상 칸에 'AF Board#MDI3716'처럼 #을 포함해 넣었다면 부품명 자동 분리
+    // 만약 대상 칸에 'MSPF#MDI0001'처럼 #을 포함해 넣었다면 부품명 자동 분리 및 태그 직접 지정
     if (cleanTarget.includes('#')) {
         const [p, s] = cleanTarget.split('#');
         if (!cleanPart && p.trim()) cleanPart = p.trim();
@@ -7255,31 +7276,58 @@ function resolveSwapSide(partNameInput, rawTargetInput, masterList) {
         const existingByTag = masterList.find(a => (a.part_name || '').toUpperCase() === fullTagUpper);
         if (existingByTag) {
             return {
+                inputType: 'tag',
                 isExisting: true,
                 tag: existingByTag.part_name,
-                location: existingByTag.current_location || s.trim().toUpperCase()
+                location: existingByTag.current_location || s.trim().toUpperCase(),
+                originEquip: s.trim().toUpperCase(),
+                isSwappedBefore: false,
+                note: `특정 태그 직접 지정 (현재 위치: ${existingByTag.current_location || '미상'})`
             };
         }
         return {
+            inputType: 'tag',
             isExisting: false,
             tag: `${cleanPart || p.trim()}#${s.trim().toUpperCase()}`,
-            location: s.trim().toUpperCase()
+            location: s.trim().toUpperCase(),
+            originEquip: s.trim().toUpperCase(),
+            isSwappedBefore: false,
+            note: `신규 태그 직접 지정 (${cleanPart || p.trim()}#${s.trim().toUpperCase()})`
         };
     }
 
     const targetUpper = cleanTarget.toUpperCase();
 
-    // 1. 입력값이 이미 등록된 태그명과 정확히 일치하는 경우
+    // 1. 입력값이 이미 등록된 전체 태그명과 정확히 일치하는 경우
     const exactMatch = masterList.find(a => (a.part_name || '').toUpperCase() === targetUpper);
     if (exactMatch) {
         return {
+            inputType: 'tag',
             isExisting: true,
             tag: exactMatch.part_name,
-            location: exactMatch.current_location || targetUpper
+            location: exactMatch.current_location || targetUpper,
+            originEquip: exactMatch.part_name.includes('#') ? exactMatch.part_name.split('#')[1] : targetUpper,
+            isSwappedBefore: false,
+            note: `등록된 부품 태그 직접 지정 (현재 위치: ${exactMatch.current_location || '미상'})`
         };
     }
 
-    // 2. 입력값이 설비호기(예: MDI3716)일 때, 현재 그 설비에 장착 중인 해당 부품 태그가 있는지 확인
+    // 2. 신품/보관 창고 키워드인 경우 (NEW, 신품, 창고 등)
+    const isNewOrStorage = /^(new|신품|창고|보관|입고)$/i.test(targetUpper);
+    if (isNewOrStorage) {
+        const finalTag = cleanPart ? `${cleanPart}#${targetUpper}` : `PART#${targetUpper}`;
+        return {
+            inputType: 'storage',
+            isExisting: masterList.some(a => (a.part_name || '').toUpperCase() === finalTag.toUpperCase()),
+            tag: finalTag,
+            location: targetUpper === 'NEW' ? '신품입고' : targetUpper,
+            originEquip: targetUpper,
+            isSwappedBefore: false,
+            note: `신품/보관품 투입 (${finalTag})`
+        };
+    }
+
+    // 3. 입력값이 설비호기(예: MDI0002)일 때: 현재 그 설비에 실제로 장착 중인 해당 품목 부품 탐색!
     if (cleanPart) {
         const pUpper = cleanPart.toUpperCase();
         const mountedAtEquip = masterList.find(a => 
@@ -7287,24 +7335,41 @@ function resolveSwapSide(partNameInput, rawTargetInput, masterList) {
             (a.part_name || '').toUpperCase().startsWith(pUpper + '#')
         );
         if (mountedAtEquip) {
+            // 태그 출신 호기와 현재 실장 설비 비교 (과거 스왑 이력 판별!)
+            const tagOrigin = mountedAtEquip.part_name.includes('#') ? mountedAtEquip.part_name.split('#')[1].toUpperCase() : '';
+            const isSwappedBefore = tagOrigin && tagOrigin !== targetUpper;
+            const altTagCandidate = `${cleanPart}#${targetUpper}`;
+
             return {
+                inputType: 'equip',
                 isExisting: true,
                 tag: mountedAtEquip.part_name,
-                location: targetUpper
+                location: targetUpper,
+                mountedTag: mountedAtEquip.part_name,
+                originEquip: tagOrigin,
+                isSwappedBefore: isSwappedBefore,
+                altTagCandidate: altTagCandidate,
+                note: isSwappedBefore 
+                    ? `설비 [${targetUpper}] 실장품 (⚠️ 원래 [${tagOrigin}] 출신 ${mountedAtEquip.part_name} 장착 중)`
+                    : `설비 [${targetUpper}] 실장품 (${mountedAtEquip.part_name})`
             };
         }
     }
 
-    // 3. 미등록 상태면 '부품명#설비호기'(예: AF Board#MDI3716)로 자동 태그 생성 예약
+    // 4. 미등록 설비인 경우: '부품명#설비호기'(예: MSPF#MDI0002)로 자동 태그 생성 예약
     const finalTag = cleanPart ? `${cleanPart}#${targetUpper}` : `PART#${targetUpper}`;
     return {
+        inputType: 'equip_new',
         isExisting: false,
         tag: finalTag,
-        location: targetUpper
+        location: targetUpper,
+        originEquip: targetUpper,
+        isSwappedBefore: false,
+        note: `설비 [${targetUpper}] (미등록 ➔ [${finalTag}] 자동 생성 예약)`
     };
 }
 
-/** 스왑 입력 시 하단 미리보기 실시간 표시 */
+/** 🔄 스왑 입력 시 실시간 지능형 해석 및 양방향 시뮬레이션 매트릭스 렌더링 */
 function updateSwapPreview() {
     let partName = (document.getElementById('inpSwapPartName')?.value || '').trim();
     const rawA = (document.getElementById('inpSwapTargetA')?.value || '').trim();
@@ -7319,17 +7384,115 @@ function updateSwapPreview() {
 
     const prevA = document.getElementById('swapLocPreviewA');
     const prevB = document.getElementById('swapLocPreviewB');
+    const matrixBox = document.getElementById('swapExchangeMatrix');
 
+    // 1. 대상 A 간이 라벨
     if (prevA) {
-        prevA.textContent = sideA 
-            ? `${sideA.isExisting ? '기존' : '신규자동'} [${sideA.tag}] (위치: ${sideA.location})`
-            : '호기 입력 시 자동태그';
+        if (!sideA) {
+            prevA.innerHTML = '<span class="text-text-muted">호기/태그 입력 시 자동 해석</span>';
+        } else if (sideA.inputType === 'equip') {
+            prevA.innerHTML = sideA.isSwappedBefore
+                ? `<span class="text-amber-500 font-bold">⚠️ 실장: ${sideA.tag}</span>`
+                : `<span class="text-primary font-bold">🏢 실장: ${sideA.tag}</span>`;
+        } else if (sideA.inputType === 'tag') {
+            prevA.innerHTML = `<span class="text-blue-500 font-bold">🏷️ 태그: ${sideA.tag}</span>`;
+        } else {
+            prevA.innerHTML = `<span class="text-emerald-500 font-bold">📦 ${sideA.tag}</span>`;
+        }
     }
+
+    // 2. 대상 B 간이 라벨
     if (prevB) {
-        prevB.textContent = sideB 
-            ? `${sideB.isExisting ? '기존' : '신규자동'} [${sideB.tag}] (위치: ${sideB.location})`
-            : '호기 입력 시 자동태그';
+        if (!sideB) {
+            prevB.innerHTML = '<span class="text-text-muted">호기/태그 입력 시 자동 해석</span>';
+        } else if (sideB.inputType === 'equip') {
+            prevB.innerHTML = sideB.isSwappedBefore
+                ? `<span class="text-amber-500 font-bold">⚠️ 실장: ${sideB.tag}</span>`
+                : `<span class="text-primary font-bold">🏢 실장: ${sideB.tag}</span>`;
+        } else if (sideB.inputType === 'tag') {
+            prevB.innerHTML = `<span class="text-blue-500 font-bold">🏷️ 태그: ${sideB.tag}</span>`;
+        } else {
+            prevB.innerHTML = `<span class="text-emerald-500 font-bold">📦 ${sideB.tag}</span>`;
+        }
     }
+
+    // 3. 실시간 교차 시뮬레이션 매트릭스 카드 렌더링
+    if (!matrixBox) return;
+
+    if (!sideA || !sideB) {
+        matrixBox.classList.add('hidden');
+        matrixBox.innerHTML = '';
+        return;
+    }
+
+    matrixBox.classList.remove('hidden');
+
+    // 렌더링 카드 조립
+    const renderSideBlock = (label, side, otherSide, targetKey) => {
+        let badge = '';
+        let desc = '';
+        let altBtn = '';
+
+        if (side.inputType === 'equip') {
+            if (side.isSwappedBefore) {
+                badge = `<span class="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20 font-bold text-[10px]">🏢 설비 실장품 감지 (이전 스왑 이력 있음)</span>`;
+                desc = `현재 <b>${escapeHtml(side.location)}</b> 설비에는 원래 [${escapeHtml(side.originEquip)}] 출신 부품인 <code class="text-amber-500 font-black">${escapeHtml(side.tag)}</code>이(가) 장착되어 있습니다.`;
+                if (side.altTagCandidate) {
+                    altBtn = `<button type="button" onclick="setSwapTargetInput('${targetKey}', '${escapeHtml(side.altTagCandidate)}')" class="mt-1 text-[10px] text-primary hover:underline flex items-center gap-1 font-semibold">
+                        <span>💡 혹시 태그 <code class="font-bold underline">${escapeHtml(side.altTagCandidate)}</code> 실물 자체를 교체하시려 했나요? 클릭하여 전환</span>
+                    </button>`;
+                }
+            } else {
+                badge = `<span class="px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 font-bold text-[10px]">🏢 설비 호기 기준</span>`;
+                desc = `현재 <b>${escapeHtml(side.location)}</b> 설비에 실장된 <code class="text-primary font-bold">${escapeHtml(side.tag)}</code> 부품을 탈거합니다.`;
+            }
+        } else if (side.inputType === 'tag') {
+            badge = `<span class="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20 font-bold text-[10px]">🏷️ 특정 부품 태그 직접 지정</span>`;
+            desc = `부품 실물 <code class="text-blue-500 font-bold">${escapeHtml(side.tag)}</code> (현재 위치: <b>${escapeHtml(side.location)}</b>)을(를) 지정하여 이동합니다.`;
+        } else {
+            badge = `<span class="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-bold text-[10px]">📦 보관 / 신품 투입</span>`;
+            desc = `새로운 보관/신품 <code class="text-emerald-500 font-bold">${escapeHtml(side.tag)}</code> 부품이 투입됩니다.`;
+        }
+
+        return `
+            <div class="p-2.5 rounded bg-background border border-border space-y-1">
+                <div class="flex items-center justify-between gap-1 flex-wrap">
+                    <span class="font-bold text-text-main flex items-center gap-1">
+                        <span class="text-primary">${label}:</span> ${escapeHtml(side.location)}
+                    </span>
+                    ${badge}
+                </div>
+                <div class="text-[11px] text-text-muted leading-relaxed">${desc}</div>
+                <div class="text-[11px] font-bold text-primary flex items-center gap-1 pt-0.5">
+                    <span>➔ 스왑 후 이동:</span>
+                    <span class="px-1.5 py-0.2 rounded bg-primary/10 border border-primary/30 font-mono text-text-main">${escapeHtml(side.tag)} ➔ [${escapeHtml(otherSide.location)}]</span>
+                </div>
+                ${altBtn}
+            </div>
+        `;
+    };
+
+    // 하단 명쾌한 결론 요약 문구
+    const summaryText = `💡 <b>실제 동작 확인</b>: 
+        <b>${escapeHtml(sideA.location)}</b>에 실장되어 있던 <code>${escapeHtml(sideA.tag)}</code> 부품이 <b>[${escapeHtml(sideB.location)}]</b>(으)로 이동하고, 
+        <b>${escapeHtml(sideB.location)}</b>의 <code>${escapeHtml(sideB.tag)}</code> 부품이 <b>[${escapeHtml(sideA.location)}]</b>(으)로 맞교환 장착됩니다.`;
+
+    matrixBox.innerHTML = `
+        <div class="flex items-center justify-between border-b border-border pb-1.5">
+            <span class="font-black text-text-main flex items-center gap-1">
+                <span class="material-symbols-outlined text-primary text-sm">compare_arrows</span>
+                스왑(Swap) 시뮬레이션 결과 (실제 일어나는 일)
+            </span>
+            <span class="text-[10px] text-text-muted">설비 실장품과 부품 태그가 명확히 분리 해석됩니다</span>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            ${renderSideBlock('대상 1 (A측)', sideA, sideB, 'A')}
+            ${renderSideBlock('대상 2 (B측)', sideB, sideA, 'B')}
+        </div>
+        <div class="p-2 rounded bg-primary/5 border border-primary/20 text-[11px] text-text-main">
+            ${summaryText}
+        </div>
+    `;
 }
 
 /** ✅ 액션 저장 실행 (장착 / 탈착 / 스왑 / 이동) */
@@ -7352,12 +7515,12 @@ function submitAssetAction() {
         if (!partName && rawB.includes('#')) partName = rawB.split('#')[0].trim();
 
         if (!partName) {
-            alert('스왑할 부품명(예: AF Board, MSPF)을 입력해주세요.');
+            alert('스왑할 부품명(예: MSPF, AF Board)을 입력해주세요.');
             document.getElementById('inpSwapPartName')?.focus();
             return;
         }
         if (!rawA || !rawB) {
-            alert('스왑할 두 설비호기(예: MDI3716, MDI3719)를 모두 입력해주세요.');
+            alert('스왑할 두 대상(설비호기, 신품, 태그)을 모두 입력해주세요.');
             return;
         }
 
@@ -7368,7 +7531,15 @@ function submitAssetAction() {
             return alert('서로 다른 두 설비(또는 태그)를 입력해주세요.');
         }
 
-        // 교차 스왑 이벤트 2건 생성 (A는 locA ➔ locB, B는 locB ➔ locA)
+        // 교차 스왑 이벤트 2건 생성 (상세 출신과 설비 명시)
+        const memoA = sideA.isSwappedBefore
+            ? `[스왑: ${sideA.location} 실장품 ➔ ${sideB.location}] (${sideA.location} 장착중이던 ${sideA.tag}을 ${sideB.tag}와 맞교환) ${memo}`
+            : `[스왑: ${sideA.location} ➔ ${sideB.location}] (${sideA.tag} ↔ ${sideB.tag} 맞교환) ${memo}`;
+
+        const memoB = sideB.isSwappedBefore
+            ? `[스왑: ${sideB.location} 실장품 ➔ ${sideA.location}] (${sideB.location} 장착중이던 ${sideB.tag}을 ${sideA.tag}와 맞교환) ${memo}`
+            : `[스왑: ${sideB.location} ➔ ${sideA.location}] (${sideB.tag} ↔ ${sideA.tag} 맞교환) ${memo}`;
+
         events.push({
             event_id: `EVT_${nowMs}_A`,
             asset_id: sideA.tag.toUpperCase(),
@@ -7376,7 +7547,7 @@ function submitAssetAction() {
             action: '스왑',
             from_location: sideA.location,
             to_location: sideB.location,
-            memo: `[${sideB.tag}와 스왑] ${memo}`,
+            memo: memoA,
             work_date: workDate,
             timestamp: `${workDate} ${timeSuffix}`,
             created_at: nowMs
@@ -7389,7 +7560,7 @@ function submitAssetAction() {
             action: '스왑',
             from_location: sideB.location,
             to_location: sideA.location,
-            memo: `[${sideA.tag}와 스왑] ${memo}`,
+            memo: memoB,
             work_date: workDate,
             timestamp: `${workDate} ${timeSuffix}`,
             created_at: nowMs + 1
@@ -7480,9 +7651,25 @@ function refreshAssetTrackerDatalists() {
 
     const dlSwap = document.getElementById('dlSwapTargets');
     if (dlSwap) {
+        // 설비별 현재 실장 부품 매핑
+        const equipMountedMap = {};
+        master.forEach(a => {
+            if (a.current_location && !a.current_location.includes('창고') && !a.current_location.includes('입고') && !a.current_location.includes('사무실')) {
+                const locKey = a.current_location.toUpperCase();
+                equipMountedMap[locKey] = equipMountedMap[locKey] || [];
+                equipMountedMap[locKey].push(a.part_name);
+            }
+        });
+
         const swapOptions = [
-            ...Array.from(equipSet).map(eq => `<option value="${escapeHtml(eq)}">설비호기</option>`),
-            ...master.map(a => `<option value="${escapeHtml(a.part_name)}">현재: ${escapeHtml(a.current_location)}</option>`)
+            '<option value="NEW">신품 입고 (NEW)</option>',
+            '<option value="P3 창고">P3 창고 (예비 보관품)</option>',
+            '<option value="고객 사무실">고객 사무실 (보관품)</option>',
+            ...Array.from(equipSet).sort().map(eq => {
+                const mounted = equipMountedMap[eq] ? ` (현재 실장: ${equipMountedMap[eq].join(', ')})` : '';
+                return `<option value="${escapeHtml(eq)}">${escapeHtml(eq)}${escapeHtml(mounted)}</option>`;
+            }),
+            ...master.map(a => `<option value="${escapeHtml(a.part_name)}">[태그] ${escapeHtml(a.part_name)} (현재: ${escapeHtml(a.current_location)})</option>`)
         ];
         dlSwap.innerHTML = swapOptions.join('');
     }
@@ -7906,7 +8093,9 @@ function exportAssetTrackerCsv() {
     const rows = [['부품태그', '현재위치', '현재상태', '최근액션', '최근메모', '최종작업일'], ...master.map(a => [
         a.part_name, a.current_location, a.current_status, a.last_action || '', a.last_memo || '', (a.last_updated || '').slice(0, 10)
     ])];
-    const csv = '\uFEFF' + rows.map(r => r.map(v => `"${String(v || '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+    const q = String.fromCharCode(34);
+    const dq = String.fromCharCode(34, 34);
+    const csv = '\uFEFF' + rows.map(r => r.map(v => q + String(v || '').split(q).join(dq) + q).join(',')).join('\r\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
     a.download = `Asset_Tags_${getCurrentDept()}_${getTodayDateString()}.csv`;
@@ -7919,7 +8108,7 @@ function initAssetTrackerUI() {
     setAssetActionMode(currentAssetActionMode || '장착');
     renderAssetTrackerAll();
 }
-    
+
 // [Module: ui.js]
 // 7. [UI & View Renderers] 화면 전환, 렌더링, 타임라인, 다크모드 및 유틸리티
 // ==============================================================================
