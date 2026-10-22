@@ -6892,228 +6892,32 @@ const ASSET_CATEGORIES = [
 ];
 
 /** 초기 시드 데이터 생성 (최초 1회 실행) */
+/** 초기 스토리지 세팅 및 잔존 샘플(시드) 데이터 영구 자동 삭제 */
 function ensureAssetTrackerSeedData() {
-    let master = null;
-    let events = null;
+    const SEED_ASSET_IDS = new Set(['AST_001', 'AST_002', 'AST_003', 'AST_004', 'AST_005']);
+    const SEED_EVENT_IDS = new Set([
+        'EVT_20261001_091000_101', 'EVT_20261003_142000_102',
+        'EVT_20261005_100000_103', 'EVT_20261012_164500_104',
+        'EVT_20261013_110000_105', 'EVT_20261015_143000_106',
+        'EVT_20261018_151000_107', 'EVT_20261019_132000_108'
+    ]);
+
     try {
-        master = JSON.parse(localStorage.getItem(ASSET_MASTER_KEY) || 'null');
-        events = JSON.parse(localStorage.getItem(ASSET_EVENT_KEY) || 'null');
+        let master = JSON.parse(localStorage.getItem(ASSET_MASTER_KEY) || '[]');
+        let events = JSON.parse(localStorage.getItem(ASSET_EVENT_KEY) || '[]');
+
+        // 브라우저에 남아있는 옛날 샘플 데이터만 쏙 골라내서 자동 제거 (실제 등록한 데이터는 보존)
+        const cleanMaster = master.filter(m => !SEED_ASSET_IDS.has(m.asset_id));
+        const cleanEvents = events.filter(e => !SEED_EVENT_IDS.has(e.event_id) && !SEED_ASSET_IDS.has(e.asset_id));
+
+        if (cleanMaster.length !== master.length || cleanEvents.length !== events.length || !localStorage.getItem(ASSET_MASTER_KEY)) {
+            localStorage.setItem(ASSET_MASTER_KEY, JSON.stringify(cleanMaster));
+            localStorage.setItem(ASSET_EVENT_KEY, JSON.stringify(cleanEvents));
+        }
     } catch (_) {
-        master = null;
-        events = null;
+        localStorage.setItem(ASSET_MASTER_KEY, '[]');
+        localStorage.setItem(ASSET_EVENT_KEY, '[]');
     }
-
-    // 데이터가 있고 인스턴스 태그 규격이 맞으면 재사용
-    const needMigration = !master || !events || master.length === 0 || master.some(m => !m.instance_tag);
-    if (!needMigration) {
-        return;
-    }
-
-    const initialEquips = JSON.parse(localStorage.getItem('equipmentData') || '[]');
-    const eq1 = initialEquips[0] ? initialEquips[0].name : 'MDI3701';
-    const eq2 = initialEquips[1] ? initialEquips[1].name : 'MDI3702';
-    const eq3 = initialEquips[2] ? initialEquips[2].name : 'MDI3703';
-
-    // 1. 초기 이벤트 로그 시드 (불변 이벤트 소싱)
-    const seedEvents = [
-        {
-            event_id: 'EVT_20261001_091000_101',
-            asset_id: 'AST_001',
-            part_name: 'Laser Head',
-            instance_tag: 'Laser Head #1 (HHT 대여품)',
-            serial_number: 'LZR_4011',
-            part_category: '보관품',
-            action: '창고 보관',
-            from_location: 'HHT 본사',
-            to_location: '클린룸 창고 A랙',
-            owner_type: 'HHT',
-            reason: '대여품 정기 수급',
-            memo: '대여 입고 완료',
-            timestamp: '2026.10.01 09:10:00'
-        },
-        {
-            event_id: 'EVT_20261003_142000_102',
-            asset_id: 'AST_001',
-            part_name: 'Laser Head',
-            instance_tag: 'Laser Head #1 (HHT 대여품)',
-            serial_number: 'LZR_4011',
-            part_category: '보관품',
-            action: '장착',
-            from_location: '클린룸 창고 A랙',
-            to_location: eq1,
-            owner_type: 'HHT',
-            reason: '정기 교체',
-            memo: '설비 정기 오버홀 시 장착',
-            timestamp: '2026.10.03 14:20:00'
-        },
-        {
-            event_id: 'EVT_20261005_100000_103',
-            asset_id: 'AST_002',
-            part_name: 'AF Board',
-            instance_tag: 'AF Board #1 (MDI3701 초기품)',
-            serial_number: '',
-            part_category: '신품',
-            action: '장착',
-            from_location: '클린룸 창고 B랙',
-            to_location: eq1,
-            owner_type: 'HTK',
-            reason: '초기 셋업 장착',
-            memo: 'MDI3701 가동용 AF보드',
-            timestamp: '2026.10.05 10:00:00'
-        },
-        {
-            event_id: 'EVT_20261012_164500_104',
-            asset_id: 'AST_002',
-            part_name: 'AF Board',
-            instance_tag: 'AF Board #1 (MDI3701 초기품)',
-            serial_number: '',
-            part_category: '타호기 탈착품',
-            action: '탈거',
-            from_location: eq1,
-            to_location: '클린룸 창고 B랙',
-            owner_type: 'HTK',
-            reason: '설비 간 차용',
-            memo: 'MDI3703 긴급 가동 지원을 위해 정상 탈거',
-            timestamp: '2026.10.12 16:45:00'
-        },
-        {
-            event_id: 'EVT_20261013_110000_105',
-            asset_id: 'AST_002',
-            part_name: 'AF Board',
-            instance_tag: 'AF Board #1 (MDI3701 초기품)',
-            serial_number: '',
-            part_category: '타호기 탈착품',
-            action: '장착',
-            from_location: '클린룸 창고 B랙',
-            to_location: eq3,
-            owner_type: 'HTK',
-            reason: 'Trouble 대응',
-            memo: 'MDI3701 탈착 AF보드를 MDI3703에 전용 장착 완료',
-            timestamp: '2026.10.13 11:00:00'
-        },
-        {
-            event_id: 'EVT_20261015_143000_106',
-            asset_id: 'AST_003',
-            part_name: 'Servo Motor',
-            instance_tag: 'Servo Motor #1 (고객사 수리품)',
-            serial_number: 'MOT_1042',
-            part_category: '수리품',
-            action: '장착',
-            from_location: '수리실',
-            to_location: eq1,
-            owner_type: '고객',
-            reason: '수리품 대체',
-            memo: '고객사 수리 완료 모터 장착',
-            timestamp: '2026.10.15 14:30:00'
-        },
-        {
-            event_id: 'EVT_20261018_151000_107',
-            asset_id: 'AST_004',
-            part_name: 'Laser Diode',
-            instance_tag: 'Laser Diode #1 (HHT 예비품)',
-            serial_number: 'DIO_9921',
-            part_category: '보관품',
-            action: '창고 보관',
-            from_location: 'HHT 본사',
-            to_location: '클린룸 창고 A랙',
-            owner_type: 'HHT',
-            reason: '긴급 라인 백업용',
-            memo: 'HHT 대여품 입고 보관중',
-            timestamp: '2026.10.18 15:10:00'
-        },
-        {
-            event_id: 'EVT_20261019_132000_108',
-            asset_id: 'AST_005',
-            part_name: 'Z축 Cylinder',
-            instance_tag: 'Z축 Cylinder #1 (협력사 오버홀)',
-            serial_number: '',
-            part_category: '오버홀품',
-            action: '수리중',
-            from_location: eq2,
-            to_location: '협력업체 수리처',
-            owner_type: '기타',
-            reason: '패킹 노후화',
-            memo: '오버홀 및 패킹 교체 의뢰',
-            timestamp: '2026.10.19 13:20:00'
-        }
-    ];
-
-    // 2. 초기 자산 원장 시드
-    const seedMaster = [
-        {
-            asset_id: 'AST_001',
-            part_name: 'Laser Head',
-            instance_tag: 'Laser Head #1 (HHT 대여품)',
-            part_number: 'PN_LZR_8800',
-            serial_number: 'LZR_4011',
-            part_category: '보관품',
-            owner_type: 'HHT',
-            current_location: eq1,
-            current_status: '가동중',
-            mounted_equipment: eq1,
-            origin_info: 'HHT 본사 대여 입고',
-            last_updated: '2026.10.03 14:20:00'
-        },
-        {
-            asset_id: 'AST_002',
-            part_name: 'AF Board',
-            instance_tag: 'AF Board #1 (MDI3701 초기품)',
-            part_number: 'PN_BRD_AF01',
-            serial_number: '',
-            part_category: '타호기 탈착품',
-            owner_type: 'HTK',
-            current_location: eq3,
-            current_status: '가동중',
-            mounted_equipment: eq3,
-            origin_info: 'MDI3701 초기 셋업 탈착품',
-            last_updated: '2026.10.13 11:00:00'
-        },
-        {
-            asset_id: 'AST_003',
-            part_name: 'Servo Motor',
-            instance_tag: 'Servo Motor #1 (고객사 수리품)',
-            part_number: 'PN_MOT_5520',
-            serial_number: 'MOT_1042',
-            part_category: '수리품',
-            owner_type: '고객',
-            current_location: eq1,
-            current_status: '가동중',
-            mounted_equipment: eq1,
-            origin_info: '고객사 수리 입고',
-            last_updated: '2026.10.15 14:30:00'
-        },
-        {
-            asset_id: 'AST_004',
-            part_name: 'Laser Diode',
-            instance_tag: 'Laser Diode #1 (HHT 예비품)',
-            part_number: 'PN_DIO_7700',
-            serial_number: 'DIO_9921',
-            part_category: '보관품',
-            owner_type: 'HHT',
-            current_location: '클린룸 창고 A랙',
-            current_status: '창고 보관',
-            mounted_equipment: null,
-            origin_info: 'HHT 본사 대여품',
-            last_updated: '2026.10.18 15:10:00'
-        },
-        {
-            asset_id: 'AST_005',
-            part_name: 'Z축 Cylinder',
-            instance_tag: 'Z축 Cylinder #1 (협력사 오버홀)',
-            part_number: 'PN_CYL_1200',
-            serial_number: '',
-            part_category: '오버홀품',
-            owner_type: '기타',
-            current_location: '협력업체 수리처',
-            current_status: '수리중',
-            mounted_equipment: null,
-            origin_info: 'MDI3702 탈거 오버홀품',
-            last_updated: '2026.10.19 13:20:00'
-        }
-    ];
-
-    localStorage.setItem(ASSET_MASTER_KEY, JSON.stringify(seedMaster));
-    localStorage.setItem(ASSET_EVENT_KEY, JSON.stringify(seedEvents));
 }
 
 /** 자산 원장 조회 */
