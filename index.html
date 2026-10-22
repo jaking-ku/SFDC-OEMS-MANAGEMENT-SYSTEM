@@ -867,7 +867,7 @@
         </div>
     </section>
 
-<!-- 📦 [전면 개편] 태그 기반 부품 이동 추적 시스템 (장착 / 탈착 / 스왑 / 이동 + 작업일 지정) -->
+<!-- 📦 [최종 개편] 태그(부품명#설비호기) 기반 이동 추적 + 자동 스왑 + 이력/태그 수정 시스템 -->
     <section id="asset_tracking" class="tab-content hidden space-y-6 animate-[fadeIn_0.3s_ease-in-out]">
         
         <!-- 상단 헤더 -->
@@ -875,10 +875,10 @@
             <div>
                 <h2 class="text-2xl font-bold text-text-main flex items-center gap-2">
                     <span class="material-symbols-outlined text-primary text-3xl">route</span>
-                    부품 태그(S/N) 이동경로 관리
+                    부품 태그(#) 이동경로 관리
                 </h2>
                 <p class="text-sm text-text-muted mt-1">
-                    부품에 고유 태그(예: <code class="text-primary font-bold">MSPF #P3_1</code>)를 부여하고 작업일별 <b>장착 · 탈착 · 스왑 · 이동</b> 경로를 추적합니다.
+                    설비호기 태그(예: <code class="text-primary font-bold">Board#MDIB701</code>) 또는 커스텀 태그(<code class="text-primary font-bold">#New</code>, <code class="text-primary font-bold">#261001</code>)로 이동경로를 추적하고 수정합니다.
                 </p>
             </div>
             <div class="flex items-center gap-2">
@@ -891,7 +891,7 @@
             </div>
         </div>
 
-        <!-- [STEP 1] 직관적인 4대 액션 등록 카드 (장착 / 탈착 / 스왑 / 이동) -->
+        <!-- [STEP 1] 4대 액션 등록 카드 (장착 / 탈착 / 스왑 / 이동) -->
         <div class="card-base rounded-lg p-6 shadow-xs space-y-5 border-t-4 border-t-primary">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-4">
                 <span class="text-sm font-black text-text-main flex items-center gap-1.5">
@@ -915,23 +915,23 @@
                 </div>
             </div>
 
-            <!-- 빠른 태그 채번 도우미 -->
+            <!-- 빠른 태그 조합 도우미 -->
             <div id="tagGeneratorBar" class="p-3 bg-background/70 border border-dashed border-border rounded flex flex-wrap items-center justify-between gap-2 text-xs">
                 <div class="flex items-center gap-2 flex-wrap">
                     <span class="font-bold text-text-muted flex items-center gap-1">
-                        <span class="material-symbols-outlined text-sm text-primary">sell</span> 새 부품 태그 자동 채번:
+                        <span class="material-symbols-outlined text-sm text-primary">sell</span> 빠른 태그 조합:
                     </span>
-                    <input type="text" id="genPartType" class="input-base h-8 px-2.5 w-32 rounded text-xs" placeholder="품목 (예: MSPF)">
-                    <span class="text-text-muted font-bold">#</span>
-                    <input type="text" id="genLineCode" class="input-base h-8 px-2.5 w-24 rounded text-xs" placeholder="라인 (예: P3)">
-                    <button type="button" onclick="autoGenerateNextTag()" class="px-3 h-8 bg-surface border border-primary/40 text-primary font-bold rounded hover:bg-primary hover:text-white transition-all">
-                        다음 번호 자동 생성 ➔
+                    <input type="text" id="genPartType" list="dlCommonParts" class="input-base h-8 px-2.5 w-36 rounded text-xs" placeholder="부품명 (예: AF Board)">
+                    <span class="text-primary font-black text-sm">#</span>
+                    <input type="text" id="genTagSuffix" list="dlEquipAndLocs" class="input-base h-8 px-2.5 w-40 rounded text-xs font-mono" placeholder="설비호기 / New / 261001" onkeydown="if(event.key==='Enter') applyComposedTag()">
+                    <button type="button" onclick="applyComposedTag()" class="px-3 h-8 bg-surface border border-primary/40 text-primary font-bold rounded hover:bg-primary hover:text-white transition-all">
+                        태그 적용 ➔
                     </button>
                 </div>
-                <span class="text-[11px] text-text-muted">💡 기존 부품은 아래 부품 태그 칸에서 바로 선택하세요.</span>
+                <span class="text-[11px] text-text-muted">💡 아래 부품 태그 칸에 <code class="text-primary font-bold">Board#MDIB701</code>처럼 직접 타이핑해도 됩니다.</span>
             </div>
 
-            <!-- 일반 입력 폼 (장착 / 탈착 / 이동 공용 - 작업일 포함 12컬럼) -->
+            <!-- 일반 입력 폼 (장착 / 탈착 / 이동 공용) -->
             <div id="standardActionForm" class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
                 <div class="md:col-span-2">
                     <label class="label-base mb-1.5 flex items-center justify-between">
@@ -941,9 +941,9 @@
                     <input type="date" id="inpAssetDate" class="input-base h-10 px-2.5 rounded font-mono text-xs">
                 </div>
                 <div class="md:col-span-3">
-                    <label class="label-base mb-1.5 text-primary" id="lblTargetTag">부품 태그 (고유 시리얼) *</label>
+                    <label class="label-base mb-1.5 text-primary" id="lblTargetTag">부품 태그 (품목#식별자) *</label>
                     <input type="text" id="inpAssetTag" list="dlRegisteredTags" class="input-base h-10 px-3 rounded font-mono font-bold" 
-                           placeholder="예: MSPF #P3_1" oninput="onAssetTagInput(this.value)">
+                           placeholder="예: Board#MDIB701 또는 #New" oninput="onAssetTagInput(this.value)">
                 </div>
                 <div class="md:col-span-2">
                     <label class="label-base mb-1.5" id="lblFromLoc">출발 위치</label>
@@ -962,7 +962,7 @@
                 </div>
             </div>
 
-            <!-- 스왑(맞교환) 전용 입력 폼 (작업일 포함 12컬럼) -->
+            <!-- 🔄 스왑(맞교환) 전용 입력 폼 (미등록 설비도 즉시 자동 태그화하여 스왑) -->
             <div id="swapActionForm" class="hidden grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-primary/5 p-4 rounded border border-primary/20">
                 <div class="md:col-span-2">
                     <label class="label-base mb-1.5 flex items-center justify-between">
@@ -970,34 +970,40 @@
                         <button type="button" onclick="resetAssetDateToToday('inpSwapDate')" class="text-[9px] text-primary hover:underline font-bold">오늘</button>
                     </label>
                     <input type="date" id="inpSwapDate" class="input-base h-10 px-2.5 rounded font-mono text-xs">
-                    <p class="text-[11px] text-transparent mt-1 select-none">-</p>
+                    <p class="text-[10px] text-transparent mt-1 select-none">-</p>
                 </div>
-                <div class="md:col-span-3">
-                    <label class="label-base mb-1.5 text-primary">스왑 대상 1 (태그 A) *</label>
-                    <input type="text" id="inpSwapTagA" list="dlRegisteredTags" class="input-base h-10 px-3 rounded font-mono font-bold" 
-                           placeholder="예: MSPF #P3_1" oninput="updateSwapPreview()">
-                    <p class="text-[11px] text-text-muted mt-1 truncate" id="swapLocPreviewA">현재 위치: -</p>
+                <div class="md:col-span-2">
+                    <label class="label-base mb-1.5 text-primary">스왑 부품명 *</label>
+                    <input type="text" id="inpSwapPartName" list="dlCommonParts" class="input-base h-10 px-3 rounded font-bold" 
+                           placeholder="예: AF Board" oninput="updateSwapPreview()">
+                    <p class="text-[10px] text-text-muted mt-1 truncate">교환할 부품 종류</p>
                 </div>
-                <div class="md:col-span-1 flex items-center justify-center pb-5">
+                <div class="md:col-span-2">
+                    <label class="label-base mb-1.5 text-primary">대상 1 (호기 또는 태그) *</label>
+                    <input type="text" id="inpSwapTargetA" list="dlSwapTargets" class="input-base h-10 px-3 rounded font-mono font-bold" 
+                           placeholder="예: MDI3716" oninput="updateSwapPreview()">
+                    <p class="text-[10px] text-primary font-mono mt-1 truncate" id="swapLocPreviewA">호기 입력 시 자동태그</p>
+                </div>
+                <div class="md:col-span-1 flex items-center justify-center pb-6">
                     <span class="material-symbols-outlined text-2xl text-primary font-bold">swap_horiz</span>
                 </div>
-                <div class="md:col-span-3">
-                    <label class="label-base mb-1.5 text-primary">스왑 대상 2 (태그 B) *</label>
-                    <input type="text" id="inpSwapTagB" list="dlRegisteredTags" class="input-base h-10 px-3 rounded font-mono font-bold" 
-                           placeholder="예: MSPF #P3_2" oninput="updateSwapPreview()">
-                    <p class="text-[11px] text-text-muted mt-1 truncate" id="swapLocPreviewB">현재 위치: -</p>
+                <div class="md:col-span-2">
+                    <label class="label-base mb-1.5 text-primary">대상 2 (호기 또는 태그) *</label>
+                    <input type="text" id="inpSwapTargetB" list="dlSwapTargets" class="input-base h-10 px-3 rounded font-mono font-bold" 
+                           placeholder="예: MDI3719" oninput="updateSwapPreview()">
+                    <p class="text-[10px] text-primary font-mono mt-1 truncate" id="swapLocPreviewB">호기 입력 시 자동태그</p>
                 </div>
                 <div class="md:col-span-3">
                     <label class="label-base mb-1.5">스왑 사유 / 메모</label>
                     <input type="text" id="inpSwapMemo" class="input-base h-10 px-3 rounded" 
-                           placeholder="예: 호기 간 교차 점검" onkeydown="if(event.key==='Enter') submitAssetAction()">
-                    <p class="text-[11px] text-transparent mt-1 select-none">-</p>
+                           placeholder="예: MDI3716 에러 발생하여 Swap" onkeydown="if(event.key==='Enter') submitAssetAction()">
+                    <p class="text-[10px] text-transparent mt-1 select-none">-</p>
                 </div>
             </div>
 
             <div class="flex justify-between items-center pt-2">
                 <p id="actionGuideText" class="text-xs text-text-muted">
-                    💡 <b>[장착]</b> 부품 태그를 설비에 장착합니다. (작업일은 오늘 날짜가 기본이며 변경 가능합니다)
+                    💡 <b>[장착]</b> 부품 태그(예: <code>Board#MDIB701</code>, <code>Board#New</code>)를 설비에 장착합니다.
                 </p>
                 <button type="button" onclick="submitAssetAction()" class="btn-primary px-8 h-10 rounded text-xs shadow-sm">
                     <span class="material-symbols-outlined text-sm">check</span> 기록 저장
@@ -1005,8 +1011,12 @@
             </div>
 
             <!-- 자동완성 데이터리스트 -->
+            <datalist id="dlCommonParts">
+                <option value="AF Board"><option value="Board"><option value="MSPF"><option value="Laser Head"><option value="Scale Head"><option value="Servo Motor"><option value="Revolver"><option value="TDI"><option value="Z축 Cylinder">
+            </datalist>
             <datalist id="dlRegisteredTags"></datalist>
             <datalist id="dlEquipAndLocs"></datalist>
+            <datalist id="dlSwapTargets"></datalist>
         </div>
 
         <!-- [STEP 2] 태그/설비 검색 및 이동경로(Trajectory) 한눈에 보기 -->
@@ -1017,12 +1027,12 @@
                         <span class="material-symbols-outlined text-primary text-lg">timeline</span>
                         2. 태그별 이동경로 & 설비 이력 조회
                     </span>
-                    <p class="text-xs text-text-muted mt-0.5">아래 태그 칩을 클릭하거나 검색창에 태그(예: <code class="text-primary">MSPF #P3_1</code>) 또는 설비명을 입력하세요.</p>
+                    <p class="text-xs text-text-muted mt-0.5">아래 태그 칩을 클릭하거나 검색창에 태그(예: <code class="text-primary">AF Board#MDI3716</code>) 또는 설비명을 입력하세요.</p>
                 </div>
                 <div class="relative w-full md:w-80">
                     <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-primary text-base">search</span>
                     <input type="text" id="assetSearchInput" class="input-base h-10 pl-9 pr-8 rounded text-xs font-bold" 
-                           placeholder="태그(MSPF #P3_1) 또는 설비명 검색..." oninput="renderAssetTrackerAll()">
+                           placeholder="태그 또는 설비호기 검색..." oninput="renderAssetTrackerAll()">
                     <button type="button" onclick="setAssetSearchQuery('')" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-primary">
                         <span class="material-symbols-outlined text-sm">close</span>
                     </button>
@@ -1045,13 +1055,13 @@
                         <span class="material-symbols-outlined text-primary text-base">inventory_2</span>
                         등록된 부품 태그 현황 (<span id="assetMasterCountLabel">0</span>개)
                     </span>
-                    <span class="text-[11px] text-text-muted">태그 클릭 시 이동경로가 표시됩니다</span>
+                    <span class="text-[11px] text-text-muted">태그 클릭 시 이동경로 표시</span>
                 </div>
                 <div class="overflow-x-auto max-h-[420px] overflow-y-auto">
                     <table class="w-full text-left text-xs">
                         <thead class="sticky top-0 bg-background border-b border-border z-10">
                             <tr>
-                                <th class="th-base py-2.5 px-4">부품 태그 (시리얼)</th>
+                                <th class="th-base py-2.5 px-4">부품 태그 (품목#식별자)</th>
                                 <th class="th-base py-2.5 px-4">현재 위치</th>
                                 <th class="th-base py-2.5 px-4">상태 / 최근 액션</th>
                                 <th class="th-base py-2.5 px-4">최종 작업일</th>
@@ -1070,6 +1080,7 @@
                         <span class="material-symbols-outlined text-primary text-base">history</span>
                         최근 이동 이벤트 로그 (<span id="assetEventLogCountLabel">0</span>건)
                     </span>
+                    <span class="text-[11px] text-text-muted">수정 시 경로 자동 재계산</span>
                 </div>
                 <div class="overflow-x-auto max-h-[420px] overflow-y-auto">
                     <table class="w-full text-left text-xs">
@@ -1078,12 +1089,28 @@
                                 <th class="th-base py-2.5 px-3">작업일 / 액션</th>
                                 <th class="th-base py-2.5 px-3">부품 태그</th>
                                 <th class="th-base py-2.5 px-3">경로 (From ➔ To)</th>
-                                <th class="th-base py-2.5 px-3 text-right">삭제</th>
+                                <th class="th-base py-2.5 px-3 text-right">관리</th>
                             </tr>
                         </thead>
                         <tbody id="assetEventLogTableBody" class="divide-y divide-border"></tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+
+        <!-- ✏️ [신규] 이동 이벤트 & 부품 태그 수정 모달 -->
+        <div id="assetEditModal" class="hidden fixed inset-0 z-[120] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div class="card-base bg-surface w-full max-w-lg rounded-xl shadow-2xl border border-border overflow-hidden animate-[fadeIn_0.15s_ease-out]">
+                <div class="px-5 py-4 bg-background border-b border-border flex items-center justify-between">
+                    <h4 class="text-sm font-black text-text-main flex items-center gap-2" id="assetEditModalTitle">
+                        <span class="material-symbols-outlined text-primary text-lg">edit_square</span>
+                        기록 수정
+                    </h4>
+                    <button type="button" onclick="closeAssetEditModal()" class="text-text-muted hover:text-text-main">
+                        <span class="material-symbols-outlined text-lg">close</span>
+                    </button>
+                </div>
+                <div class="p-5 space-y-4" id="assetEditModalBody"></div>
             </div>
         </div>
     </section>
@@ -6960,7 +6987,7 @@ function searchSalesforce(customQuery, inputId = 'sfSearchInput') {
 
 // ==============================================================================
 // [Module: asset_tracker.js]
-// 부품 고유 태그(예: MSPF #P3_1) 기반 4대 액션(장착/탈착/스왑/이동) 및 작업일 기준 이동경로 추적
+// 설비호기/커스텀 태그(Board#MDIB701, #New 등) 기반 이동경로 + 자동 스왑 + 수정(Edit) 엔진
 // ==============================================================================
 
 const ASSET_MASTER_KEY = 'assetMasterData';
@@ -6968,14 +6995,14 @@ const ASSET_EVENT_KEY = 'assetEventLogs';
 
 let currentAssetActionMode = '장착'; // '장착' | '탈착' | '스왑' | '이동'
 
-/** 로컬 기준 오늘 날짜 (YYYY-MM-DD) 반환 */
+/** 로컬 기준 오늘 날짜 (YYYY-MM-DD) */
 function getTodayDateString() {
     const d = new Date();
     const pad = n => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/** 날짜 입력칸을 오늘 날짜로 리셋 */
+/** 날짜 입력칸 오늘 날짜로 리셋 */
 function resetAssetDateToToday(inputId) {
     const today = getTodayDateString();
     if (inputId) {
@@ -6989,7 +7016,7 @@ function resetAssetDateToToday(inputId) {
     }
 }
 
-/** 이벤트에서 표시용 작업일(YYYY-MM-DD) 추출 */
+/** 이벤트에서 작업일(YYYY-MM-DD) 추출 */
 function getEventWorkDate(ev) {
     if (!ev) return '';
     if (ev.work_date) return ev.work_date;
@@ -7042,22 +7069,24 @@ function getAssetEventLogs() {
 
 /**
  * 🔄 이벤트 로그 기반 마스터 상태 자동 재계산
- * (과거 날짜로 소급 입력하거나 중간 이벤트를 삭제해도 가장 최신 작업일 기준으로 현재 위치/상태를 정확히 유지)
+ * (이력이 수정/추가/삭제될 때 전체 시간순으로 현재 위치와 장착 상태를 정확히 다시 투영)
  */
 function recalculateMasterFromEvents(masterList, eventLogs) {
     const sortedEvents = eventLogs.slice().sort(compareAssetEventsChronologically);
     const updatedMasterMap = new Map();
 
+    // 이벤트가 하나라도 존재하는 태그와 기존 마스터 병합
     masterList.forEach(a => {
-        updatedMasterMap.set(a.asset_id.toUpperCase(), { ...a });
+        const key = (a.part_name || a.asset_id || '').toUpperCase();
+        if (key) updatedMasterMap.set(key, { ...a, asset_id: key });
     });
 
     sortedEvents.forEach(ev => {
-        const key = (ev.asset_id || ev.part_name || '').toUpperCase();
+        const key = (ev.part_name || ev.asset_id || '').toUpperCase();
         if (!key) return;
         let asset = updatedMasterMap.get(key);
         const workDate = getEventWorkDate(ev);
-        const status = (ev.action === '장착') ? '장착중' : (ev.action === '탈착' ? '탈착보관' : '보관/이동');
+        const status = (ev.action === '장착' || ev.action === '스왑') ? '장착중' : (ev.action === '탈착' ? '탈착보관' : '보관/이동');
 
         if (!asset) {
             asset = {
@@ -7066,27 +7095,17 @@ function recalculateMasterFromEvents(masterList, eventLogs) {
                 serial_number: ev.part_name || key,
                 current_location: ev.to_location,
                 current_status: status,
-                mounted_equipment: (ev.action === '장착') ? ev.to_location : null,
+                mounted_equipment: (status === '장착중') ? ev.to_location : null,
                 last_action: ev.action,
                 last_memo: ev.memo || '',
                 last_updated: workDate
             };
             updatedMasterMap.set(key, asset);
         } else {
+            asset.part_name = ev.part_name || asset.part_name;
             asset.current_location = ev.to_location;
-            if (ev.action === '장착') {
-                asset.current_status = '장착중';
-                asset.mounted_equipment = ev.to_location;
-            } else if (ev.action === '탈착') {
-                asset.current_status = '탈착보관';
-                asset.mounted_equipment = null;
-            } else if (ev.action === '이동') {
-                asset.current_status = '보관/이동';
-                asset.mounted_equipment = null;
-            } else if (ev.action === '스왑') {
-                // 스왑의 경우 도착지가 설비명이면 장착중 유지
-                asset.current_location = ev.to_location;
-            }
+            asset.current_status = status;
+            asset.mounted_equipment = (status === '장착중') ? ev.to_location : null;
             asset.last_action = ev.action;
             asset.last_memo = ev.memo || '';
             asset.last_updated = workDate;
@@ -7105,36 +7124,30 @@ function saveAssetTrackerState(masterList, eventLogs) {
     }
 }
 
-/** 🏷️ 새 부품 태그 다음 번호 자동 채번 (예: MSPF + P3 ➔ MSPF #P3_1) */
-function autoGenerateNextTag() {
-    const partType = (document.getElementById('genPartType')?.value || '').trim().toUpperCase();
-    const lineCode = (document.getElementById('genLineCode')?.value || '').trim().toUpperCase();
+/** 🏷️ 빠른 태그 조합기: 품목명 + # + 식별자(설비호기/New/261001) 조합 */
+function applyComposedTag() {
+    const partType = (document.getElementById('genPartType')?.value || '').trim();
+    const rawSuffix = (document.getElementById('genTagSuffix')?.value || '').trim().replace(/^#+/, '');
+
     if (!partType) {
-        alert('품목명(예: MSPF, LASER, AF보드)을 먼저 입력해주세요.');
+        alert('부품명(예: AF Board, Board, MSPF)을 입력해주세요.');
         document.getElementById('genPartType')?.focus();
         return;
     }
-    const prefix = lineCode ? `${partType} #${lineCode}_` : `${partType} #`;
-    const master = getAssetMasterList();
-    let maxIdx = 0;
+    if (!rawSuffix) {
+        alert('# 뒤에 붙일 설비호기(예: MDIB701)나 태그(예: New, 261001)를 입력해주세요.');
+        document.getElementById('genTagSuffix')?.focus();
+        return;
+    }
 
-    master.forEach(item => {
-        const tag = (item.part_name || item.asset_id || '').toUpperCase();
-        if (tag.startsWith(prefix)) {
-            const tail = tag.substring(prefix.length);
-            const num = parseInt(tail, 10);
-            if (!isNaN(num) && num > maxIdx) maxIdx = num;
-        }
-    });
-
-    const newTag = `${prefix}${maxIdx + 1}`;
+    const composedTag = `${partType}#${rawSuffix}`;
     const tagInput = document.getElementById('inpAssetTag');
     if (tagInput) {
-        tagInput.value = newTag;
-        onAssetTagInput(newTag);
+        tagInput.value = composedTag;
+        onAssetTagInput(composedTag);
         document.getElementById('inpToLoc')?.focus();
     }
-    showToast('자동 채번 완료', `[${newTag}] 태그가 입력칸에 적용되었습니다.`);
+    showToast('태그 적용됨', `[${composedTag}] 태그가 입력칸에 적용되었습니다.`);
 }
 
 /** 🔄 4대 액션 모드 전환 (장착 / 탈착 / 스왑 / 이동) */
@@ -7154,6 +7167,7 @@ function setAssetActionMode(mode) {
 
     const stdForm = document.getElementById('standardActionForm');
     const swapForm = document.getElementById('swapActionForm');
+    const genBar = document.getElementById('tagGeneratorBar');
     const lblFrom = document.getElementById('lblFromLoc');
     const lblTo = document.getElementById('lblToLoc');
     const inpTo = document.getElementById('inpToLoc');
@@ -7161,156 +7175,263 @@ function setAssetActionMode(mode) {
 
     if (mode === '스왑') {
         stdForm?.classList.add('hidden');
+        genBar?.classList.add('hidden');
         swapForm?.classList.remove('hidden');
-        if (guide) guide.innerHTML = '💡 <b>[스왑]</b> 선택한 작업일 기준으로 두 부품 태그의 현재 위치를 서로 맞교환(A ↔ B)합니다.';
+        const genPart = (document.getElementById('genPartType')?.value || '').trim();
+        const swapPartInput = document.getElementById('inpSwapPartName');
+        if (genPart && swapPartInput && !swapPartInput.value) {
+            swapPartInput.value = genPart;
+        }
+        if (guide) {
+            guide.innerHTML = '💡 <b>[스왑]</b> 부품명과 두 설비호기(예: <code>MDI3716</code> ↔ <code>MDI3719</code>)만 입력하면 미등록 부품도 <b>자동으로 설비 태그(<code>부품명#호기</code>)를 생성</b>해 맞교환합니다.';
+        }
         updateSwapPreview();
     } else {
         stdForm?.classList.remove('hidden');
+        genBar?.classList.remove('hidden');
         swapForm?.classList.add('hidden');
 
         if (mode === '장착') {
-            if (lblFrom) lblFrom.textContent = '출발 위치 (보관 장소)';
+            if (lblFrom) lblFrom.textContent = '출발 위치 (원래 위치)';
             if (lblTo) lblTo.textContent = '장착할 설비호기 *';
             if (inpTo) inpTo.placeholder = '예: MDIB701';
-            if (guide) guide.innerHTML = '💡 <b>[장착]</b> 부품 태그를 설비에 장착합니다. (작업일은 오늘이 기본이며 변경 가능합니다)';
+            if (guide) guide.innerHTML = '💡 <b>[장착]</b> 부품 태그(예: <code>Board#MDIB701</code>, <code>Board#New</code>)를 설비에 장착합니다.';
         } else if (mode === '탈착') {
             if (lblFrom) lblFrom.textContent = '탈착 설비 (현재 위치)';
             if (lblTo) lblTo.textContent = '보관할 장소 *';
-            if (inpTo) inpTo.placeholder = '예: P3 창고, 수리대기랙';
-            if (guide) guide.innerHTML = '💡 <b>[탈착]</b> 설비에서 부품을 탈착하여 창고나 대기 장소로 옮깁니다.';
+            if (inpTo) inpTo.placeholder = '예: P3 창고, 고객 사무실';
+            if (guide) guide.innerHTML = '💡 <b>[탈착]</b> 설비에서 부품을 떼어내어 창고나 보관 장소로 옮깁니다.';
         } else if (mode === '이동') {
             if (lblFrom) lblFrom.textContent = '출발 위치 (현재 위치)';
             if (lblTo) lblTo.textContent = '이동할 도착 위치 *';
-            if (inpTo) inpTo.placeholder = '예: 동탄지원, 본사반각, 창고B';
-            if (guide) guide.innerHTML = '💡 <b>[이동]</b> 부품을 다른 창고, 타 사업장, 수리처 등으로 이동합니다.';
+            if (inpTo) inpTo.placeholder = '예: 고객 사무실, 수리실, 본사';
+            if (guide) guide.innerHTML = '💡 <b>[이동]</b> 부품을 다른 창고, 고객 사무실, 수리처 등으로 이동합니다.';
         }
     }
 }
 
-/** 태그 입력 시 현재 위치를 출발지(From)에 자동 매핑 */
+/**
+ * 🧠 태그 입력 시 출발 위치(From) 지능형 자동 완성
+ * - 이미 등록된 태그면 DB상의 현재 위치를 자동 입력
+ * - 미등록 신규 태그라도 'Board#MDIB701'처럼 # 뒤에 설비호기가 있으면 'MDIB701'을 출발지로 자동 세팅
+ */
 function onAssetTagInput(val) {
-    const cleanTag = (val || '').trim().toUpperCase();
+    const raw = (val || '').trim();
+    const cleanTag = raw.toUpperCase();
     const master = getAssetMasterList();
     const found = master.find(a => (a.part_name || '').toUpperCase() === cleanTag || (a.asset_id || '').toUpperCase() === cleanTag);
     const fromInput = document.getElementById('inpFromLoc');
-    if (found && fromInput) {
+    if (!fromInput) return;
+
+    if (found) {
         fromInput.value = found.current_location || '';
+        return;
+    }
+    if (raw.includes('#')) {
+        const suffix = raw.split('#').pop().trim();
+        if (/^new$/i.test(suffix)) {
+            fromInput.value = '신품입고';
+        } else if (suffix.length >= 2) {
+            fromInput.value = suffix.toUpperCase();
+        }
     }
 }
 
-/** 스왑 폼에서 태그 A, B 입력 시 각각의 현재 위치 미리보기 */
-function updateSwapPreview() {
-    const tagA = (document.getElementById('inpSwapTagA')?.value || '').trim().toUpperCase();
-    const tagB = (document.getElementById('inpSwapTagB')?.value || '').trim().toUpperCase();
-    const master = getAssetMasterList();
+/**
+ * 🔍 스왑(Swap) 대상 자동 해석기
+ * 사용자가 설비호기('MDI3716')만 입력하든, 전체 태그('AF Board#MDI3716')를 입력하든
+ * 1) 등록된 태그 확인 -> 2) 해당 설비에 장착된 동일 품목 확인 -> 3) 없으면 '부품명#설비호기'로 즉시 자동 생성!
+ */
+function resolveSwapSide(partNameInput, rawTargetInput, masterList) {
+    const cleanTarget = (rawTargetInput || '').trim();
+    let cleanPart = (partNameInput || '').trim();
+    if (!cleanTarget) return null;
 
-    const foundA = master.find(a => (a.part_name || '').toUpperCase() === tagA);
-    const foundB = master.find(a => (a.part_name || '').toUpperCase() === tagB);
+    // 만약 대상 칸에 'AF Board#MDI3716'처럼 #을 포함해 넣었다면 부품명 자동 분리
+    if (cleanTarget.includes('#')) {
+        const [p, s] = cleanTarget.split('#');
+        if (!cleanPart && p.trim()) cleanPart = p.trim();
+        const fullTagUpper = cleanTarget.toUpperCase();
+        const existingByTag = masterList.find(a => (a.part_name || '').toUpperCase() === fullTagUpper);
+        if (existingByTag) {
+            return {
+                isExisting: true,
+                tag: existingByTag.part_name,
+                location: existingByTag.current_location || s.trim().toUpperCase()
+            };
+        }
+        return {
+            isExisting: false,
+            tag: `${cleanPart || p.trim()}#${s.trim().toUpperCase()}`,
+            location: s.trim().toUpperCase()
+        };
+    }
+
+    const targetUpper = cleanTarget.toUpperCase();
+
+    // 1. 입력값이 이미 등록된 태그명과 정확히 일치하는 경우
+    const exactMatch = masterList.find(a => (a.part_name || '').toUpperCase() === targetUpper);
+    if (exactMatch) {
+        return {
+            isExisting: true,
+            tag: exactMatch.part_name,
+            location: exactMatch.current_location || targetUpper
+        };
+    }
+
+    // 2. 입력값이 설비호기(예: MDI3716)일 때, 현재 그 설비에 장착 중인 해당 부품 태그가 있는지 확인
+    if (cleanPart) {
+        const pUpper = cleanPart.toUpperCase();
+        const mountedAtEquip = masterList.find(a => 
+            (a.current_location || '').toUpperCase() === targetUpper &&
+            (a.part_name || '').toUpperCase().startsWith(pUpper + '#')
+        );
+        if (mountedAtEquip) {
+            return {
+                isExisting: true,
+                tag: mountedAtEquip.part_name,
+                location: targetUpper
+            };
+        }
+    }
+
+    // 3. 미등록 상태면 '부품명#설비호기'(예: AF Board#MDI3716)로 자동 태그 생성 예약
+    const finalTag = cleanPart ? `${cleanPart}#${targetUpper}` : `PART#${targetUpper}`;
+    return {
+        isExisting: false,
+        tag: finalTag,
+        location: targetUpper
+    };
+}
+
+/** 스왑 입력 시 하단 미리보기 실시간 표시 */
+function updateSwapPreview() {
+    let partName = (document.getElementById('inpSwapPartName')?.value || '').trim();
+    const rawA = (document.getElementById('inpSwapTargetA')?.value || '').trim();
+    const rawB = (document.getElementById('inpSwapTargetB')?.value || '').trim();
+
+    if (!partName && rawA.includes('#')) partName = rawA.split('#')[0].trim();
+    if (!partName && rawB.includes('#')) partName = rawB.split('#')[0].trim();
+
+    const master = getAssetMasterList();
+    const sideA = resolveSwapSide(partName, rawA, master);
+    const sideB = resolveSwapSide(partName, rawB, master);
 
     const prevA = document.getElementById('swapLocPreviewA');
     const prevB = document.getElementById('swapLocPreviewB');
-    if (prevA) prevA.textContent = foundA ? `현재 위치: ${foundA.current_location} (${foundA.current_status})` : '미등록 태그';
-    if (prevB) prevB.textContent = foundB ? `현재 위치: ${foundB.current_location} (${foundB.current_status})` : '미등록 태그';
+
+    if (prevA) {
+        prevA.textContent = sideA 
+            ? `${sideA.isExisting ? '기존' : '신규자동'} [${sideA.tag}] (위치: ${sideA.location})`
+            : '호기 입력 시 자동태그';
+    }
+    if (prevB) {
+        prevB.textContent = sideB 
+            ? `${sideB.isExisting ? '기존' : '신규자동'} [${sideB.tag}] (위치: ${sideB.location})`
+            : '호기 입력 시 자동태그';
+    }
 }
 
-/** ✅ 액션 저장 실행 (작업일 반영 + 장착 / 탈착 / 스왑 / 이동) */
+/** ✅ 액션 저장 실행 (장착 / 탈착 / 스왑 / 이동) */
 function submitAssetAction() {
     const mode = currentAssetActionMode;
     const master = getAssetMasterList();
     const events = getAssetEventLogs();
     const nowMs = Date.now();
-    const timeSuffix = new Date().toTimeString().slice(0, 8); // HH:MM:SS
+    const timeSuffix = new Date().toTimeString().slice(0, 8);
 
+    // 1. 스왑(Swap) 처리 — 미등록 설비도 즉시 자동 태그 생성 후 스왑
     if (mode === '스왑') {
         const workDate = document.getElementById('inpSwapDate')?.value || getTodayDateString();
-        const rawTagA = (document.getElementById('inpSwapTagA')?.value || '').trim();
-        const rawTagB = (document.getElementById('inpSwapTagB')?.value || '').trim();
-        const memo = (document.getElementById('inpSwapMemo')?.value || '').trim() || '부품 상호 스왑';
+        let partName = (document.getElementById('inpSwapPartName')?.value || '').trim();
+        const rawA = (document.getElementById('inpSwapTargetA')?.value || '').trim();
+        const rawB = (document.getElementById('inpSwapTargetB')?.value || '').trim();
+        const memo = (document.getElementById('inpSwapMemo')?.value || '').trim() || '설비 간 부품 스왑';
 
-        if (!rawTagA || !rawTagB) return alert('스왑할 두 부품 태그(A, B)를 모두 입력해주세요.');
-        if (rawTagA.toUpperCase() === rawTagB.toUpperCase()) return alert('서로 다른 부품 태그를 선택해주세요.');
+        if (!partName && rawA.includes('#')) partName = rawA.split('#')[0].trim();
+        if (!partName && rawB.includes('#')) partName = rawB.split('#')[0].trim();
 
-        const assetA = master.find(a => a.part_name.toUpperCase() === rawTagA.toUpperCase());
-        const assetB = master.find(a => a.part_name.toUpperCase() === rawTagB.toUpperCase());
-
-        if (!assetA || !assetB) {
-            return alert('스왑하려면 두 부품 태그 모두 시스템에 등록되어 현재 위치가 있어야 합니다.');
+        if (!partName) {
+            alert('스왑할 부품명(예: AF Board, MSPF)을 입력해주세요.');
+            document.getElementById('inpSwapPartName')?.focus();
+            return;
+        }
+        if (!rawA || !rawB) {
+            alert('스왑할 두 설비호기(예: MDI3716, MDI3719)를 모두 입력해주세요.');
+            return;
         }
 
-        const locA = assetA.current_location || '미상';
-        const locB = assetB.current_location || '미상';
+        const sideA = resolveSwapSide(partName, rawA, master);
+        const sideB = resolveSwapSide(partName, rawB, master);
 
+        if (sideA.tag.toUpperCase() === sideB.tag.toUpperCase()) {
+            return alert('서로 다른 두 설비(또는 태그)를 입력해주세요.');
+        }
+
+        // 교차 스왑 이벤트 2건 생성 (A는 locA ➔ locB, B는 locB ➔ locA)
         events.push({
             event_id: `EVT_${nowMs}_A`,
-            asset_id: assetA.asset_id,
-            part_name: assetA.part_name,
+            asset_id: sideA.tag.toUpperCase(),
+            part_name: sideA.tag,
             action: '스왑',
-            from_location: locA,
-            to_location: locB,
-            memo: `[${assetB.part_name}와 스왑] ${memo}`,
+            from_location: sideA.location,
+            to_location: sideB.location,
+            memo: `[${sideB.tag}와 스왑] ${memo}`,
             work_date: workDate,
             timestamp: `${workDate} ${timeSuffix}`,
             created_at: nowMs
         });
+
         events.push({
             event_id: `EVT_${nowMs}_B`,
-            asset_id: assetB.asset_id,
-            part_name: assetB.part_name,
+            asset_id: sideB.tag.toUpperCase(),
+            part_name: sideB.tag,
             action: '스왑',
-            from_location: locB,
-            to_location: locA,
-            memo: `[${assetA.part_name}와 스왑] ${memo}`,
+            from_location: sideB.location,
+            to_location: sideA.location,
+            memo: `[${sideA.tag}와 스왑] ${memo}`,
             work_date: workDate,
             timestamp: `${workDate} ${timeSuffix}`,
             created_at: nowMs + 1
         });
 
         saveAssetTrackerState(master, events);
-        document.getElementById('inpSwapTagA').value = '';
-        document.getElementById('inpSwapTagB').value = '';
+
+        document.getElementById('inpSwapTargetA').value = '';
+        document.getElementById('inpSwapTargetB').value = '';
         document.getElementById('inpSwapMemo').value = '';
         updateSwapPreview();
-        setAssetSearchQuery(assetA.part_name);
-        showToast('스왑 완료', `[${workDate}] ${assetA.part_name}(${locB}) ↔ ${assetB.part_name}(${locA})`);
+        setAssetSearchQuery(sideA.tag);
+        showToast('스왑 기록 완료', `[${sideA.tag} ➔ ${sideB.location}] ↔ [${sideB.tag} ➔ ${sideA.location}]`);
         return;
     }
 
-    // 장착 / 탈착 / 이동 처리
+    // 2. 일반 액션 (장착 / 탈착 / 이동) 처리
     const workDate = document.getElementById('inpAssetDate')?.value || getTodayDateString();
     const tag = (document.getElementById('inpAssetTag')?.value || '').trim();
     let fromLoc = (document.getElementById('inpFromLoc')?.value || '').trim();
     const toLoc = (document.getElementById('inpToLoc')?.value || '').trim();
     const memo = (document.getElementById('inpAssetMemo')?.value || '').trim();
 
-    if (!tag) return alert('부품 태그(예: MSPF #P3_1)를 입력해주세요.');
-    if (!toLoc) return alert('도착 위치(또는 장착 설비)를 입력해주세요.');
+    if (!tag) return alert('부품 태그(예: Board#MDIB701 또는 Board#New)를 입력해주세요.');
+    if (!toLoc) return alert('도착 위치(또는 장착 설비호기)를 입력해주세요.');
 
-    let asset = master.find(a => a.part_name.toUpperCase() === tag.toUpperCase());
+    const existing = master.find(a => (a.part_name || '').toUpperCase() === tag.toUpperCase());
     if (!fromLoc) {
-        fromLoc = asset ? (asset.current_location || '초기입고') : '초기입고';
-    }
-
-    const newStatus = (mode === '장착') ? '장착중' : (mode === '탈착' ? '탈착보관' : '보관/이동');
-
-    if (!asset) {
-        asset = {
-            asset_id: tag.toUpperCase(),
-            part_name: tag,
-            serial_number: tag,
-            current_location: toLoc,
-            current_status: newStatus,
-            mounted_equipment: (mode === '장착') ? toLoc : null,
-            last_action: mode,
-            last_memo: memo,
-            last_updated: workDate
-        };
-        master.push(asset);
+        if (existing && existing.current_location) {
+            fromLoc = existing.current_location;
+        } else if (tag.includes('#')) {
+            const suffix = tag.split('#').pop().trim();
+            fromLoc = /^new$/i.test(suffix) ? '신품입고' : suffix.toUpperCase();
+        } else {
+            fromLoc = '초기입고';
+        }
     }
 
     events.push({
         event_id: `EVT_${nowMs}_${Math.floor(Math.random() * 1000)}`,
-        asset_id: asset.asset_id,
-        part_name: asset.part_name,
+        asset_id: tag.toUpperCase(),
+        part_name: tag,
         action: mode,
         from_location: fromLoc,
         to_location: toLoc,
@@ -7322,14 +7443,13 @@ function submitAssetAction() {
 
     saveAssetTrackerState(master, events);
 
-    // 입력 폼 클리어 (작업일은 그대로 유지하거나 오늘로 유지)
     document.getElementById('inpAssetTag').value = '';
     document.getElementById('inpFromLoc').value = '';
     document.getElementById('inpToLoc').value = '';
     document.getElementById('inpAssetMemo').value = '';
 
-    setAssetSearchQuery(asset.part_name);
-    showToast(`${mode} 기록 완료`, `[${workDate}] ${asset.part_name}: ${fromLoc} ➔ ${toLoc}`);
+    setAssetSearchQuery(tag);
+    showToast(`${mode} 기록 완료`, `[${workDate}] ${tag}: ${fromLoc} ➔ ${toLoc}`);
 }
 
 /** 자동완성 Datalist 갱신 */
@@ -7342,24 +7462,40 @@ function refreshAssetTrackerDatalists() {
         dlTags.innerHTML = master.map(a => `<option value="${escapeHtml(a.part_name)}">현재: ${escapeHtml(a.current_location)} (${escapeHtml(a.current_status)})</option>`).join('');
     }
 
-    const locSet = new Set(['P1 창고', 'P2 창고', 'P3 창고', 'P4 창고', '사무실 보관랙', '수리실', '본사 반각']);
-    eqList.forEach(e => { if (e.name) locSet.add(e.name.trim().toUpperCase()); });
+    const locSet = new Set(['New', 'P1 창고', 'P2 창고', 'P3 창고', 'P4 창고', '고객 사무실', '사무실 보관랙', '수리실', '본사 반각']);
+    const equipSet = new Set();
+    eqList.forEach(e => {
+        if (e.name) {
+            const n = e.name.trim().toUpperCase();
+            locSet.add(n);
+            equipSet.add(n);
+        }
+    });
     master.forEach(a => { if (a.current_location) locSet.add(a.current_location); });
 
     const dlLocs = document.getElementById('dlEquipAndLocs');
     if (dlLocs) {
         dlLocs.innerHTML = Array.from(locSet).map(l => `<option value="${escapeHtml(l)}">`).join('');
     }
+
+    const dlSwap = document.getElementById('dlSwapTargets');
+    if (dlSwap) {
+        const swapOptions = [
+            ...Array.from(equipSet).map(eq => `<option value="${escapeHtml(eq)}">설비호기</option>`),
+            ...master.map(a => `<option value="${escapeHtml(a.part_name)}">현재: ${escapeHtml(a.current_location)}</option>`)
+        ];
+        dlSwap.innerHTML = swapOptions.join('');
+    }
 }
 
-/** 검색어 지정 및 이동경로 즉시 보기 */
+/** 검색어 설정 및 이동경로 즉시 보기 */
 function setAssetSearchQuery(q) {
     const inp = document.getElementById('assetSearchInput');
     if (inp) inp.value = q;
     renderAssetTrackerAll();
 }
 
-/** 🗺️ 핵심: 태그 이동경로(Flowchart) + 현황판 통합 렌더링 */
+/** 🗺️ 태그 이동경로(Flowchart) + 현황판 통합 렌더링 */
 function renderAssetTrackerAll() {
     refreshAssetTrackerDatalists();
     resetAssetDateToToday();
@@ -7369,11 +7505,11 @@ function renderAssetTrackerAll() {
     const query = (document.getElementById('assetSearchInput')?.value || '').trim();
     const qUpper = query.toUpperCase();
 
-    // 1. 빠른 태그 칩 렌더링
+    // 1. 상단 태그 칩 렌더링
     const chipsEl = document.getElementById('assetQuickTagChips');
     if (chipsEl) {
         if (master.length === 0) {
-            chipsEl.innerHTML = `<span class="text-xs text-text-muted">등록된 부품 태그가 없습니다. 위에서 첫 부품을 등록해보세요.</span>`;
+            chipsEl.innerHTML = `<span class="text-xs text-text-muted">등록된 부품 태그가 없습니다. 위에서 첫 부품을 기록해보세요.</span>`;
         } else {
             chipsEl.innerHTML = master.map(a => {
                 const isSelected = qUpper && a.part_name.toUpperCase() === qUpper;
@@ -7394,7 +7530,7 @@ function renderAssetTrackerAll() {
         }
     }
 
-    // 2. 태그 또는 설비 검색 시 이동경로(Trajectory) 시각화 박스 렌더링
+    // 2. 태그 또는 설비 검색 시 이동경로(Trajectory) 박스 렌더링
     const trajBox = document.getElementById('assetTrajectoryBox');
     if (trajBox) {
         if (!qUpper) {
@@ -7410,14 +7546,14 @@ function renderAssetTrackerAll() {
 
             if (matchedAsset) {
                 const assetEvents = events
-                    .filter(e => e.asset_id === matchedAsset.asset_id || e.part_name.toUpperCase() === matchedAsset.part_name.toUpperCase())
+                    .filter(e => (e.part_name || '').toUpperCase() === matchedAsset.part_name.toUpperCase() || e.asset_id === matchedAsset.asset_id)
                     .sort(compareAssetEventsChronologically);
 
                 let flowStepsHtml = '';
                 if (assetEvents.length > 0) {
                     flowStepsHtml += `
                         <div class="px-3 py-2 rounded bg-surface border border-border text-xs font-bold text-text-muted shrink-0">
-                            🏁 ${escapeHtml(assetEvents[0].from_location || '초기입고')}
+                            🏁 ${escapeHtml(assetEvents[0].from_location || '초기위치')}
                         </div>
                     `;
                     assetEvents.forEach((ev, idx) => {
@@ -7449,7 +7585,10 @@ function renderAssetTrackerAll() {
                     <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
                         <div class="flex items-center gap-2">
                             <span class="px-2.5 py-1 rounded bg-primary text-white font-mono font-black text-sm">${escapeHtml(matchedAsset.part_name)}</span>
-                            <span class="text-xs font-bold text-text-main">전체 이동경로 (총 ${assetEvents.length}회 이동)</span>
+                            <button type="button" onclick="openRenameAssetTagModal('${escapeHtml(matchedAsset.asset_id)}')" class="btn-text text-xs border border-border bg-surface px-2 py-1 rounded hover:border-primary">
+                                <span class="material-symbols-outlined text-xs">edit</span> 태그명 변경
+                            </button>
+                            <span class="text-xs font-bold text-text-muted">총 ${assetEvents.length}회 이동</span>
                         </div>
                         <div class="text-xs">
                             현재 위치: <b class="text-primary text-sm">${escapeHtml(matchedAsset.current_location)}</b> 
@@ -7460,7 +7599,7 @@ function renderAssetTrackerAll() {
                     <div class="flex items-center gap-2 overflow-x-auto py-3 px-1">
                         ${flowStepsHtml || '<span class="text-xs text-text-muted">기록된 이동 이벤트가 없습니다.</span>'}
                     </div>
-                    <!-- 상세 이력 리스트 -->
+                    <!-- 상세 이력 리스트 (개별 수정 버튼 포함) -->
                     <div class="space-y-1.5 pt-2 border-t border-border/60">
                         ${assetEvents.slice().reverse().map((ev, i) => `
                             <div class="flex items-center justify-between text-xs bg-surface px-3 py-2 rounded border border-border/60">
@@ -7470,15 +7609,19 @@ function renderAssetTrackerAll() {
                                     <span class="font-bold text-text-main">${escapeHtml(ev.from_location)} ➔${escapeHtml(ev.to_location)}</span>
                                     <span class="text-text-muted text-[11px]">(${escapeHtml(ev.memo || '-')})</span>
                                 </div>
-                                ${i === 0 ? `<span class="text-[10px] font-bold text-primary">최신</span>` : ''}
+                                <div class="flex items-center gap-2 shrink-0">
+                                    ${i === 0 ? `<span class="text-[10px] font-bold text-primary mr-1">최신</span>` : ''}
+                                    <button type="button" onclick="openEditAssetEventModal('${escapeHtml(ev.event_id)}')" class="text-xs text-primary font-bold hover:underline">수정</button>
+                                    <button type="button" onclick="deleteSingleAssetEvent('${escapeHtml(ev.event_id)}')" class="text-xs text-red-500 hover:underline">삭제</button>
+                                </div>
                             </div>
                         `).join('')}
                     </div>
                 `;
             } else if (touchedEventsByEquip.length > 0) {
                 const mountedNow = master.filter(a => (a.current_location || '').toUpperCase() === qUpper && a.current_status === '장착중');
-                const touchedTagNames = new Set(touchedEventsByEquip.map(e => e.part_name.toUpperCase()));
-                const pastTags = master.filter(a => touchedTagNames.has(a.part_name.toUpperCase()) && !((a.current_location || '').toUpperCase() === qUpper && a.current_status === '장착중'));
+                const touchedTagNames = new Set(touchedEventsByEquip.map(e => (e.part_name || '').toUpperCase()));
+                const pastTags = master.filter(a => touchedTagNames.has((a.part_name || '').toUpperCase()) && !((a.current_location || '').toUpperCase() === qUpper && a.current_status === '장착중'));
 
                 trajBox.classList.remove('hidden');
                 trajBox.innerHTML = `
@@ -7491,7 +7634,7 @@ function renderAssetTrackerAll() {
                             ${mountedNow.length ? mountedNow.map(a => `
                                 <div class="flex justify-between items-center text-xs p-2 bg-background rounded">
                                     <span class="font-mono font-bold text-primary cursor-pointer hover:underline" onclick="setAssetSearchQuery('${escapeHtml(a.part_name)}')">${escapeHtml(a.part_name)}</span>
-                                    <span class="text-[11px] text-text-muted">📅 ${escapeHtml((a.last_updated || '').slice(0, 10))} 장착</span>
+                                    <span class="text-[11px] text-text-muted">📅 ${escapeHtml((a.last_updated || '').slice(0, 10))}</span>
                                 </div>
                             `).join('') : '<p class="text-xs text-text-muted">현재 장착된 부품 태그가 없습니다.</p>'}
                         </div>
@@ -7520,7 +7663,7 @@ function renderAssetTrackerAll() {
     const masterTbody = document.getElementById('assetMasterTableBody');
     if (masterTbody) {
         const filteredMaster = qUpper 
-            ? master.filter(a => a.part_name.toUpperCase().includes(qUpper) || (a.current_location || '').toUpperCase().includes(qUpper))
+            ? master.filter(a => (a.part_name || '').toUpperCase().includes(qUpper) || (a.current_location || '').toUpperCase().includes(qUpper))
             : master;
 
         masterTbody.innerHTML = filteredMaster.length ? filteredMaster.map(a => {
@@ -7542,7 +7685,8 @@ function renderAssetTrackerAll() {
                     </td>
                     <td class="td-base py-2.5 px-4 font-mono text-xs font-bold text-text-muted">${escapeHtml((a.last_updated || '').slice(0, 10))}</td>
                     <td class="td-base py-2.5 px-4 text-right whitespace-nowrap">
-                        <button type="button" onclick="setAssetSearchQuery('${escapeHtml(a.part_name)}')" class="text-xs text-primary font-bold hover:underline mr-2">경로보기</button>
+                        <button type="button" onclick="setAssetSearchQuery('${escapeHtml(a.part_name)}')" class="text-xs text-primary font-bold hover:underline mr-2">경로</button>
+                        <button type="button" onclick="openRenameAssetTagModal('${escapeHtml(a.asset_id)}')" class="text-xs text-text-main font-bold hover:text-primary hover:underline mr-2">수정</button>
                         <button type="button" onclick="deleteAssetTag('${escapeHtml(a.asset_id)}')" class="text-xs text-red-500 hover:underline">삭제</button>
                     </td>
                 </tr>
@@ -7550,7 +7694,7 @@ function renderAssetTrackerAll() {
         }).join('') : `<tr><td colspan="5" class="td-base text-center py-10 text-xs text-text-muted">등록된 부품 태그가 없습니다.</td></tr>`;
     }
 
-    // 4. 우측 이벤트 로그 테이블 렌더링 (최신 작업일 순 정렬)
+    // 4. 우측 이벤트 로그 테이블 렌더링
     const logCountEl = document.getElementById('assetEventLogCountLabel');
     if (logCountEl) logCountEl.textContent = events.length;
 
@@ -7568,9 +7712,10 @@ function renderAssetTrackerAll() {
                 </td>
                 <td class="td-base py-2 px-3 text-xs">
                     <span class="text-text-muted">${escapeHtml(ev.from_location)}</span> ➔ <b class="text-text-main">${escapeHtml(ev.to_location)}</b>
-                    ${ev.memo ? `<span class="block text-[10px] text-text-muted truncate max-w-[160px]">${escapeHtml(ev.memo)}</span>` : ''}
+                    ${ev.memo ? `<span class="block text-[10px] text-text-muted truncate max-w-[150px]">${escapeHtml(ev.memo)}</span>` : ''}
                 </td>
-                <td class="td-base py-2 px-3 text-right">
+                <td class="td-base py-2 px-3 text-right whitespace-nowrap">
+                    <button type="button" onclick="openEditAssetEventModal('${escapeHtml(ev.event_id)}')" class="text-[11px] text-primary font-bold hover:underline mr-2">수정</button>
                     <button type="button" onclick="deleteSingleAssetEvent('${escapeHtml(ev.event_id)}')" class="text-[11px] text-text-muted hover:text-red-500">삭제</button>
                 </td>
             </tr>
@@ -7578,16 +7723,165 @@ function renderAssetTrackerAll() {
     }
 }
 
+/** ✏️ [수정 모달 1] 개별 이동 이벤트 로그 수정 (작업일, 액션, 태그, 출발지, 도착지, 메모) */
+function openEditAssetEventModal(eventId) {
+    const events = getAssetEventLogs();
+    const ev = events.find(e => e.event_id === eventId);
+    if (!ev) return;
+
+    const modal = document.getElementById('assetEditModal');
+    const titleEl = document.getElementById('assetEditModalTitle');
+    const bodyEl = document.getElementById('assetEditModalBody');
+    if (!modal || !bodyEl) return;
+
+    const wDate = getEventWorkDate(ev);
+    titleEl.innerHTML = `<span class="material-symbols-outlined text-primary text-lg">edit_calendar</span> 이동 이벤트 기록 수정`;
+
+    bodyEl.innerHTML = `
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="label-base mb-1">작업일 *</label>
+                <input type="date" id="editEvDate" class="input-base h-9 px-2.5 rounded text-xs font-mono" value="${escapeHtml(wDate)}">
+            </div>
+            <div>
+                <label class="label-base mb-1">이동 액션 *</label>
+                <select id="editEvAction" class="input-base h-9 px-2.5 rounded text-xs font-bold text-primary">
+                    ${['장착', '탈착', '스왑', '이동'].map(act => `<option value="${act}" ${ev.action === act ? 'selected' : ''}>${act}</option>`).join('')}
+                </select>
+            </div>
+        </div>
+        <div>
+            <label class="label-base mb-1">부품 태그 (품목#식별자) *</label>
+            <input type="text" id="editEvTag" list="dlRegisteredTags" class="input-base h-9 px-3 rounded text-xs font-mono font-bold" value="${escapeHtml(ev.part_name)}">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="label-base mb-1">출발 위치 (From) *</label>
+                <input type="text" id="editEvFrom" list="dlEquipAndLocs" class="input-base h-9 px-3 rounded text-xs" value="${escapeHtml(ev.from_location)}">
+            </div>
+            <div>
+                <label class="label-base mb-1">도착 위치 (To) *</label>
+                <input type="text" id="editEvTo" list="dlEquipAndLocs" class="input-base h-9 px-3 rounded text-xs font-bold" value="${escapeHtml(ev.to_location)}">
+            </div>
+        </div>
+        <div>
+            <label class="label-base mb-1">작업 사유 / 메모</label>
+            <input type="text" id="editEvMemo" class="input-base h-9 px-3 rounded text-xs" value="${escapeHtml(ev.memo || '')}" onkeydown="if(event.key==='Enter') saveEditedAssetEvent('${escapeHtml(eventId)}')">
+        </div>
+        <div class="flex justify-end gap-2 pt-3 border-t border-border">
+            <button type="button" onclick="closeAssetEditModal()" class="btn-text px-4 py-2 border border-border rounded text-xs">취소</button>
+            <button type="button" onclick="saveEditedAssetEvent('${escapeHtml(eventId)}')" class="btn-primary px-6 py-2 rounded text-xs">수정 저장</button>
+        </div>
+    `;
+    modal.classList.remove('hidden');
+}
+
+function saveEditedAssetEvent(eventId) {
+    const newDate = document.getElementById('editEvDate')?.value;
+    const newAction = document.getElementById('editEvAction')?.value;
+    const newTag = (document.getElementById('editEvTag')?.value || '').trim();
+    const newFrom = (document.getElementById('editEvFrom')?.value || '').trim();
+    const newTo = (document.getElementById('editEvTo')?.value || '').trim();
+    const newMemo = (document.getElementById('editEvMemo')?.value || '').trim();
+
+    if (!newDate || !newTag || !newTo) {
+        return alert('작업일, 부품 태그, 도착 위치는 필수입니다.');
+    }
+
+    const events = getAssetEventLogs();
+    const master = getAssetMasterList();
+    const target = events.find(e => e.event_id === eventId);
+    if (!target) return;
+
+    target.work_date = newDate;
+    target.timestamp = `${newDate} ${(target.timestamp || '').split(' ')[1] || '12:00:00'}`;
+    target.action = newAction;
+    target.part_name = newTag;
+    target.asset_id = newTag.toUpperCase();
+    target.from_location = newFrom || '초기입고';
+    target.to_location = newTo;
+    target.memo = newMemo;
+
+    // 이벤트가 하나도 남지 않은 고아 마스터 태그 정리 후 전체 재계산
+    const activeAssetIds = new Set(events.map(e => (e.asset_id || e.part_name || '').toUpperCase()));
+    const cleanedMaster = master.filter(m => activeAssetIds.has((m.asset_id || m.part_name || '').toUpperCase()));
+
+    saveAssetTrackerState(cleanedMaster, events);
+    closeAssetEditModal();
+    renderAssetTrackerAll();
+    showToast('수정 완료', '이동 이벤트가 수정되고 경로가 자동 재계산되었습니다.');
+}
+
+/** ✏️ [수정 모달 2] 부품 태그명 일괄 변경 (해당 태그의 모든 이력까지 일괄 업데이트) */
+function openRenameAssetTagModal(assetId) {
+    const master = getAssetMasterList();
+    const asset = master.find(a => a.asset_id.toUpperCase() === assetId.toUpperCase());
+    if (!asset) return;
+
+    const modal = document.getElementById('assetEditModal');
+    const titleEl = document.getElementById('assetEditModalTitle');
+    const bodyEl = document.getElementById('assetEditModalBody');
+    if (!modal || !bodyEl) return;
+
+    titleEl.innerHTML = `<span class="material-symbols-outlined text-primary text-lg">sell</span> 부품 태그명 변경`;
+    bodyEl.innerHTML = `
+        <div>
+            <label class="label-base mb-1">현재 태그명</label>
+            <input type="text" class="input-base h-9 px-3 rounded text-xs font-mono bg-background/60 text-text-muted" value="${escapeHtml(asset.part_name)}" disabled>
+        </div>
+        <div>
+            <label class="label-base mb-1 text-primary">변경할 새 태그명 (품목#식별자) *</label>
+            <input type="text" id="editNewTagName" class="input-base h-10 px-3 rounded text-xs font-mono font-bold" value="${escapeHtml(asset.part_name)}" placeholder="예: AF Board#MDI3716" onkeydown="if(event.key==='Enter') saveRenamedAssetTag('${escapeHtml(asset.asset_id)}')">
+            <p class="text-[11px] text-text-muted mt-1.5">💡 태그명을 변경하면 이 부품의 과거 모든 이동 이벤트 로그도 새 태그명으로 자동 통합됩니다.</p>
+        </div>
+        <div class="flex justify-end gap-2 pt-3 border-t border-border">
+            <button type="button" onclick="closeAssetEditModal()" class="btn-text px-4 py-2 border border-border rounded text-xs">취소</button>
+            <button type="button" onclick="saveRenamedAssetTag('${escapeHtml(asset.asset_id)}')" class="btn-primary px-6 py-2 rounded text-xs">일괄 변경 저장</button>
+        </div>
+    `;
+    modal.classList.remove('hidden');
+    setTimeout(() => document.getElementById('editNewTagName')?.focus(), 50);
+}
+
+function saveRenamedAssetTag(oldAssetId) {
+    const newTag = (document.getElementById('editNewTagName')?.value || '').trim();
+    if (!newTag) return alert('새 태그명을 입력해주세요.');
+
+    const oldKey = oldAssetId.toUpperCase();
+    const newKey = newTag.toUpperCase();
+
+    const master = getAssetMasterList();
+    const events = getAssetEventLogs();
+
+    events.forEach(ev => {
+        if ((ev.asset_id || '').toUpperCase() === oldKey || (ev.part_name || '').toUpperCase() === oldKey) {
+            ev.part_name = newTag;
+            ev.asset_id = newKey;
+        }
+    });
+
+    const filteredMaster = master.filter(a => (a.asset_id || '').toUpperCase() !== oldKey);
+    saveAssetTrackerState(filteredMaster, events);
+    closeAssetEditModal();
+    setAssetSearchQuery(newTag);
+    showToast('태그 변경 완료', `[${newTag}] 이름으로 모든 이력이 업데이트되었습니다.`);
+}
+
+function closeAssetEditModal() {
+    document.getElementById('assetEditModal')?.classList.add('hidden');
+}
+
 /** 개별 태그 삭제 */
 function deleteAssetTag(assetId) {
     if (!confirm(`[${assetId}] 부품 태그와 관련 이동 기록을 모두 삭제하시겠습니까?`)) return;
-    const master = getAssetMasterList().filter(a => a.asset_id !== assetId);
-    const events = getAssetEventLogs().filter(e => e.asset_id !== assetId);
+    const key = assetId.toUpperCase();
+    const master = getAssetMasterList().filter(a => (a.asset_id || '').toUpperCase() !== key);
+    const events = getAssetEventLogs().filter(e => (e.asset_id || '').toUpperCase() !== key);
     saveAssetTrackerState(master, events);
     renderAssetTrackerAll();
 }
 
-/** 개별 이벤트 로그 1건 삭제 (삭제 후 남은 이벤트로 현재 위치 자동 재계산) */
+/** 개별 이벤트 로그 1건 삭제 */
 function deleteSingleAssetEvent(eventId) {
     if (!confirm('이 이동 기록 1건을 삭제하시겠습니까?')) return;
     const events = getAssetEventLogs().filter(e => e.event_id !== eventId);
@@ -7625,7 +7919,7 @@ function initAssetTrackerUI() {
     setAssetActionMode(currentAssetActionMode || '장착');
     renderAssetTrackerAll();
 }
-
+    
 // [Module: ui.js]
 // 7. [UI & View Renderers] 화면 전환, 렌더링, 타임라인, 다크모드 및 유틸리티
 // ==============================================================================
