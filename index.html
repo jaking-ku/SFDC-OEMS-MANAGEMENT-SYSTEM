@@ -864,7 +864,7 @@
                     <!-- Error Code 전용 검색창 -->
                     <div class="relative w-full sm:w-64">
                         <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-primary text-base">pin</span>
-                        <input id="ecDedicatedInput" type="text" class="input-base pl-8 pr-7 h-8 rounded text-xs font-bold border-primary/40 focus:border-primary" placeholder="E/C 번호(예: 8520) 또는 에러명..." oninput="onEcDedicatedSearchInput(this.value)" onkeydown="if(event.key==='Enter') executeHistorySearch()"/>
+                        <input id="ecDedicatedInput" type="text" class="input-base pl-8 pr-7 h-8 rounded text-xs font-bold border-primary/40 focus:border-primary" placeholder="예: 8520, D556, 4047 에러, 에러명..." oninput="onEcDedicatedSearchInput(this.value)" onkeydown="if(event.key==='Enter') executeHistorySearch()"/>
                         <button id="ecDedicatedClearBtn" type="button" class="hidden absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-primary" onclick="clearEcDedicatedSearch()" title="에러코드 검색 초기화">
                             <span class="material-symbols-outlined text-xs">close</span>
                         </button>
@@ -8388,7 +8388,9 @@ const KNOWN_EC_DESCRIPTIONS = {
     '3715': 'Beam position correction sequence Error',
     '3932': 'Calibration / Alignment sequence error',
     '4015': 'Stage Error : Receiving timeout',
+    '4020': 'Stage X-axis Error : Emergency stop on hardware',
     '4039': 'Y-axis Error : Stage specification limit error',
+    '4047': 'Stage Z-axis Error',
     '4049': 'Stage Z-axis Error : Error has occurred in cylinder for drop-protection of Z-axis',
     '4070': 'Stage Error : X-axis position error in operation end',
     '4078': 'Stage Error : Vacuum error of 12-inch wafer has occurred',
@@ -8405,8 +8407,11 @@ const KNOWN_EC_DESCRIPTIONS = {
     '5232': 'TDI Camera communication error',
     '5333': 'A Communication error with PLC has occurred',
     '5334': 'PLC / Sensor communication error',
+    '7042': 'Transfer unit : Wafer Condition in specified slot is indefinite',
+    '8132': 'Nip_IFM : CVIF to Camera communication error',
     '8504': 'MM94 MSPF2 : The alarm signal of a motor driver turns on',
     '8520': 'MM95 SPF_Multi_Zero + limit detection software is executing as MM35',
+    '8584': 'MM97 MSPF2 : The alarm signal of a motor driver turns on',
     '8706': 'IPU Error',
     '8710': 'Errorcode on Imaging Process is Unknown (Space Error)',
     '8711': 'Program Error On Imaging Process (Space Error)',
@@ -8414,9 +8419,11 @@ const KNOWN_EC_DESCRIPTIONS = {
     '9118': 'DigitalCamera.exe communication beating failure',
     '11960': 'MM40 : SPF Secondary filter drive, overload',
     '12110': 'MM43 : SPF Secondary filter drive-3, overload',
+    '31010': 'IPU Server / Program Error',
     '31013': 'IPU Error : Command Sequence is incorrect',
     '31047': 'IPU Error : COMM STATUS error',
     '31098': 'IPU Error : SVIF INT please perform an initialize',
+    '50002': 'Operation of handling unit has been stopped (stop signal active)',
     '50005': 'System error of Mini-Environment is energized',
     '50010': 'Vacuum or compressed air pressure supplied to mini-environment error',
     '50122': 'The timeout occurred during read of absolute encoder',
@@ -8425,10 +8432,25 @@ const KNOWN_EC_DESCRIPTIONS = {
     '50154': 'Hand1 cannot hold a wafer',
     '50155': 'Hand2 cannot hold a wafer',
     '50511': 'Load port detected Y-axis Position Error',
+    '50525': 'Loadport detected door forward/backward position error',
     '50821': 'Handling Unit Communication Error',
     '52414': 'Error occurred while checking vacuum pressure of Hand',
     '53020': 'Retry over (5 times)',
-    '53021': 'The equipment was not able to be connected with the mini-environment unit'
+    '53021': 'The equipment was not able to be connected with the mini-environment unit',
+    'A04': 'SHI Stage Sub Error Log (A04)',
+    'C05': 'SHI Stage Sub Error Code (C05)',
+    'D110': 'Stage Sub Error Log (D110)',
+    'D120': 'Stage Sub Error Log (D120)',
+    'D231': 'Stage Sub Error Log (D231)',
+    'D233': 'Stage Initial Sub Error (D233)',
+    'D320': 'Stage Sub Error Log (D320)',
+    'D321': 'Stage Sub Error Log (D321)',
+    'D340': 'Stage Sub Error Log (D340)',
+    'D510': 'Stage Sub Error Log (D510)',
+    'D520': 'Stage Sub Error Log (D520)',
+    'D533': 'Stage Sub Error Log (D533)',
+    'D556': 'Stage Sub Error Code (D556)',
+    'TP05': 'Load Port Sub Error (TP05)'
 };
 
 /** 작업 이력 쓰레드 묶기 토글 */
@@ -8644,54 +8666,133 @@ function invalidateHistoryCache() {
     lastRenderedDept = null;
 }
 
-/** Error Code 존재 여부 초고속 사전 판별 정규식 */
-const FAST_EC_HINT_RE = /(?:E\s*\/\s*C|E\.C\.?|Error\s*Code|에러\s*코드|\bEC\s*[:：=\-]?\s*[0-9]{3,6})/i;
+/** Error Code 존재 여부 초고속 사전 판별 정규식 (변형 패턴 및 Stage 하위 코드 포함) */
+const FAST_EC_HINT_RE = /(?:E\s*\/\s*C|E\.C\.?|Error|Err|에러|알람|Alarm|\bEC\s*[:：=\-\(]?\s*[0-9]|Code|코드|Stage)/i;
+
+/** Error Code 도감 제외 영숫자 식별자 (MM 모터 구동축, 설비 모델명, 호기명, 보드명, 레지스터 등) */
+const NON_EC_ALPHANUM_RE = /^(?:EC\d+|MM\d+|IS\d+[A-Z]*|DI\d+|CG\d+|MD[A-Z0-9]+|P[1-9][A-Z]|LP\d+|E[1-4]|CPK\d+|BIT\d+|VER\d+|V\d+|SW\d+|CH\d+|PC\d+|0X[0-9A-F]+)$/i;
+
+/** 숫자형 Error Code 선행 0 정규화 (예: 004209 -> 4209) */
+function normalizeNumericEcCode(raw) {
+    return String(raw || '').trim().replace(/^0+(?=[0-9]{4,5}$)/, '');
+}
+
+/** Error Code 검색창 입력값 스마트 정규화 (다양한 현장 변형 표기 지원) */
+function normalizeEcQueryInput(raw) {
+    let s = String(raw || '').trim();
+    if (!s) return '';
+    // 바깥 괄호 제거: (code:8504), (D556) 등
+    s = s.replace(/^\(\s*(.+?)\s*\)$/, '$1').trim();
+    // 접두어 변형 제거 (뒤에 코드 토큰이 이어질 때만 제거하여 일반 영문 설명 검색 보존)
+    s = s.replace(
+        /^(?:SHI\s*Stage\s*(?:Error\s*(?:code|log))?|Stage\s*(?:Error\s*(?:log|code)|E\s*\/\s*C|Log)?|E\s*\/\s*C(?:\s*코드)?|E\.C\.?|Error\s*Code|에러\s*코드|\bEC|\bError|\bErr|에러|알람|\bAlarm|\bCode|코드)\s*(?:확인)?\s*[:：=\-\(\[\{#]*\s*(?:No\.?\s*)?(?=[0-9]|[A-Za-z]{1,2}[0-9])/i,
+        ''
+    ).trim();
+    // 접미어 변형 제거: 8520 에러, 4047 Error, D556 Error, E/C(7042) 닫는 괄호 등
+    s = s.replace(/^([0-9]{2,6}|[A-Za-z]{1,2}[0-9]{2,4})\s*[\)\]\}]*\s*(?:에러|Error|Err|알람|Alarm|코드|발생)?\s*[\)\]\}]*$/i, '$1').trim();
+    // 004209 -> 4209 선행 0 정규화
+    if (/^0+[0-9]{4,5}$/.test(s)) {
+        s = normalizeNumericEcCode(s);
+    }
+    return s;
+}
+
+/** Error Code 코드순 정렬 비교 (4~5자리 숫자 오름차순 우선 -> 영숫자 하위 코드 자연 정렬) */
+function compareEcCodeStrings(a, b) {
+    const aIsNum = /^[0-9]+$/.test(a);
+    const bIsNum = /^[0-9]+$/.test(b);
+    if (aIsNum && bIsNum) return Number(a) - Number(b);
+    if (aIsNum !== bIsNum) return aIsNum ? -1 : 1;
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+/** 매칭 주변 문맥에서 영문 Error Description 후보 정제 */
+function extractAroundEcDesc(prefix, suffix) {
+    let sufClean = String(suffix || '').trim().replace(/^[\s,:\/=\-\>→\(\[\{]+/, '');
+    sufClean = sufClean.replace(/\s*(?:발생|재발생|재발|확인|점검|조치|진행|관련|현상|으로|건으로|에러|Error\s*발생).*$/i, '');
+    sufClean = sufClean.replace(/[\)\]\}.,;:]+$/, '').trim();
+    if (sufClean.length >= 4 && /[A-Za-z]{3,}/.test(sufClean) && !/^(?:Error|Err|Alarm|Code|에러|발생|점검|확인)$/i.test(sufClean)) {
+        return sufClean;
+    }
+    const preTrim = String(prefix || '').trim();
+    if (preTrim.length >= 4) {
+        let preClean = preTrim.replace(/[\(\[\{:\-\s]+$/, '');
+        preClean = preClean.replace(/^[*•·\-\s\d\.\)]+/, '');
+        preClean = preClean.replace(/^(?:설비\s*Initial\s*시|작업\s*중|진행\s*중|에서\s*진행한)\s*/i, '').trim();
+        if (preClean.length >= 4 && /[A-Za-z]{3,}/.test(preClean) && !/MDI|IS\d+|Line|삼성전자/i.test(preClean)) {
+            return preClean;
+        }
+    }
+    return '';
+}
 
 /**
- * 🔬 단일 텍스트(메일 제목+본문)에서 Error Code 목록 및 주변 에러 설명 추출
+ * 🔬 단일 텍스트(메일 제목+본문)에서 모든 변형 Error Code 및 주변 에러 설명 추출
+ * - 지원 숫자형(4~5자리): E/C:0000, E/C(0000), E/C 코드:0000, Error Code 0000, 에러코드 0000,
+ *   Error 0000, ERROR(0000), Code:0000, (code:0000), 0000 에러, 0000 Error, 004209(->4209)
+ * - 지원 영숫자 하위 코드: Stage E/C : D556, Stage Error log : D231, D320,D321,D340, A04, C05, TP05 등
+ * - 제외 대상: MM 모터축(MM14, MM40, MM94 등), 1~2자리 단순 숫자, 연도(2021~2027), 설비 모델명(IS 4100 등)
  */
 function extractErrorCodesWithDescFromText(text) {
     if (!text || !FAST_EC_HINT_RE.test(text)) return [];
     const results = [];
     const lines = String(text).split(/\r?\n/);
-    const markerRe = /(?:E\s*\/\s*C|E\.C\.?|Error\s*Code|에러\s*코드|\bEC)\s*[:：=\-]?\s*(?:#|No\.?\s*)?([0-9]{3,6}(?:\s*[,\/]\s*[0-9]{3,6})*)\b([^\r\n]*)/gi;
+
+    const prefixNumRe = /(?:E\s*\/\s*C(?:\s*코드)?|E\.C\.?|Error\s*Code|에러\s*코드|\bEC|\bError|\bErr|에러|알람|\bAlarm|\bCode|코드)\s*[:：=\-\(\[\{#]*\s*(?:No\.?\s*)?(0{0,2}[0-9]{4,5}(?:\s*[,\/]\s*0{0,2}[0-9]{4,5})*)\b([^\r\n]*)/gi;
+    const suffixNumRe = /\b(0{0,2}[0-9]{4,5})\s*(?:에러|Error|Err|알람|Alarm)\b([^\r\n]*)/gi;
+    const stageAlphanumRe = /(?:Stage\s*(?:Error\s*log|Error\s*code|E\s*\/\s*C|Log)|SHI\s*Stage\s*(?:Error\s*code|log)|(?:^|[\(\[\s])E\s*\/\s*C|Error\s*Code|에러\s*코드)\s*(?:확인)?\s*[:：=\-\(\[\s]*\s*([A-Za-z]{1,2}[0-9]{2,4}(?:\s*[,\/]\s*[A-Za-z]{1,2}[0-9]{2,4})*)\b/gi;
+    const suffixAlphanumRe = /\b([A-Za-z]{1,2}[0-9]{2,4})\s*(?:Error|Err|에러|알람|Alarm)\b|(?:Error|에러)\s*(?:발생|재발|재발생|확인)?\s*\(\s*([DFAC][0-9]{2,3})\s*\)/gi;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line || !FAST_EC_HINT_RE.test(line)) continue;
-        markerRe.lastIndex = 0;
+
         let m;
-        while ((m = markerRe.exec(line)) !== null) {
-            const matchStart = m.index;
-            const prefix = line.substring(0, matchStart).trim();
-            const codesStr = m[1];
-            const suffix = (m[2] || '').trim();
-
-            const rawCodes = codesStr.split(/[,\/]/).map(s => s.trim()).filter(s => /^[0-9]{3,6}$/.test(s));
-            if (rawCodes.length === 0) continue;
-
-            let desc = '';
-            let sufClean = suffix.replace(/^[\s,:\/=\-\>→\(\[\{]+/, '');
-            sufClean = sufClean.replace(/\s*(?:발생|재발생|확인|점검|조치|진행|관련|현상|으로|건으로|에러|Error\s*발생).*$/i, '');
-            sufClean = sufClean.replace(/[\)\]\}.,;:]+$/, '').trim();
-
-            if (sufClean.length >= 4 && /[A-Za-z]{3,}/.test(sufClean) && !/^(?:Error|에러|발생|점검|확인)$/i.test(sufClean)) {
-                desc = sufClean;
-            } else if (prefix.length >= 4) {
-                let preClean = prefix.replace(/[\(\[\{:\-\s]+$/, '');
-                preClean = preClean.replace(/^[*•·\-\s\d\.\)]+/, '');
-                preClean = preClean.replace(/^(?:설비\s*Initial\s*시|작업\s*중|진행\s*중|에서\s*진행한)\s*/i, '').trim();
-                if (preClean.length >= 4 && /[A-Za-z]{3,}/.test(preClean) && !/MDI|IS\d+|Line|삼성전자/i.test(preClean)) {
-                    desc = preClean;
-                }
-            }
-
-            for (const c of rawCodes) {
-                if ((c === '2023' || c === '2024' || c === '2025' || c === '2026' || c === '2027') && !/E\s*\/\s*C|Error\s*Code/i.test(m[0])) {
-                    continue;
-                }
+        // 1) 접두사 + 4~5자리 숫자형 (E/C: 0000, Error Code 0000, 에러코드 0000, Error 0000, Code: 0000, E/C(0000) 등)
+        prefixNumRe.lastIndex = 0;
+        while ((m = prefixNumRe.exec(line)) !== null) {
+            const before = line.substring(0, m.index);
+            const desc = extractAroundEcDesc(before, m[2]);
+            const tokens = m[1].split(/[,\/]/);
+            for (let t = 0; t < tokens.length; t++) {
+                const c = normalizeNumericEcCode(tokens[t]);
+                if (!/^[0-9]{4,5}$/.test(c)) continue;
+                if ((c >= '2021' && c <= '2027') && !/E\s*\/\s*C|Error\s*Code|에러\s*코드/i.test(m[0])) continue;
+                if ((c === '3000' || c === '3200' || c === '4100' || c === '4600' || c === '7300') && /(?:IS|DI|CG)\s*$/i.test(before)) continue;
                 results.push({ code: c, desc: desc });
             }
+        }
+
+        // 2) 4~5자리 숫자 + 접미사형 (0000 에러, 0000 Error, 0000 알람 등)
+        suffixNumRe.lastIndex = 0;
+        while ((m = suffixNumRe.exec(line)) !== null) {
+            const before = line.substring(0, m.index);
+            if (/[#\-]$/.test(before)) continue;
+            const c = normalizeNumericEcCode(m[1]);
+            if (!/^[0-9]{4,5}$/.test(c)) continue;
+            if (c >= '2021' && c <= '2027') continue;
+            if ((c === '3000' || c === '3200' || c === '4100' || c === '4600' || c === '7300') && /(?:IS|DI|CG)\s*$/i.test(before)) continue;
+            const desc = extractAroundEcDesc(before, m[2]);
+            results.push({ code: c, desc: desc });
+        }
+
+        // 3) Stage / Port 하위 영숫자 코드 (Stage E/C : D556, Stage Error log : D231, E/C : TP05 등)
+        stageAlphanumRe.lastIndex = 0;
+        while ((m = stageAlphanumRe.exec(line)) !== null) {
+            const tokens = m[1].split(/[,\/]/);
+            for (let t = 0; t < tokens.length; t++) {
+                const c = tokens[t].trim().toUpperCase();
+                if (!c || NON_EC_ALPHANUM_RE.test(c)) continue;
+                results.push({ code: c, desc: '' });
+            }
+        }
+
+        // 4) 영숫자 하위 코드 + 접미사 / 괄호형 (D556 Error, Error 발생(D233) 등)
+        suffixAlphanumRe.lastIndex = 0;
+        while ((m = suffixAlphanumRe.exec(line)) !== null) {
+            const c = String(m[1] || m[2] || '').trim().toUpperCase();
+            if (!c || NON_EC_ALPHANUM_RE.test(c)) continue;
+            results.push({ code: c, desc: '' });
         }
     }
     return results;
@@ -8849,8 +8950,8 @@ function onEcDedicatedSearchInput(val) {
         if (val && val.trim()) clearBtn.classList.remove('hidden');
         else clearBtn.classList.add('hidden');
     }
-    const cleanVal = String(val || '').replace(/^(?:E\s*\/\s*C|EC)\s*[:：\-]?\s*/i, '').trim();
-    if (selectedHistoryEc && cleanVal && selectedHistoryEc !== cleanVal) {
+    const cleanVal = normalizeEcQueryInput(val);
+    if (selectedHistoryEc && cleanVal && selectedHistoryEc.toLowerCase() !== cleanVal.toLowerCase()) {
         selectedHistoryEc = null;
     }
     historyCurrentPage = 1;
@@ -9054,7 +9155,7 @@ function loadMoreHistoryResults() {
 }
 
 /**
- * 🖍️ 텍스트 내 검색 키워드 및 Error Code 형광펜 하이라이트
+ * 🖍️ 텍스트 내 검색 키워드 및 모든 변형 Error Code 형광펜 하이라이트
  */
 function highlightHistoryText(text, highlightTerms = []) {
     let safe = escapeHtml(text || '');
@@ -9062,7 +9163,7 @@ function highlightHistoryText(text, highlightTerms = []) {
 
     if (FAST_EC_HINT_RE.test(safe)) {
         safe = safe.replace(
-            /((?:E\s*\/\s*C|E\.C\.?|Error\s*Code|에러\s*코드|\bEC)\s*[:：=\-]?\s*(?:#|No\.?\s*)?[0-9]{3,6}(?:\s*[,\/]\s*[0-9]{3,6})*)/gi,
+            /((?:Stage\s*(?:Error\s*(?:log|code)|E\s*\/\s*C|Log)|SHI\s*Stage\s*(?:Error\s*(?:code|log)))\s*(?:확인)?\s*[:：=\-\(\[\s]*\s*[A-Za-z]{1,2}[0-9]{2,4}(?:\s*[,\/]\s*[A-Za-z]{1,2}[0-9]{2,4})*\b|(?:E\s*\/\s*C(?:\s*코드)?|E\.C\.?|Error\s*Code|에러\s*코드)\s*[:：=\-\(\[\s]*\s*[DFAC][0-9]{2,3}\b|(?:E\s*\/\s*C(?:\s*코드)?|E\.C\.?|Error\s*Code|에러\s*코드)\s*[:：=\-\(\[\s]*\s*TP[0-9]{2}\b|\(?(?:E\s*\/\s*C(?:\s*코드)?|E\.C\.?|Error\s*Code|에러\s*코드|\bEC|\bError|\bErr|에러|\bAlarm|알람|\bCode|코드)\s*[:：=\-\(\[#]*\s*(?:No\.?\s*)?0{0,2}[0-9]{4,5}(?:\s*[,\/]\s*0{0,2}[0-9]{4,5})*\)?|\b(?:0{0,2}[0-9]{4,5}|[DFAC][0-9]{2,3}|TP[0-9]{2})\s*(?:에러|Error|Err|알람|Alarm)\b)/gi,
             '<span class="text-red-600 dark:text-red-400 font-black bg-red-500/10 px-1 rounded">$1</span>'
         );
     }
@@ -9118,15 +9219,15 @@ function renderEcDirectorySection() {
     const directory = cachedEcDirectory || [];
     if (totalBadge) totalBadge.textContent = `총 ${directory.length}종`;
 
-    const rawEcQuery = (document.getElementById('ecDedicatedInput')?.value || '').trim().toLowerCase();
-    const cleanEcQuery = rawEcQuery.replace(/^(?:e\s*\/\s*c|ec|error\s*code|에러\s*코드)\s*[:：=\-]?\s*/i, '').trim();
+    const rawEcQuery = (document.getElementById('ecDedicatedInput')?.value || '').trim();
+    const cleanEcQuery = normalizeEcQueryInput(rawEcQuery).toLowerCase();
 
     const sorted = directory.slice().sort((a, b) => {
         if (ecDirectorySortMode === 'code') {
-            return Number(a.code) - Number(b.code) || a.code.localeCompare(b.code);
+            return compareEcCodeStrings(a.code, b.code);
         }
         if (b.count !== a.count) return b.count - a.count;
-        return Number(a.code) - Number(b.code);
+        return compareEcCodeStrings(a.code, b.code);
     });
 
     const filteredCodes = cleanEcQuery
@@ -9135,7 +9236,7 @@ function renderEcDirectorySection() {
 
     const activeEcObj = selectedHistoryEc
         ? directory.find(d => d.code === selectedHistoryEc)
-        : (cleanEcQuery && filteredCodes.length === 1 && filteredCodes[0].code === cleanEcQuery ? filteredCodes[0] : null);
+        : (cleanEcQuery && filteredCodes.length === 1 && filteredCodes[0].code.toLowerCase() === cleanEcQuery ? filteredCodes[0] : null);
 
     if (banner) {
         if (activeEcObj) {
@@ -9202,7 +9303,7 @@ function renderEcDirectorySection() {
     }
 
     grid.innerHTML = visibleCodes.map(item => {
-        const isSelected = selectedHistoryEc === item.code || (cleanEcQuery && item.code === cleanEcQuery);
+        const isSelected = selectedHistoryEc === item.code || (cleanEcQuery && item.code.toLowerCase() === cleanEcQuery);
         const descText = item.description || '클릭하여 메일 조회';
         return `
             <button type="button" onclick="selectHistoryErrorCode('${escapeHtml(item.code)}')"
@@ -9295,7 +9396,7 @@ function renderHistoryResultsOnly() {
     const equipVal = (document.getElementById('histEquipInput')?.value || '').trim();
     const lineVal = document.getElementById('histLineSelect')?.value || 'ALL';
     const rawEcInput = (document.getElementById('ecDedicatedInput')?.value || '').trim();
-    const cleanEcInput = rawEcInput.replace(/^(?:e\s*\/\s*c|ec|error\s*code|에러\s*코드)\s*[:：=\-]?\s*/i, '').trim().toLowerCase();
+    const cleanEcInput = normalizeEcQueryInput(rawEcInput).toLowerCase();
 
     const pageSizeSel = document.getElementById('historyPageSizeSelect');
     if (pageSizeSel) {
