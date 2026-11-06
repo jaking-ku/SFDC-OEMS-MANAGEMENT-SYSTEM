@@ -819,51 +819,143 @@
     </section>
 
 
-    <section id="history" class="tab-content hidden space-y-8 animate-[fadeIn_0.3s_ease-in-out]">
+    <section id="history" class="tab-content hidden space-y-6 animate-[fadeIn_0.3s_ease-in-out]">
+        <!-- 상단 헤더 & 전역 컨트롤 -->
         <div class="flex items-end justify-between border-b border-border pb-4 flex-wrap gap-4">
             <div>
-                <h2 class="text-2xl font-bold text-text-main">작업 히스토리 타임라인 (Local)</h2>
-                <p class="text-sm text-text-muted mt-1">작업 내용을 클릭하면 복사된 원본 메일 내용을 확인할 수 있습니다.</p>
+                <h2 class="text-2xl font-bold text-text-main flex items-center gap-2">
+                    <span class="material-symbols-outlined text-primary text-3xl">troubleshoot</span>
+                    작업 이력 & Error Code 통합 검색
+                </h2>
+                <p class="text-sm text-text-muted mt-1">
+                    메일 히스토리에서 자동 추출된 <b>Error Code(E/C) 도감</b>과 <b>설비호기 · 작업내용 검색</b>으로 과거 조치 내역을 즉시 찾아봅니다.
+                </p>
             </div>
-            <div class="flex items-center gap-4">
-                <div class="relative">
-                    <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-base">search</span>
-                    <input id="historySearch" class="input-base pl-9 pr-8 py-2 w-64 h-9 rounded" placeholder="설비호기 / 작업내용 검색..." type="text" oninput="onHistorySearchInput(this.value)" onkeydown="if(event.key==='Enter') executeHistorySearch(this.value)"/>
-                    <button id="historySearchClearBtn" class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-primary" onclick="clearHistorySearch()" title="검색어 초기화">
-                        <span class="material-symbols-outlined text-sm">close</span>
-                    </button>
-                </div>
-                <select id="historySortOrder" class="input-base w-32 h-9 px-3 rounded" onchange="renderHistory()">
-                    <option value="desc">최신순</option><option value="asc">오래된순</option>
+            <div class="flex items-center gap-2.5 flex-wrap">
+                <select id="historySortOrder" class="input-base w-32 h-9 px-3 rounded text-xs font-bold" onchange="renderHistory()">
+                    <option value="desc">최신 작업순</option>
+                    <option value="asc">오래된 작업순</option>
                 </select>
-                <button id="historyThreadToggleBtn" class="btn-text h-9 px-3 border border-primary bg-primary/10 text-primary hover:bg-primary hover:text-white rounded flex items-center gap-1 text-xs font-bold transition-all" onclick="toggleHistoryThreadMode()">
+                <button id="historyThreadToggleBtn" class="btn-text h-9 px-3 border border-primary bg-primary/10 text-primary hover:bg-primary hover:text-white rounded flex items-center gap-1 text-xs font-bold transition-all" onclick="toggleHistoryThreadMode()" title="동일 호기에서 연속으로 대응한 작업을 하나의 흐름으로 묶어서 봅니다">
                     <span class="material-symbols-outlined text-base">forum</span>
                     <span id="historyThreadToggleText">쓰레드 묶기 ON</span>
                 </button>
-                <button class="btn-text h-9 px-4 border border-border hover:border-red-400 hover:text-red-600 rounded" onclick="clearAllHistory()">
+                <button class="btn-text h-9 px-3.5 border border-border hover:border-red-400 hover:text-red-600 rounded text-xs" onclick="clearAllHistory()">
                     <span class="material-symbols-outlined text-sm">delete_sweep</span> 기록 일괄 삭제
                 </button>
             </div>
         </div>
 
-        <!-- 1. 기본 뷰: 설비 선택 칩 아코디언 -->
-        <div id="historyEquipCard" class="card-base rounded-md">
-            <div class="px-6 py-3 bg-background border-b border-border rounded-t-md">
-                <span class="label-base !mb-0">설비 선택</span>
+        <!-- 1. 🚨 Error Code 트러블슈팅 도감 & 전용 검색 카드 -->
+        <div id="historyEcDirectoryCard" class="card-base rounded-lg overflow-hidden border-t-4 border-t-primary shadow-xs">
+            <div class="px-5 py-3.5 bg-background border-b border-border flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="material-symbols-outlined text-primary text-xl">bug_report</span>
+                    <span class="text-sm font-black text-text-main">Error Code 트러블슈팅 도감</span>
+                    <span id="ecTotalCountBadge" class="bg-primary/10 text-primary border border-primary/30 text-[11px] font-black px-2 py-0.5 rounded">0종</span>
+                    <span class="text-xs text-text-muted hidden sm:inline">· 에러코드를 클릭하거나 번호를 검색하면 과거 조치 이력이 즉시 나열됩니다</span>
+                </div>
+                <div class="flex items-center gap-2 flex-wrap">
+                    <!-- Error Code 전용 검색창 -->
+                    <div class="relative w-full sm:w-72">
+                        <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-primary text-base">pin</span>
+                        <input id="ecDedicatedInput" type="text" class="input-base pl-8 pr-7 h-8 rounded text-xs font-bold border-primary/40 focus:border-primary" placeholder="E/C 번호(예: 8520) 또는 영문 에러명..." oninput="onEcDedicatedSearchInput(this.value)" onkeydown="if(event.key==='Enter') executeHistorySearch()"/>
+                        <button id="ecDedicatedClearBtn" type="button" class="hidden absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-primary" onclick="clearEcDedicatedSearch()" title="에러코드 검색 초기화">
+                            <span class="material-symbols-outlined text-xs">close</span>
+                        </button>
+                    </div>
+                    <!-- 도감 정렬 모드 -->
+                    <div class="flex items-center bg-surface p-0.5 rounded border border-border text-[11px]">
+                        <button type="button" id="ecSortFreqBtn" class="px-2.5 py-1 font-bold rounded transition-all bg-primary text-white" onclick="setEcDirectorySort('freq')">빈도순</button>
+                        <button type="button" id="ecSortCodeBtn" class="px-2.5 py-1 font-bold rounded transition-all text-text-muted hover:text-text-main" onclick="setEcDirectorySort('code')">코드번호순</button>
+                    </div>
+                    <!-- 도감 전체 펼치기/접기 -->
+                    <button type="button" id="ecExpandToggleBtn" class="btn-text h-8 px-2.5 border border-border bg-surface hover:border-primary hover:text-primary rounded text-xs font-bold flex items-center gap-1" onclick="toggleEcDirectoryExpand()">
+                        <span id="ecExpandToggleText">전체 코드 펼치기</span>
+                        <span id="ecExpandToggleIcon" class="material-symbols-outlined text-sm">expand_more</span>
+                    </button>
+                </div>
             </div>
-            <div class="p-4 flex flex-wrap gap-2" id="historyEquipChips"></div>
+
+            <!-- 선택된 Error Code 상세 요약 배너 (코드 선택 시 활성화) -->
+            <div id="ecSelectedDetailBanner" class="hidden px-5 py-3.5 bg-primary/5 border-b border-primary/20"></div>
+
+            <!-- Error Code 칩 그리드 영역 -->
+            <div class="p-4 bg-surface/40">
+                <div id="ecDirectoryGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2"></div>
+                <div id="ecDirectoryMoreNotice" class="hidden mt-3 pt-2 border-t border-border/50 text-center">
+                    <button type="button" onclick="toggleEcDirectoryExpand()" class="text-xs font-bold text-primary hover:underline inline-flex items-center gap-1">
+                        <span id="ecDirectoryMoreText">나머지 에러코드 더보기</span>
+                        <span class="material-symbols-outlined text-sm">expand_more</span>
+                    </button>
+                </div>
+            </div>
         </div>
 
-        <!-- 2. 기본 뷰: 선택된 설비 타임라인 -->
-        <div id="historyTimelineWrap" class="space-y-0"></div>
+        <!-- 2. 🔍 다중 조건 통합 이력 검색 바 (설비호기 / 작업내용 / 라인) -->
+        <div id="historyMultiSearchCard" class="card-base p-4 rounded-lg shadow-xs bg-surface border border-border">
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                <!-- 설비호기 검색 -->
+                <div class="md:col-span-3">
+                    <label class="label-base mb-1.5 flex items-center gap-1 text-xs">
+                        <span class="material-symbols-outlined text-sm text-primary">precision_manufacturing</span>
+                        설비호기 검색
+                    </label>
+                    <div class="relative">
+                        <input id="histEquipInput" type="text" list="dlHistoryMachines" class="input-base h-9 pl-3 pr-7 rounded text-xs font-bold font-mono" placeholder="예: MDI3566 (호기 입력/선택)" oninput="onHistEquipFilterInput(this.value)" onkeydown="if(event.key==='Enter') executeHistorySearch()"/>
+                        <button id="histEquipClearBtn" type="button" class="hidden absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-primary" onclick="clearHistEquipFilter()" title="설비호기 필터 초기화">
+                            <span class="material-symbols-outlined text-xs">close</span>
+                        </button>
+                    </div>
+                    <datalist id="dlHistoryMachines"></datalist>
+                </div>
 
-        <!-- 3. 검색 전용 뷰: 검색 결과 목록 -->
-        <div id="historySearchResultsWrap" class="hidden space-y-4"></div>
+                <!-- 작업내용 / 조치내역 키워드 검색 -->
+                <div class="md:col-span-5">
+                    <label class="label-base mb-1.5 flex items-center gap-1 text-xs">
+                        <span class="material-symbols-outlined text-sm text-primary">search</span>
+                        작업내용 · 조치내역 · 부품명 · 작업자 검색
+                    </label>
+                    <div class="relative">
+                        <input id="historySearch" type="text" class="input-base h-9 pl-3 pr-7 rounded text-xs" placeholder="예: Laser, Stage, MSPF, 커넥터 교체, Data Matching..." oninput="onHistorySearchInput(this.value)" onkeydown="if(event.key==='Enter') executeHistorySearch(this.value)"/>
+                        <button id="historySearchClearBtn" type="button" class="hidden absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-primary" onclick="clearHistoryKeywordOnly()" title="작업내용 검색어 초기화">
+                            <span class="material-symbols-outlined text-xs">close</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 라인 필터 -->
+                <div class="md:col-span-2">
+                    <label class="label-base mb-1.5 flex items-center gap-1 text-xs">
+                        <span class="material-symbols-outlined text-sm text-primary">factory</span>
+                        라인 필터
+                    </label>
+                    <select id="histLineSelect" class="input-base h-9 px-2.5 rounded text-xs font-bold" onchange="renderHistory()">
+                        <option value="ALL">전체 라인</option>
+                    </select>
+                </div>
+
+                <!-- 전체 필터 초기화 버튼 -->
+                <div class="md:col-span-2">
+                    <button type="button" onclick="clearHistorySearch()" class="w-full h-9 px-3 rounded border border-border bg-background hover:border-primary hover:text-primary text-xs font-bold flex items-center justify-center gap-1 transition-all">
+                        <span class="material-symbols-outlined text-sm">restart_alt</span>
+                        전체 조건 초기화
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 하위 호환성 유지용 히든 컨테이너 -->
+        <div id="historyEquipCard" class="hidden"><div id="historyEquipChips"></div></div>
+        <div id="historyTimelineWrap" class="hidden"></div>
+
+        <!-- 3. 📋 검색 결과 요약 및 작업 이력 카드 목록 -->
+        <div id="historySearchResultsWrap" class="space-y-4"></div>
 
         <!-- 4. 빈 상태 안내 -->
         <div id="historyEmpty" class="hidden card-base p-16 text-center rounded-md">
-            <span class="material-symbols-outlined text-5xl text-text-muted block mb-4">history</span>
-            <p id="historyEmptyText" class="label-base">작업 기록 없음</p>
+            <span class="material-symbols-outlined text-5xl text-text-muted block mb-4">manage_search</span>
+            <p id="historyEmptyText" class="label-base">조건과 일치하는 작업 기록이 없습니다.</p>
         </div>
     </section>
 
@@ -8256,29 +8348,91 @@ function saveMachineNote(m, t) {
 /** 작업 이력 동일 제목 쓰레드 그룹화 모드 플래그 */
 let isHistoryThreadMode = true;
 
+/** Error Code 도감 및 다중 검색 상태 변수 */
+let selectedHistoryEc = null;
+let ecDirectorySortMode = 'freq';
+let isEcDirectoryExpanded = false;
+let cachedEcDirectory = null;
+let cachedEcDescMap = null;
+let historyDisplayLimit = 50;
+
+/** 반도체 계측 설비 주요 Error Code 표준 설명 사전 (메일 본문 내 설명 생략 시 보조 활용) */
+const KNOWN_EC_DESCRIPTIONS = {
+    '2001': 'BIT3 Motion Error was Detected',
+    '2020': 'IPU initialization failed',
+    '1118': 'Observation AF error : Observation Lamp is Dead',
+    '1215': 'Observation AF Error : Receiving timeout',
+    '1221': 'Observation AF : Changing object lens has failed',
+    '1232': 'Observation AF (one-shot mode) error has occurred',
+    '1242': 'Observation AF : System error has occurred in observation AF unit',
+    '1249': 'Observation AF Error : While executing an auto focus, upper limit detected',
+    '1250': 'Observation AF Error : Receiving timeout',
+    '1440': 'The Sensor I/F initial state of board-1 is abnormal',
+    '3001': 'Limit detection error',
+    '3707': 'Beam position correction sequence : Inspection AF does not complete normally',
+    '3715': 'Beam position correction sequence Error',
+    '3932': 'Calibration / Alignment sequence error',
+    '4015': 'Stage Error : Receiving timeout',
+    '4039': 'Y-axis Error : Stage specification limit error',
+    '4049': 'Stage Z-axis Error : Error has occurred in cylinder for drop-protection of Z-axis',
+    '4070': 'Stage Error : X-axis position error in operation end',
+    '4078': 'Stage Error : Vacuum error of 12-inch wafer has occurred',
+    '4090': 'Stage Error : Other Errors occurred in the stage',
+    '4099': 'Stage Error : Motion Error / Z position difference over',
+    '4160': 'Laser Error : The Laser Shutter is out of order',
+    '4207': 'Laser Error : Laser power does not reach setting value',
+    '4209': 'Laser Error : The Panel Switch is off',
+    '5006': 'Inspection AF Error',
+    '5010': 'Inspection AF does not complete normally',
+    '5201': 'DC Fuse Blown occurred',
+    '5207': 'Xenon Lamp replacement request',
+    '5225': 'The ionizing ability of the ionizer declined',
+    '5232': 'TDI Camera communication error',
+    '5333': 'A Communication error with PLC has occurred',
+    '5334': 'PLC / Sensor communication error',
+    '8504': 'MM94 MSPF2 : The alarm signal of a motor driver turns on',
+    '8520': 'MM95 SPF_Multi_Zero + limit detection software is executing as MM35',
+    '8706': 'IPU Error',
+    '8710': 'Errorcode on Imaging Process is Unknown (Space Error)',
+    '8711': 'Program Error On Imaging Process (Space Error)',
+    '9059': 'Shutter close on sensor is not turned on',
+    '9118': 'DigitalCamera.exe communication beating failure',
+    '11960': 'MM40 : SPF Secondary filter drive, overload',
+    '12110': 'MM43 : SPF Secondary filter drive-3, overload',
+    '31013': 'IPU Error : Command Sequence is incorrect',
+    '31047': 'IPU Error : COMM STATUS error',
+    '31098': 'IPU Error : SVIF INT please perform an initialize',
+    '50005': 'System error of Mini-Environment is energized',
+    '50010': 'Vacuum or compressed air pressure supplied to mini-environment error',
+    '50122': 'The timeout occurred during read of absolute encoder',
+    '50125': 'Robot Changer Position Error',
+    '50134': 'Motor Rotation Error was detected on robot',
+    '50154': 'Hand1 cannot hold a wafer',
+    '50155': 'Hand2 cannot hold a wafer',
+    '50511': 'Load port detected Y-axis Position Error',
+    '50821': 'Handling Unit Communication Error',
+    '52414': 'Error occurred while checking vacuum pressure of Hand',
+    '53020': 'Retry over (5 times)',
+    '53021': 'The equipment was not able to be connected with the mini-environment unit'
+};
+
 /** 작업 이력 쓰레드 묶기 토글 */
 function toggleHistoryThreadMode() {
     isHistoryThreadMode = !isHistoryThreadMode;
-    const btn = document.getElementById("historyThreadToggleBtn");
-    const txt = document.getElementById("historyThreadToggleText");
+    const btn = document.getElementById('historyThreadToggleBtn');
+    const txt = document.getElementById('historyThreadToggleText');
     if (btn && txt) {
         if (isHistoryThreadMode) {
-            btn.className = "btn-text h-9 px-3 border border-primary bg-primary/10 text-primary hover:bg-primary hover:text-white rounded flex items-center gap-1 text-xs font-bold transition-all";
-            txt.textContent = "쓰레드 묶기 ON";
+            btn.className = 'btn-text h-9 px-3 border border-primary bg-primary/10 text-primary hover:bg-primary hover:text-white rounded flex items-center gap-1 text-xs font-bold transition-all';
+            txt.textContent = '쓰레드 묶기 ON';
         } else {
-            btn.className = "btn-text h-9 px-3 border border-border bg-surface text-text-muted hover:border-primary hover:text-primary rounded flex items-center gap-1 text-xs font-medium transition-all";
-            txt.textContent = "쓰레드 묶기 OFF";
+            btn.className = 'btn-text h-9 px-3 border border-border bg-surface text-text-muted hover:border-primary hover:text-primary rounded flex items-center gap-1 text-xs font-medium transition-all';
+            txt.textContent = '쓰레드 묶기 OFF';
         }
     }
-    const sortOrder = document.getElementById("historySortOrder")?.value || "desc";
-    renderHistoryTimeline(sortOrder);
+    renderHistory();
 }
 
-/**
- * 정렬된 작업 이력 목록에서 인접한 동일 제목(Setup, Upgrade 등)을 쓰레드로 그룹화
- * @param {Array} entries 정렬된 이력 객체 배열
- * @returns {Array} 그룹화된 이력 객체 배열 [{ isThread, title, entries, count }]
- */
 /**
  * 정렬된 작업 이력 목록에서 동일 날짜 중복 작업을 단일화하고, 인접한 동일 제목(Setup, Upgrade 등)을 쓰레드로 그룹화
  * @param {Array} entries 정렬된 이력 객체 배열
@@ -8294,46 +8448,44 @@ function groupEntriesByThread(entries) {
     for (let i = 0; i < entries.length; i++) {
         if (mergedIndices.has(i)) continue;
         const e = entries[i];
-        const title = (typeof getDisplayContent === "function" ? getDisplayContent(e) : (e.content || "")).trim();
-        const normTitle = typeof normalizeHistoryWorkTitle === "function" 
+        const title = (typeof getDisplayContent === 'function' ? getDisplayContent(e) : (e.content || '')).trim();
+        const normTitle = typeof normalizeHistoryWorkTitle === 'function' 
             ? normalizeHistoryWorkTitle(title) 
-            : title.toLowerCase().replace(/\s+/g, "");
-        const dDays = typeof parseDateToDays === "function" ? parseDateToDays(e.date) : 0;
-        const raw = String(e.rawText || "").replace(/\s+/g, " ").trim();
+            : title.toLowerCase().replace(/\s+/g, '');
+        const raw = String(e.rawText || '').replace(/\s+/g, ' ').trim();
 
         let bestEntry = e;
 
         for (let j = i + 1; j < entries.length; j++) {
             if (mergedIndices.has(j)) continue;
             const other = entries[j];
-            const otherTitle = (typeof getDisplayContent === "function" ? getDisplayContent(other) : (other.content || "")).trim();
-            const otherNormTitle = typeof normalizeHistoryWorkTitle === "function" 
+            if ((e.machine || '') !== (other.machine || '')) continue;
+
+            const otherTitle = (typeof getDisplayContent === 'function' ? getDisplayContent(other) : (other.content || '')).trim();
+            const otherNormTitle = typeof normalizeHistoryWorkTitle === 'function' 
                 ? normalizeHistoryWorkTitle(otherTitle) 
-                : otherTitle.toLowerCase().replace(/\s+/g, "");
-            const otherDDays = typeof parseDateToDays === "function" ? parseDateToDays(other.date) : 0;
-            const otherRaw = String(other.rawText || "").replace(/\s+/g, " ").trim();
+                : otherTitle.toLowerCase().replace(/\s+/g, '');
+            const otherRaw = String(other.rawText || '').replace(/\s+/g, ' ').trim();
 
             let shouldMerge = false;
-            // 조건 1: 동일 날짜 내의 동일/유사 작업 (실제 중복 등록건)
-            const dStr = typeof normalizeEntryDateStr === "function" ? normalizeEntryDateStr(e.date) : (e.date || "");
-            const otherDStr = typeof normalizeEntryDateStr === "function" ? normalizeEntryDateStr(other.date) : (other.date || "");
+            const dStr = typeof normalizeEntryDateStr === 'function' ? normalizeEntryDateStr(e.date) : (e.date || '');
+            const otherDStr = typeof normalizeEntryDateStr === 'function' ? normalizeEntryDateStr(other.date) : (other.date || '');
             if (dStr && otherDStr && dStr === otherDStr) {
-                if (normTitle && otherNormTitle && normTitle !== "—" && normTitle !== "미상") {
-                    const isTitleMatch = (normTitle === otherNormTitle) || normTitle.includes(otherNormTitle) || otherNormTitle.includes(normTitle) || (normTitle.includes("pm") && otherNormTitle.includes("pm"));
+                if (normTitle && otherNormTitle && normTitle !== '—' && normTitle !== '미상') {
+                    const isTitleMatch = (normTitle === otherNormTitle) || normTitle.includes(otherNormTitle) || otherNormTitle.includes(normTitle) || (normTitle.includes('pm') && otherNormTitle.includes('pm'));
                     if (isTitleMatch) shouldMerge = true;
                 }
                 if (raw && otherRaw && (raw === otherRaw || (raw.length > 40 && otherRaw.length > 40 && (raw.includes(otherRaw) || otherRaw.includes(raw))))) {
                     shouldMerge = true;
                 }
             }
-            // 조건 2: 서로 다른 날짜라도 원문 자체가 100% 동일한 완전 복사본 (날짜 오타 등록건)
             else if (raw && otherRaw && raw.length > 100 && raw === otherRaw) {
                 shouldMerge = true;
             }
 
             if (shouldMerge) {
                 mergedIndices.add(j);
-                if (String(other.rawText || "").length > String(bestEntry.rawText || "").length) {
+                if (String(other.rawText || '').length > String(bestEntry.rawText || '').length) {
                     bestEntry = other;
                 }
             }
@@ -8342,21 +8494,40 @@ function groupEntriesByThread(entries) {
         cleanEntries.push(bestEntry);
     }
 
-    // 2단계: 서로 다른 일자의 인접한 동일 작업명들을 쓰레드로 그룹화
+    // 2단계: 같은 설비 내에서 인접한 동일 작업명(또는 동일 Error Code 연속 작업)들을 쓰레드로 그룹화
     const groups = [];
     let currentGroup = null;
 
     cleanEntries.forEach(e => {
-        const title = (typeof getDisplayContent === "function" ? getDisplayContent(e) : (e.content || "")).trim();
-        const normKey = title.toLowerCase().replace(/\s+/g, " ");
+        const title = (typeof getDisplayContent === 'function' ? getDisplayContent(e) : (e.content || '')).trim();
+        const normKey = title.toLowerCase().replace(/\s+/g, ' ');
+        const machineKey = (e.machine || '미상').trim().toUpperCase();
+        const ecList = e._errorCodes || [];
 
-        if (currentGroup && normKey && normKey !== "—" && normKey !== "미상" && currentGroup.normKey === normKey) {
+        let canGroup = false;
+        if (currentGroup && currentGroup.machineKey === machineKey) {
+            if (normKey && normKey !== '—' && normKey !== '미상' && currentGroup.normKey === normKey) {
+                canGroup = true;
+            } else if (ecList.length > 0 && currentGroup.ecSet && ecList.some(code => currentGroup.ecSet.has(code))) {
+                // 같은 호기에서 인접한 이력이 동일한 에러코드를 다루고 있으면 연속 대응 쓰레드로 묶음
+                const d1 = parseEntryDate(currentGroup.entries[currentGroup.entries.length - 1].date, currentGroup.entries[currentGroup.entries.length - 1].savedAt);
+                const d2 = parseEntryDate(e.date, e.savedAt);
+                if (Math.abs( Number(d1.substring(0, 6)) - Number(d2.substring(0, 6)) ) <= 1) {
+                    canGroup = true;
+                }
+            }
+        }
+
+        if (canGroup) {
             currentGroup.entries.push(e);
+            ecList.forEach(c => currentGroup.ecSet.add(c));
         } else {
             currentGroup = {
+                machineKey: machineKey,
                 normKey: normKey,
                 title: title,
-                entries: [e]
+                entries: [e],
+                ecSet: new Set(ecList)
             };
             groups.push(currentGroup);
         }
@@ -8366,7 +8537,10 @@ function groupEntriesByThread(entries) {
         isThread: g.entries.length > 1,
         title: g.title,
         entries: g.entries,
-        count: g.entries.length
+        count: g.entries.length,
+        machine: g.entries[0]?.machine || '미상',
+        line: g.entries[0]?.line || '미상',
+        errorCodes: Array.from(g.ecSet || [])
     }));
 }
 
@@ -8385,34 +8559,439 @@ function invalidateHistoryCache() {
     cachedRawHistory = null;
     cachedExpandedHistory = null;
     cachedLineMap = null;
+    cachedEcDirectory = null;
+    cachedEcDescMap = null;
     lastRenderedDept = null;
 }
 
-/** 🔍 검색창 디바운스 입력 핸들러 (300ms 비차단) */
-function onHistorySearchInput(val) {
-    const clearBtn = document.getElementById("historySearchClearBtn");
-    if (clearBtn) {
-        if (val && val.trim()) clearBtn.classList.remove("hidden");
-        else clearBtn.classList.add("hidden");
+/**
+ * 🔬 단일 텍스트(메일 제목+본문)에서 Error Code 목록 및 주변 에러 설명 추출
+ * @param {string} text 검사할 텍스트
+ * @returns {Array<{code: string, desc: string}>}
+ */
+function extractErrorCodesWithDescFromText(text) {
+    if (!text) return [];
+    const results = [];
+    const lines = String(text).split(/\r?\n/);
+    const markerRe = /(?:E\s*\/\s*C|E\.C\.?|Error\s*Code|에러\s*코드|\bEC)\s*[:：=\-]?\s*(?:#|No\.?\s*)?([0-9]{3,6}(?:\s*[,\/]\s*[0-9]{3,6})*)\b([^\r\n]*)/gi;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        markerRe.lastIndex = 0;
+        let m;
+        while ((m = markerRe.exec(line)) !== null) {
+            const matchStart = m.index;
+            const prefix = line.substring(0, matchStart).trim();
+            const codesStr = m[1];
+            const suffix = (m[2] || '').trim();
+
+            const rawCodes = codesStr.split(/[,\/]/).map(s => s.trim()).filter(s => /^[0-9]{3,6}$/.test(s));
+            if (rawCodes.length === 0) continue;
+
+            let desc = '';
+            // 후행 설명 정제
+            let sufClean = suffix.replace(/^[\s,:\/=\-\>→\(\[\{]+/, '');
+            sufClean = sufClean.replace(/\s*(?:발생|재발생|확인|점검|조치|진행|관련|현상|으로|건으로|에러|Error\s*발생).*$/i, '');
+            sufClean = sufClean.replace(/[\)\]\}.,;:]+$/, '').trim();
+
+            if (sufClean.length >= 4 && /[A-Za-z]{3,}/.test(sufClean) && !/^(?:Error|에러|발생|점검|확인)$/i.test(sufClean)) {
+                desc = sufClean;
+            } else if (prefix.length >= 4) {
+                let preClean = prefix.replace(/[\(\[\{:\-\s]+$/, '');
+                preClean = preClean.replace(/^[*•·\-\s\d\.\)]+/, '');
+                preClean = preClean.replace(/^(?:설비\s*Initial\s*시|작업\s*중|진행\s*중|에서\s*진행한)\s*/i, '').trim();
+                if (preClean.length >= 4 && /[A-Za-z]{3,}/.test(preClean) && !/MDI|IS\d+|Line|삼성전자/i.test(preClean)) {
+                    desc = preClean;
+                }
+            }
+
+            for (const c of rawCodes) {
+                if ((c === '2023' || c === '2024' || c === '2025' || c === '2026' || c === '2027') && !/E\s*\/\s*C|Error\s*Code/i.test(m[0])) {
+                    continue;
+                }
+                results.push({ code: c, desc: desc });
+            }
+        }
     }
+    return results;
+}
+
+/**
+ * 📧 메일 원문(rawText)에서 당일 최신 메일의 [작업내용]과 [인폼사항] 핵심 블록 발췌
+ * @param {Object} e 작업 이력 엔트리
+ * @returns {{ workDetails: string, informNotes: string, topMailText: string }}
+ */
+function extractMailCoreSections(e) {
+    if (!e) return { workDetails: '', informNotes: '', topMailText: '' };
+    if (e._coreSections) return e._coreSections;
+
+    const rawText = String(e.rawText || '').trim();
+    const fallbackContent = String(e.content || '').trim();
+
+    if (!rawText) {
+        e._coreSections = { workDetails: fallbackContent, informNotes: '', topMailText: fallbackContent };
+        return e._coreSections;
+    }
+
+    // 첫 번째 From: / 보낸 사람: / 구분선 이전의 당일 최신 메일 블록만 분리
+    const topMail = rawText.split(/\r?\n\s*(?:From\s*:|보낸\s*사람\s*:|-{8,}|_{8,})/i)[0] || rawText;
+
+    // 1. [작업내용] 추출
+    let workDetails = '';
+    const workMatch = topMail.match(/(?:작업\s*내용|작업\s*내역|점검\s*내용)\s*[:：]\s*([\s\S]*?)(?=\r?\n\s*(?:작업자\s*[:：]|인폼\s*사항|인폼\s*내용|특이\s*사항|이상입니다|감사합니다|HITACHI|$))/i);
+    if (workMatch && workMatch[1]) {
+        const lines = workMatch[1].split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        workDetails = lines.join('\n');
+    }
+
+    // 2. [인폼사항] 추출
+    let informNotes = '';
+    const informMatch = topMail.match(/(?:인폼\s*사항|인폼\s*내용|특이\s*사항|인폼)\s*[:：]\s*([\s\S]*?)(?=\r?\n\s*(?:작업자\s*[:：]|상기\s*내용|이상입니다|감사합니다|HITACHI|From\s*:|$))/i);
+    if (informMatch && informMatch[1]) {
+        const lines = informMatch[1]
+            .split(/\r?\n/)
+            .map(l => l.trim())
+            .filter(l => l && !/^(?:배상|히타치|HITACHI|이상입니다)/i.test(l));
+        informNotes = lines.join('\n');
+    }
+
+    if (!workDetails) {
+        workDetails = fallbackContent || (typeof getDisplayContent === 'function' ? getDisplayContent(e) : '');
+    }
+
+    e._coreSections = {
+        workDetails: workDetails,
+        informNotes: informNotes,
+        topMailText: topMail
+    };
+    return e._coreSections;
+}
+
+/**
+ * 🎯 검색된 Error Code가 당일 최신 메일 요약에 없고 하위 RE 답장 쓰레드의 과거 일자에 있을 때, 해당 문맥 줄들을 발췌
+ */
+function extractEcContextFromThread(rawText, targetCodes, alreadyShownText) {
+    if (!rawText || !targetCodes || targetCodes.length === 0) return '';
+    const shownUpper = String(alreadyShownText || '').toUpperCase();
+    // 이미 당일 요약에 모든 타겟 에러코드가 표시되어 있으면 중복 생략
+    const missingCodes = targetCodes.filter(c => !shownUpper.includes(c));
+    if (missingCodes.length === 0) return '';
+
+    const lines = String(rawText).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const matchedSnippets = [];
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (/^(?:From|Sent|To|Cc|Subject)\s*:/i.test(line)) continue;
+        if (missingCodes.some(code => new RegExp('\\b' + code + '\\b').test(line))) {
+            if (!matchedSnippets.includes(line)) {
+                matchedSnippets.push(line);
+                // 바로 다음 줄이 조치 내용이면 함께 포함
+                if (i + 1 < lines.length && !/^(?:From|Sent|To|Cc|Subject|작업자|이상입니다|HITACHI)/i.test(lines[i + 1])) {
+                    const nextLine = lines[i + 1];
+                    if (nextLine.length > 3 && !matchedSnippets.includes(nextLine)) {
+                        matchedSnippets.push('  ↳ ' + nextLine);
+                    }
+                }
+            }
+            if (matchedSnippets.length >= 5) break;
+        }
+    }
+    return matchedSnippets.join('\n');
+}
+
+/** ⚡ 검색 인덱스 키 및 Error Code 태그 사전 생성 (메모리에 캐싱) */
+function prepareHistorySearchKeys(raw) {
+    if (!raw) return [];
+    return raw.filter(e => !e.isDeleted).map(e => {
+        if (!e._searchKey || !e._errorCodes) {
+            const disp = typeof getDisplayContent === 'function' ? getDisplayContent(e) : (e.content || '');
+            // 이메일 수신처 헤더(To:, Cc:)를 제거하여 이름 오탐 방지 및 본문 전체 검색 지원
+            const cleanedRaw = String(e.rawText || '')
+                .replace(/^(?:To|Cc|받는\s*사람|참조)\s*:.*$/gmi, '')
+                .replace(/<[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}>/g, '')
+                .replace(/\s+/g, ' ');
+
+            const coreSec = extractMailCoreSections(e);
+            const ownTextForEc = `${e.content || ''}\n${coreSec.topMailText || ''}`;
+            const ownEcMatches = extractErrorCodesWithDescFromText(ownTextForEc);
+            e._ownErrorCodes = Array.from(new Set(ownEcMatches.map(x => x.code)));
+
+            const fullTextForEc = `${e.content || ''}\n${e.rawText || ''}`;
+            const ecMatches = extractErrorCodesWithDescFromText(fullTextForEc);
+            const uniqueCodes = Array.from(new Set(ecMatches.map(x => x.code)));
+            e._errorCodes = uniqueCodes;
+            e._ecMatchDetails = ecMatches;
+
+            const ecSearchTokens = uniqueCodes.map(c => `ec${c} e/c${c} ${c} ${KNOWN_EC_DESCRIPTIONS[c] || ''}`).join(' ');
+            e._searchKey = `${e.machine || ''} ${e.line || ''} ${e.date || ''} ${e.worker || ''} ${e.sn || ''} ${e.content || ''} ${disp} ${ecSearchTokens} ${cleanedRaw}`.toLowerCase();
+        }
+        return e;
+    });
+}
+
+/**
+ * 📚 확장된 이력 목록으로부터 Error Code 트러블슈팅 도감(Directory) 데이터 생성
+ */
+function buildErrorCodeDirectory(expandedList) {
+    const codeMap = new Map();
+    const descCounterMap = new Map();
+
+    (expandedList || []).forEach(e => {
+        if (e.isDeleted) return;
+        const codes = e._errorCodes || [];
+        const details = e._ecMatchDetails || [];
+        const machine = (e.machine || '미상').trim().toUpperCase();
+        const dateStr = parseEntryDate(e.date, e.savedAt);
+
+        details.forEach(({ code, desc }) => {
+            if (desc) {
+                if (!descCounterMap.has(code)) descCounterMap.set(code, new Map());
+                const dMap = descCounterMap.get(code);
+                dMap.set(desc, (dMap.get(desc) || 0) + 1);
+            }
+        });
+
+        codes.forEach(code => {
+            if (!codeMap.has(code)) {
+                codeMap.set(code, {
+                    code: code,
+                    count: 0,
+                    machines: new Map(),
+                    latestDate: '00000000',
+                    latestDateFormatted: e.date || ''
+                });
+            }
+            const item = codeMap.get(code);
+            item.count++;
+            if (machine && machine !== '미상') {
+                item.machines.set(machine, (item.machines.get(machine) || 0) + 1);
+            }
+            if (dateStr > item.latestDate) {
+                item.latestDate = dateStr;
+                item.latestDateFormatted = e.date || '';
+            }
+        });
+    });
+
+    const directory = [];
+    const descLookup = {};
+
+    codeMap.forEach((item, code) => {
+        let bestDesc = KNOWN_EC_DESCRIPTIONS[code] || '';
+        if (descCounterMap.has(code)) {
+            let maxCnt = 0;
+            descCounterMap.get(code).forEach((cnt, d) => {
+                // 표준 사전에 없을 때 가장 빈도가 높고 의미 있는 설명 채택
+                if (!bestDesc && cnt > maxCnt) {
+                    maxCnt = cnt;
+                    bestDesc = d;
+                }
+            });
+        }
+        descLookup[code] = bestDesc;
+        const sortedMachines = Array.from(item.machines.entries())
+            .sort((a, b) => b[1] - a[1])
+            .map(([mName, mCnt]) => ({ name: mName, count: mCnt }));
+
+        directory.push({
+            code: code,
+            count: item.count,
+            description: bestDesc,
+            machines: sortedMachines,
+            latestDate: item.latestDate,
+            latestDateFormatted: item.latestDateFormatted
+        });
+    });
+
+    cachedEcDescMap = descLookup;
+    cachedEcDirectory = directory;
+    return directory;
+}
+
+/** 🔍 Error Code 전용 검색창 입력 핸들러 */
+function onEcDedicatedSearchInput(val) {
+    const clearBtn = document.getElementById('ecDedicatedClearBtn');
+    if (clearBtn) {
+        if (val && val.trim()) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+    }
+    // 전용 검색창에 직접 타이핑할 때 기존 단일 칩 선택이 입력값과 다르면 자동 해제하여 유연한 검색 유도
+    const cleanVal = String(val || '').replace(/^(?:E\s*\/\s*C|EC)\s*[:：\-]?\s*/i, '').trim();
+    if (selectedHistoryEc && cleanVal && selectedHistoryEc !== cleanVal) {
+        selectedHistoryEc = null;
+    }
+    historyDisplayLimit = 50;
     if (historySearchDebounceTimer) clearTimeout(historySearchDebounceTimer);
     historySearchDebounceTimer = setTimeout(() => {
         renderHistory();
-    }, 300);
+    }, 200);
+}
+
+/** 🔍 Error Code 전용 검색창 초기화 */
+function clearEcDedicatedSearch() {
+    const inp = document.getElementById('ecDedicatedInput');
+    if (inp) inp.value = '';
+    const clearBtn = document.getElementById('ecDedicatedClearBtn');
+    if (clearBtn) clearBtn.classList.add('hidden');
+    selectedHistoryEc = null;
+    historyDisplayLimit = 50;
+    renderHistory();
+}
+
+/** 🎯 도감 또는 카드 배지에서 특정 Error Code 클릭 선택/해제 */
+function selectHistoryErrorCode(code) {
+    const targetCode = String(code || '').trim();
+    if (!targetCode) return;
+    if (selectedHistoryEc === targetCode) {
+        selectedHistoryEc = null;
+    } else {
+        selectedHistoryEc = targetCode;
+    }
+    historyDisplayLimit = 50;
+    renderHistory();
+}
+
+/** 📊 Error Code 도감 정렬 기준 변경 ('freq' | 'code') */
+function setEcDirectorySort(mode) {
+    ecDirectorySortMode = mode;
+    const freqBtn = document.getElementById('ecSortFreqBtn');
+    const codeBtn = document.getElementById('ecSortCodeBtn');
+    if (freqBtn && codeBtn) {
+        if (mode === 'freq') {
+            freqBtn.className = 'px-2.5 py-1 font-bold rounded transition-all bg-primary text-white';
+            codeBtn.className = 'px-2.5 py-1 font-bold rounded transition-all text-text-muted hover:text-text-main';
+        } else {
+            codeBtn.className = 'px-2.5 py-1 font-bold rounded transition-all bg-primary text-white';
+            freqBtn.className = 'px-2.5 py-1 font-bold rounded transition-all text-text-muted hover:text-text-main';
+        }
+    }
+    renderEcDirectorySection();
+}
+
+/** 📂 Error Code 도감 전체 펼치기 / 접기 토글 */
+function toggleEcDirectoryExpand() {
+    isEcDirectoryExpanded = !isEcDirectoryExpanded;
+    renderEcDirectorySection();
+}
+
+/** 🔍 설비호기 검색 필터 입력 핸들러 */
+function onHistEquipFilterInput(val) {
+    const clearBtn = document.getElementById('histEquipClearBtn');
+    if (clearBtn) {
+        if (val && val.trim()) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+    }
+    historyDisplayLimit = 50;
+    if (historySearchDebounceTimer) clearTimeout(historySearchDebounceTimer);
+    historySearchDebounceTimer = setTimeout(() => {
+        renderHistory();
+    }, 200);
+}
+
+/** 🔍 설비호기 검색 필터만 초기화 */
+function clearHistEquipFilter() {
+    const inp = document.getElementById('histEquipInput');
+    if (inp) inp.value = '';
+    const clearBtn = document.getElementById('histEquipClearBtn');
+    if (clearBtn) clearBtn.classList.add('hidden');
+    historyDisplayLimit = 50;
+    renderHistory();
+}
+
+/** 🎯 특정 설비호기명으로 즉시 필터링 (카드 내 호기 배지 클릭 시) */
+function filterHistoryByMachine(machineName) {
+    const m = String(machineName || '').trim();
+    if (!m || m === '미상') return;
+    const inp = document.getElementById('histEquipInput');
+    const clearBtn = document.getElementById('histEquipClearBtn');
+    if (inp) {
+        if (inp.value.trim().toUpperCase() === m.toUpperCase()) {
+            inp.value = '';
+            if (clearBtn) clearBtn.classList.add('hidden');
+        } else {
+            inp.value = m;
+            if (clearBtn) clearBtn.classList.remove('hidden');
+        }
+    }
+    historyDisplayLimit = 50;
+    renderHistory();
+}
+
+/** 🚀 작업 이력 카드에서 Management 탭의 설비 상세페이지로 즉시 이동 */
+function openEquipDetailByMachine(machineName, sn) {
+    const data = JSON.parse(localStorage.getItem('equipmentData') || '[]');
+    const cleanM = String(machineName || '').trim().toUpperCase();
+    const cleanSn = String(sn || '').trim().toUpperCase();
+
+    let found = null;
+    if (cleanSn && cleanSn !== '미상') {
+        found = data.find(d => String(d.sn || '').trim().toUpperCase() === cleanSn);
+    }
+    if (!found && cleanM && cleanM !== '미상') {
+        found = data.find(d => String(d.name || '').trim().toUpperCase() === cleanM);
+    }
+
+    if (found && found.sn) {
+        openEquipDetail(found.sn);
+    } else {
+        showToast('설비호기 필터 적용', `[${machineName}] 마스터 상세정보가 없어 해당 호기 이력을 나열합니다.`);
+        filterHistoryByMachine(machineName);
+    }
+}
+
+/** 🔍 작업내용 키워드 검색창 디바운스 입력 핸들러 */
+function onHistorySearchInput(val) {
+    const clearBtn = document.getElementById('historySearchClearBtn');
+    if (clearBtn) {
+        if (val && val.trim()) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+    }
+    historyDisplayLimit = 50;
+    if (historySearchDebounceTimer) clearTimeout(historySearchDebounceTimer);
+    historySearchDebounceTimer = setTimeout(() => {
+        renderHistory();
+    }, 250);
+}
+
+/** 🔍 작업내용 키워드 검색창만 초기화 */
+function clearHistoryKeywordOnly() {
+    const inp = document.getElementById('historySearch');
+    if (inp) inp.value = '';
+    const clearBtn = document.getElementById('historySearchClearBtn');
+    if (clearBtn) clearBtn.classList.add('hidden');
+    historyDisplayLimit = 50;
+    renderHistory();
 }
 
 /** 🔍 Enter 키 즉시 검색 */
 function executeHistorySearch(val) {
     if (historySearchDebounceTimer) clearTimeout(historySearchDebounceTimer);
+    historyDisplayLimit = 50;
     renderHistory();
 }
 
-/** 🔍 검색어 초기화 및 기본 뷰 복귀 */
+/** 🔍 모든 검색어 및 필터 조건 일괄 초기화 */
 function clearHistorySearch() {
-    const inp = document.getElementById("historySearch");
-    if (inp) inp.value = "";
-    const clearBtn = document.getElementById("historySearchClearBtn");
-    if (clearBtn) clearBtn.classList.add("hidden");
+    selectedHistoryEc = null;
+    selectedChip = null;
+    historyDisplayLimit = 50;
+
+    const kwInp = document.getElementById('historySearch');
+    if (kwInp) kwInp.value = '';
+    document.getElementById('historySearchClearBtn')?.classList.add('hidden');
+
+    const eqInp = document.getElementById('histEquipInput');
+    if (eqInp) eqInp.value = '';
+    document.getElementById('histEquipClearBtn')?.classList.add('hidden');
+
+    const ecInp = document.getElementById('ecDedicatedInput');
+    if (ecInp) ecInp.value = '';
+    document.getElementById('ecDedicatedClearBtn')?.classList.add('hidden');
+
+    const lineSel = document.getElementById('histLineSelect');
+    if (lineSel) lineSel.value = 'ALL';
+
     renderHistory();
 }
 
@@ -8425,560 +9004,739 @@ function cancelPendingHistorySearch() {
     currentSearchToken++;
 }
 
-/** 🎯 검색 결과 카드에서 해당 설비의 전체 타임라인으로 바로 점프 */
+/** 🎯 하위 호환성 유지: 검색 결과에서 해당 설비 이력 필터링 */
 function jumpToEquipTimeline(machineName) {
-    clearHistorySearch();
-    selectedChip = machineName;
-    renderHistory();
-    setTimeout(() => {
-        const chipsWrap = document.getElementById("historyEquipChips");
-        const targetChip = chipsWrap?.querySelector(`button[data-machine="${machineName}"]`);
-        if (targetChip) {
-            selectHistoryEquipChip(machineName, targetChip);
-            targetChip.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-    }, 60);
+    filterHistoryByMachine(machineName);
 }
 
-/** ⚡ 설비 칩 초고속 즉각 전환 (DOM 재생성 없이 타임라인만 부분 렌더링) */
+/** ⚡ 하위 호환성 유지 */
 function selectHistoryEquipChip(machineName, targetChipEl) {
-    selectedChip = machineName;
-    const chipsWrap = document.getElementById("historyEquipChips");
-    if (chipsWrap) {
-        chipsWrap.querySelectorAll("button[data-machine]").forEach(btn => {
-            const isTarget = btn.getAttribute("data-machine") === machineName;
-            btn.className = `px-4 py-2 text-xs font-bold uppercase tracking-widest border transition-all flex items-center gap-2 rounded ${isTarget ? "bg-primary text-white border-primary" : "bg-surface/50 text-text-muted border-border hover:border-primary hover:text-primary"}`;
-            const badge = btn.querySelector(".badge-count");
-            if (badge) {
-                badge.className = `ml-1 ${isTarget ? "bg-surface text-primary" : "bg-background text-text-muted"} text-[9px] font-black px-1.5 py-0.5 rounded badge-count`;
-            }
-        });
-    }
-    const sortOrder = document.getElementById("historySortOrder")?.value || "desc";
-    renderHistoryTimeline(sortOrder);
+    filterHistoryByMachine(machineName);
 }
 
-/** ⚡ 검색 인덱스 키 사전 생성 (한 번만 계산하여 메모리에 보관) */
-function prepareHistorySearchKeys(raw) {
-    if (!raw) return [];
-    return raw.filter(e => !e.isDeleted).map(e => {
-        if (!e._searchKey) {
-            const disp = typeof getDisplayContent === "function" ? getDisplayContent(e) : (e.content || "");
-            const rawHead = (e.rawText || "").substring(0, 400).replace(/\s+/g, " ");
-            e._searchKey = `${e.machine || ""} ${e.line || ""} ${e.date || ""} ${e.worker || ""} ${e.content || ""} ${disp} ${rawHead}`.toLowerCase();
-        }
-        return e;
+/** ➕ 검색 결과 더보기 (+50건) */
+function loadMoreHistoryResults() {
+    historyDisplayLimit += 50;
+    renderHistoryResultsOnly();
+}
+
+/**
+ * 🖍️ 텍스트 내 검색 키워드 및 Error Code 형광펜 하이라이트
+ */
+function highlightHistoryText(text, highlightTerms = []) {
+    let safe = escapeHtml(text || '');
+    if (!safe) return '';
+
+    // 1. E/C 표기 구문 강조
+    safe = safe.replace(
+        /((?:E\s*\/\s*C|E\.C\.?|Error\s*Code|에러\s*코드|\bEC)\s*[:：=\-]?\s*(?:#|No\.?\s*)?[0-9]{3,6}(?:\s*[,\/]\s*[0-9]{3,6})*)/gi,
+        '<span class="text-red-600 dark:text-red-400 font-black bg-red-500/10 px-1 rounded">$1</span>'
+    );
+
+    // 2. 사용자 검색어 및 선택된 에러코드 하이라이트
+    const validTerms = Array.from(new Set(
+        (highlightTerms || [])
+            .map(t => String(t || '').trim())
+            .filter(t => t.length >= 2)
+    ));
+
+    validTerms.forEach(term => {
+        const escTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        try {
+            const reg = new RegExp(`(${escTerm})(?![^<]*>)`, 'gi');
+            safe = safe.replace(reg, '<mark class="bg-amber-300/70 dark:bg-amber-500/40 text-text-main font-black px-0.5 rounded">$1</mark>');
+        } catch (_) {}
     });
+
+    return safe;
 }
 
-/** 📋 검색 전용 결과 뷰 렌더링 (대용량 비차단 전용 뷰) */
-function renderSearchResults(searchVal, sortOrder) {
-    const searchWrap = document.getElementById("historySearchResultsWrap");
-    const emptyEl = document.getElementById("historyEmpty");
-    const emptyText = document.getElementById("historyEmptyText");
+/**
+ * 🚨 상단 Error Code 트러블슈팅 도감 섹션 렌더링
+ */
+function renderEcDirectorySection() {
+    const grid = document.getElementById('ecDirectoryGrid');
+    const totalBadge = document.getElementById('ecTotalCountBadge');
+    const banner = document.getElementById('ecSelectedDetailBanner');
+    const moreNotice = document.getElementById('ecDirectoryMoreNotice');
+    const moreText = document.getElementById('ecDirectoryMoreText');
+    const expandBtnText = document.getElementById('ecExpandToggleText');
+    const expandBtnIcon = document.getElementById('ecExpandToggleIcon');
+    if (!grid) return;
+
+    const directory = cachedEcDirectory || [];
+    if (totalBadge) totalBadge.textContent = `총 ${directory.length}종`;
+
+    const rawEcQuery = (document.getElementById('ecDedicatedInput')?.value || '').trim().toLowerCase();
+    const cleanEcQuery = rawEcQuery.replace(/^(?:e\s*\/\s*c|ec|error\s*code|에러\s*코드)\s*[:：=\-]?\s*/i, '').trim();
+
+    // 정렬 적용
+    const sorted = directory.slice().sort((a, b) => {
+        if (ecDirectorySortMode === 'code') {
+            return Number(a.code) - Number(b.code) || a.code.localeCompare(b.code);
+        }
+        if (b.count !== a.count) return b.count - a.count;
+        return Number(a.code) - Number(b.code);
+    });
+
+    // 전용 검색창 필터링
+    const filteredCodes = cleanEcQuery
+        ? sorted.filter(item => item.code.toLowerCase().includes(cleanEcQuery) || (item.description || '').toLowerCase().includes(cleanEcQuery))
+        : sorted;
+
+    // 선택된 Error Code 상세 요약 배너 표시
+    const activeEcObj = selectedHistoryEc
+        ? directory.find(d => d.code === selectedHistoryEc)
+        : (cleanEcQuery && filteredCodes.length === 1 && filteredCodes[0].code === cleanEcQuery ? filteredCodes[0] : null);
+
+    if (banner) {
+        if (activeEcObj) {
+            const topMachinesHtml = activeEcObj.machines.slice(0, 8).map(m => `
+                <button type="button" onclick="filterHistoryByMachine('${escapeHtml(m.name)}')" class="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-surface border border-border hover:border-primary hover:text-primary transition-all" title="${escapeHtml(m.name)} 호기 이력만 필터링">
+                    ${escapeHtml(m.name)} <span class="text-primary">(${m.count})</span>
+                </button>
+            `).join('');
+
+            banner.classList.remove('hidden');
+            banner.innerHTML = `
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div class="space-y-1">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="bg-red-600 text-white text-xs font-black px-2.5 py-1 rounded flex items-center gap-1 shadow-xs">
+                                <span class="material-symbols-outlined text-sm">error</span>
+                                E/C ${escapeHtml(activeEcObj.code)}
+                            </span>
+                            <span class="text-sm font-black text-text-main">
+                                ${escapeHtml(activeEcObj.description || '메일 원문 내 등록된 영문 에러 설명 없음')}
+                            </span>
+                            <span class="text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded">
+                                총 ${activeEcObj.count}건 이력
+                            </span>
+                        </div>
+                        <div class="flex items-center gap-1.5 flex-wrap pt-1">
+                            <span class="text-[11px] font-bold text-text-muted mr-1">발생 설비호기 (클릭 시 호기 필터):</span>
+                            ${topMachinesHtml || '<span class="text-xs text-text-muted">미상</span>'}
+                        </div>
+                    </div>
+                    <button type="button" onclick="clearEcDedicatedSearch()" class="btn-text h-8 px-3 border border-primary/40 bg-surface text-primary hover:bg-primary hover:text-white rounded text-xs font-bold shrink-0 self-start md:self-center">
+                        <span class="material-symbols-outlined text-sm">close</span> 에러코드 선택 해제
+                    </button>
+                </div>
+            `;
+        } else {
+            banner.classList.add('hidden');
+            banner.innerHTML = '';
+        }
+    }
+
+    if (filteredCodes.length === 0) {
+        grid.innerHTML = `
+            <div class="col-span-full py-6 text-center text-xs text-text-muted">
+                입력하신 <b class="text-primary">"${escapeHtml(rawEcQuery)}"</b> 조건과 일치하는 Error Code가 도감에 없습니다. (하단 이력 본문 검색은 계속 수행됩니다)
+            </div>
+        `;
+        if (moreNotice) moreNotice.classList.add('hidden');
+        return;
+    }
+
+    const COLLAPSED_COUNT = 16;
+    const showAll = isEcDirectoryExpanded || Boolean(cleanEcQuery);
+    const visibleCodes = showAll ? filteredCodes : filteredCodes.slice(0, COLLAPSED_COUNT);
+
+    if (expandBtnText && expandBtnIcon) {
+        expandBtnText.textContent = isEcDirectoryExpanded ? '도감 접기' : `전체 코드 펼치기 (${directory.length}종)`;
+        expandBtnIcon.textContent = isEcDirectoryExpanded ? 'expand_less' : 'expand_more';
+    }
+
+    if (moreNotice && moreText) {
+        if (!showAll && filteredCodes.length > COLLAPSED_COUNT) {
+            moreNotice.classList.remove('hidden');
+            moreText.textContent = `나머지 ${filteredCodes.length - COLLAPSED_COUNT}종 에러코드 모두 펼치기 (총 ${filteredCodes.length}종)`;
+        } else {
+            moreNotice.classList.add('hidden');
+        }
+    }
+
+    grid.innerHTML = visibleCodes.map(item => {
+        const isSelected = selectedHistoryEc === item.code || (cleanEcQuery && item.code === cleanEcQuery);
+        const descText = item.description || '상세 조치 이력 클릭 조회';
+        const equipPreview = item.machines.slice(0, 2).map(m => m.name).join(', ');
+        return `
+            <button type="button" onclick="selectHistoryErrorCode('${escapeHtml(item.code)}')"
+                class="text-left p-2.5 rounded-md border transition-all flex flex-col justify-between gap-1 group ${
+                    isSelected
+                        ? 'bg-primary/15 border-primary ring-2 ring-primary/30 shadow-xs'
+                        : 'bg-surface border-border hover:border-primary/60 hover:bg-background/60'
+                }">
+                <div class="flex items-center justify-between gap-2 w-full">
+                    <span class="font-mono text-xs font-black px-2 py-0.5 rounded ${
+                        isSelected
+                            ? 'bg-primary text-white'
+                            : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 group-hover:bg-primary group-hover:text-white group-hover:border-primary'
+                    } transition-colors">
+                        E/C ${escapeHtml(item.code)}
+                    </span>
+                    <div class="flex items-center gap-1.5">
+                        ${equipPreview ? `<span class="text-[10px] font-mono text-text-muted truncate max-w-[90px]">${escapeHtml(equipPreview)}</span>` : ''}
+                        <span class="text-[11px] font-black ${isSelected ? 'text-primary' : 'text-text-main'} bg-background px-1.5 py-0.5 rounded border border-border/60">
+                            ${item.count}건
+                        </span>
+                    </div>
+                </div>
+                <p class="text-[11px] ${item.description ? 'text-text-main font-medium' : 'text-text-muted'} truncate w-full mt-0.5" title="${escapeHtml(descText)}">
+                    ${escapeHtml(descText)}
+                </p>
+            </button>
+        `;
+    }).join('');
+}
+
+/**
+ * 📋 단일 또는 연속 대응 작업 이력 카드의 핵심 [작업내용] 및 [인폼사항] 블록 HTML 생성
+ */
+function buildEntrySummaryBoxHtml(e, highlightTerms, activeEcCodes) {
+    const sections = extractMailCoreSections(e);
+    const workDetails = sections.workDetails || '';
+    const informNotes = sections.informNotes || '';
+    const ecSnippet = extractEcContextFromThread(e.rawText, activeEcCodes, `${workDetails}\n${informNotes}`);
+
+    let html = '';
+    if (workDetails) {
+        html += `
+            <div class="mt-2.5 p-3 bg-background/70 border border-border/80 rounded-md">
+                <div class="text-[11px] font-black text-primary mb-1 flex items-center gap-1">
+                    <span class="material-symbols-outlined text-xs">build</span> 작업 및 점검 내용
+                </div>
+                <div class="text-xs text-text-main leading-relaxed whitespace-pre-wrap font-medium">${highlightHistoryText(workDetails, highlightTerms)}</div>
+            </div>
+        `;
+    }
+    if (informNotes) {
+        html += `
+            <div class="mt-2 p-3 bg-amber-500/5 border border-amber-500/30 rounded-md">
+                <div class="text-[11px] font-black text-amber-600 dark:text-amber-400 mb-1 flex items-center gap-1">
+                    <span class="material-symbols-outlined text-xs">tips_and_updates</span> 인폼사항 및 조치 결과 요약
+                </div>
+                <div class="text-xs text-text-main leading-relaxed whitespace-pre-wrap">${highlightHistoryText(informNotes, highlightTerms)}</div>
+            </div>
+        `;
+    }
+    if (ecSnippet) {
+        html += `
+            <div class="mt-2 p-2.5 bg-red-500/5 border border-red-500/30 rounded-md">
+                <div class="text-[11px] font-black text-red-600 dark:text-red-400 mb-1 flex items-center gap-1">
+                    <span class="material-symbols-outlined text-xs">find_in_page</span> 하위 쓰레드 내 Error Code 관련 기록 발췌
+                </div>
+                <div class="text-xs text-text-main leading-relaxed whitespace-pre-wrap font-mono">${highlightHistoryText(ecSnippet, highlightTerms)}</div>
+            </div>
+        `;
+    }
+    return html;
+}
+
+/**
+ * 📋 다중 필터가 적용된 작업 이력 결과 리스트 렌더링
+ */
+function renderHistoryResultsOnly() {
+    const searchWrap = document.getElementById('historySearchResultsWrap');
+    const emptyEl = document.getElementById('historyEmpty');
+    const emptyText = document.getElementById('historyEmptyText');
     if (!searchWrap) return;
 
-    searchWrap.innerHTML = "";
-    const raw = cachedRawHistory || [];
-    prepareHistorySearchKeys(raw);
+    const sortOrder = document.getElementById('historySortOrder')?.value || 'desc';
+    const kwVal = (document.getElementById('historySearch')?.value || '').trim();
+    const equipVal = (document.getElementById('histEquipInput')?.value || '').trim();
+    const lineVal = document.getElementById('histLineSelect')?.value || 'ALL';
+    const rawEcInput = (document.getElementById('ecDedicatedInput')?.value || '').trim();
+    const cleanEcInput = rawEcInput.replace(/^(?:e\s*\/\s*c|ec|error\s*code|에러\s*코드)\s*[:：=\-]?\s*/i, '').trim().toLowerCase();
 
-    const query = searchVal.trim().toLowerCase();
-    const queryTokens = query.split(/\s+/).filter(t => t.length > 0);
+    const expandedList = cachedExpandedHistory || [];
+    const kwTokens = kwVal.toLowerCase().split(/\s+/).filter(Boolean);
+    const equipUpper = equipVal.toUpperCase();
 
-    const matched = raw.filter(e => {
+    // 필터링 수행
+    const matched = expandedList.filter(e => {
         if (e.isDeleted) return false;
-        const key = e._searchKey || "";
-        return queryTokens.every(token => key.includes(token));
+
+        // 1. 라인 필터
+        if (lineVal !== 'ALL' && (e.line || '') !== lineVal) return false;
+
+        // 2. 설비호기 필터
+        if (equipUpper) {
+            const mName = String(e.machine || '').toUpperCase();
+            const mSn = String(e.sn || '').toUpperCase();
+            if (!mName.includes(equipUpper) && !mSn.includes(equipUpper)) return false;
+        }
+
+        // 3. Error Code 필터 (도감 칩 선택 또는 전용 검색창 입력)
+        const entryCodes = e._errorCodes || [];
+        if (selectedHistoryEc) {
+            if (!entryCodes.includes(selectedHistoryEc)) return false;
+        } else if (cleanEcInput) {
+            const hasCodeMatch = entryCodes.some(c => {
+                const desc = (cachedEcDescMap && cachedEcDescMap[c]) || KNOWN_EC_DESCRIPTIONS[c] || '';
+                return c.toLowerCase().includes(cleanEcInput) || desc.toLowerCase().includes(cleanEcInput);
+            });
+            const hasRawEcMatch = (e._searchKey || '').includes(cleanEcInput) && entryCodes.length > 0;
+            if (!hasCodeMatch && !hasRawEcMatch) return false;
+        }
+
+        // 4. 작업내용 / 키워드 필터
+        if (kwTokens.length > 0) {
+            const key = e._searchKey || '';
+            if (!kwTokens.every(t => key.includes(t))) return false;
+        }
+
+        return true;
     });
 
+    searchWrap.innerHTML = '';
+
+    const hasAnyFilter = Boolean(selectedHistoryEc || cleanEcInput || equipVal || kwVal || lineVal !== 'ALL');
+
     if (matched.length === 0) {
-        searchWrap.classList.add("hidden");
+        searchWrap.classList.add('hidden');
         if (emptyEl) {
-            emptyEl.classList.remove("hidden");
-            if (emptyText) emptyText.textContent = `"${searchVal}" 검색어와 일치하는 작업 이력이 없습니다.`;
+            emptyEl.classList.remove('hidden');
+            if (emptyText) {
+                emptyText.textContent = hasAnyFilter
+                    ? '선택하신 검색 조건(Error Code / 설비호기 / 작업내용)과 일치하는 작업 이력이 없습니다.'
+                    : '등록된 작업 이력이 없습니다.';
+            }
         }
         return;
     }
 
-    if (emptyEl) emptyEl.classList.add("hidden");
-    searchWrap.classList.remove("hidden");
+    if (emptyEl) emptyEl.classList.add('hidden');
+    searchWrap.classList.remove('hidden');
 
+    // 날짜순 정렬
     matched.sort((a, b) => {
         const dateA = parseEntryDate(a.date, a.savedAt);
         const dateB = parseEntryDate(b.date, b.savedAt);
         if (dateA !== dateB) {
-            return sortOrder === "desc" ? dateB.localeCompare(dateA) : dateA.localeCompare(dateB);
+            return sortOrder === 'desc' ? dateB.localeCompare(dateA) : dateA.localeCompare(dateB);
         }
         const sa = new Date(a.savedAt || a.updatedAt || 0).getTime();
         const sb = new Date(b.savedAt || b.updatedAt || 0).getTime();
-        return sortOrder === "desc" ? sb - sa : sa - sb;
+        return sortOrder === 'desc' ? sb - sa : sa - sb;
     });
 
-    const headerCard = document.createElement("div");
-    headerCard.className = "card-base p-4 rounded-md flex justify-between items-center bg-background/50 border border-border flex-wrap gap-2";
+    // 쓰레드 묶기 적용 여부
+    const groupedItems = isHistoryThreadMode
+        ? groupEntriesByThread(matched)
+        : matched.map(e => ({
+            isThread: false,
+            title: typeof getDisplayContent === 'function' ? getDisplayContent(e) : (e.content || '—'),
+            entries: [e],
+            count: 1,
+            machine: e.machine || '미상',
+            line: e.line || '미상',
+            errorCodes: e._errorCodes || []
+        }));
+
+    // 하이라이트할 검색어 목록 구성
+    const activeEcCodes = [];
+    if (selectedHistoryEc) activeEcCodes.push(selectedHistoryEc);
+    else if (cleanEcInput) activeEcCodes.push(cleanEcInput);
+    const highlightTerms = [...activeEcCodes, ...kwTokens];
+    if (equipVal) highlightTerms.push(equipVal);
+
+    // 활성 필터 배지 생성
+    const filterBadges = [];
+    if (selectedHistoryEc) {
+        filterBadges.push(`<span class="px-2 py-0.5 rounded bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 text-xs font-black">🚨 E/C ${escapeHtml(selectedHistoryEc)}</span>`);
+    } else if (rawEcInput) {
+        filterBadges.push(`<span class="px-2 py-0.5 rounded bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30 text-xs font-black">🚨 E/C 검색: ${escapeHtml(rawEcInput)}</span>`);
+    }
+    if (equipVal) {
+        filterBadges.push(`<span class="px-2 py-0.5 rounded bg-primary/15 text-primary border border-primary/30 text-xs font-black">설비: ${escapeHtml(equipVal)}</span>`);
+    }
+    if (lineVal !== 'ALL') {
+        filterBadges.push(`<span class="px-2 py-0.5 rounded bg-surface border border-border text-text-main text-xs font-bold">라인: ${escapeHtml(lineVal)}</span>`);
+    }
+    if (kwVal) {
+        filterBadges.push(`<span class="px-2 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-xs font-bold">키워드: "${escapeHtml(kwVal)}"</span>`);
+    }
+
+    // 결과 요약 헤더 바
+    const headerCard = document.createElement('div');
+    headerCard.className = 'card-base px-5 py-3.5 rounded-lg flex justify-between items-center bg-background/60 border border-border flex-wrap gap-2';
     headerCard.innerHTML = `
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 flex-wrap">
             <span class="material-symbols-outlined text-primary text-xl">manage_search</span>
             <span class="text-sm font-bold text-text-main">
-                검색 결과 <span class="text-primary font-black">${matched.length}건</span>
-                <span class="text-xs text-text-muted ml-1 font-normal">(검색어: "${escapeHtml(searchVal)}")</span>
+                ${hasAnyFilter ? '검색된 작업 이력' : '전체 작업 이력'}
+                <span class="text-primary font-black ml-1">${matched.length.toLocaleString()}건</span>
+                ${isHistoryThreadMode ? `<span class="text-xs text-text-muted font-normal ml-1">(연속 대응 묶음 ${groupedItems.length.toLocaleString()}건)</span>` : ''}
             </span>
+            ${filterBadges.join('')}
         </div>
-        <button onclick="clearHistorySearch()" class="btn-text h-8 px-3 border border-border bg-surface hover:border-primary hover:text-primary rounded text-xs font-bold flex items-center gap-1">
-            <span class="material-symbols-outlined text-sm">arrow_back</span> 전체 설비 목록으로 복귀
-        </button>
+        <div class="text-xs text-text-muted flex items-center gap-2">
+            <span>💡 호기명 클릭 시 해당 호기 필터 · E/C 배지 클릭 시 에러코드 필터</span>
+        </div>
     `;
     searchWrap.appendChild(headerCard);
 
-    const listWrap = document.createElement("div");
-    listWrap.className = "flex flex-col gap-3";
+    const listWrap = document.createElement('div');
+    listWrap.className = 'flex flex-col gap-3.5';
 
-    const DISPLAY_LIMIT = 100;
-    const displayItems = matched.slice(0, DISPLAY_LIMIT);
+    const displayGroups = groupedItems.slice(0, historyDisplayLimit);
 
-    displayItems.forEach((e) => {
-        const card = document.createElement("div");
-        card.className = "card-base p-5 rounded-md border border-border hover:border-primary/50 transition-all shadow-sm";
-        card.style.contentVisibility = "auto";
-        card.style.containIntrinsicSize = "0 100px";
+    displayGroups.forEach((group, idx) => {
+        const mainE = group.entries[0];
+        const oldestE = group.entries[group.entries.length - 1];
+        const savedDate = new Date(mainE.savedAt || Date.now());
+        const savedStr = `${savedDate.getFullYear()}.${savedDate.getMonth() + 1}.${savedDate.getDate()} ${savedDate.getHours()}:${String(savedDate.getMinutes()).padStart(2, '0')}`;
 
-        const dispTitle = typeof getDisplayContent === "function" ? getDisplayContent(e) : (e.content || "—");
-        const dateStr = e.date || (e.savedAt ? e.savedAt.substring(0, 10) : "날짜 미상");
-        const lineStr = e.line || "미분류";
-        const machineStr = e.machine || "미상";
-        const workerStr = e.worker || "미상";
+        const machineStr = group.machine || mainE.machine || '미상';
+        const lineStr = group.line || mainE.line || '미분류';
+        const dispTitle = group.title || (typeof getDisplayContent === 'function' ? getDisplayContent(mainE) : (mainE.content || '—'));
 
-        card.innerHTML = `
-            <div class="flex justify-between items-start flex-wrap gap-2 mb-2">
-                <div class="flex items-center gap-2 flex-wrap">
-                    <span class="bg-primary text-white text-xs font-black px-2.5 py-1 rounded cursor-pointer hover:opacity-90" onclick="jumpToEquipTimeline('${escapeHtml(machineStr)}')" title="해당 설비 타임라인으로 이동">
-                        ${escapeHtml(machineStr)}
-                    </span>
-                    <span class="bg-surface border border-border text-text-muted text-[11px] font-bold px-2 py-0.5 rounded">
-                        ${escapeHtml(lineStr)}
-                    </span>
-                    <span class="text-xs font-bold text-text-main flex items-center gap-1">
-                        <span class="material-symbols-outlined text-sm text-text-muted">calendar_today</span>
-                        ${escapeHtml(dateStr)}
-                    </span>
-                    <span class="text-xs text-text-muted flex items-center gap-1">
-                        <span class="material-symbols-outlined text-sm">person</span>
-                        ${escapeHtml(workerStr)}
-                    </span>
+        // 이 카드(또는 쓰레드 그룹)에 속한 모든 Error Code 배지 렌더링
+        const ecBadgesHtml = (group.errorCodes || []).map(code => {
+            const desc = (cachedEcDescMap && cachedEcDescMap[code]) || KNOWN_EC_DESCRIPTIONS[code] || '';
+            const isTargetEc = selectedHistoryEc === code || (cleanEcInput && code.toLowerCase().includes(cleanEcInput));
+            return `
+                <button type="button" onclick="selectHistoryErrorCode('${escapeHtml(code)}')"
+                    title="${escapeHtml(desc ? `E/C ${code}: ${desc}` : `E/C ${code} 이력만 필터링`)}"
+                    class="px-2 py-0.5 rounded text-[11px] font-mono font-black flex items-center gap-1 transition-all ${
+                        isTargetEc
+                            ? 'bg-red-600 text-white ring-2 ring-red-500/40'
+                            : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30 hover:bg-red-600 hover:text-white'
+                    }">
+                    <span class="material-symbols-outlined text-[13px]">bug_report</span>
+                    E/C ${escapeHtml(code)}
+                    ${desc ? `<span class="font-sans font-normal text-[10px] opacity-90 hidden sm:inline truncate max-w-[180px]">· ${escapeHtml(desc)}</span>` : ''}
+                </button>
+            `;
+        }).join('');
+
+        const card = document.createElement('div');
+        card.className = 'card-base p-5 rounded-lg border border-border hover:border-primary/50 transition-all shadow-xs';
+        card.style.contentVisibility = 'auto';
+        card.style.containIntrinsicSize = '0 140px';
+
+        if (!group.isThread) {
+            const dateStr = mainE.date || (mainE.savedAt ? mainE.savedAt.substring(0, 10) : '날짜 미상');
+            const workerStr = mainE.worker || '미상';
+            const rawDetailId = `hist_raw_${mainE.id}_${idx}`;
+            const summaryBoxHtml = buildEntrySummaryBoxHtml(mainE, highlightTerms, activeEcCodes);
+
+            card.innerHTML = `
+                <div class="flex justify-between items-start flex-wrap gap-2 pb-2.5 border-b border-border/60">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <button type="button" onclick="filterHistoryByMachine('${escapeHtml(machineStr)}')"
+                            class="bg-primary text-white text-xs font-black font-mono px-2.5 py-1 rounded hover:opacity-90 transition-opacity flex items-center gap-1"
+                            title="클릭 시 [${escapeHtml(machineStr)}] 호기 작업만 필터링">
+                            <span class="material-symbols-outlined text-xs">precision_manufacturing</span>
+                            ${escapeHtml(machineStr)}
+                        </button>
+                        <span class="bg-surface border border-border text-text-muted text-[11px] font-bold px-2 py-0.5 rounded">
+                            ${escapeHtml(lineStr)}
+                        </span>
+                        <span class="text-xs font-black text-text-main flex items-center gap-1 font-mono">
+                            <span class="material-symbols-outlined text-sm text-primary">calendar_today</span>
+                            ${escapeHtml(dateStr)}
+                        </span>
+                        <span class="text-xs text-text-muted flex items-center gap-1">
+                            <span class="material-symbols-outlined text-sm">person</span>
+                            ${highlightHistoryText(workerStr, highlightTerms)}
+                        </span>
+                        ${ecBadgesHtml}
+                    </div>
+                    <div class="flex items-center gap-1.5 ml-auto">
+                        <button type="button" class="btn-text text-xs text-primary hover:underline flex items-center gap-0.5 font-bold px-2 py-1 rounded bg-primary/5 border border-primary/20"
+                            onclick="openEquipDetailByMachine('${escapeHtml(machineStr)}', '${escapeHtml(mainE.sn || '')}')" title="Management 설비호기 상세페이지로 이동">
+                            <span class="material-symbols-outlined text-sm">open_in_new</span> 설비 상세
+                        </button>
+                        <button type="button" class="btn-text text-xs text-text-muted hover:text-primary flex items-center gap-0.5 px-2 py-1 rounded border border-border bg-surface"
+                            onclick="handleMailGenClick(this)" data-eq="${escapeHtml(machineStr)}" data-content="${escapeHtml(dispTitle)}">
+                            <span class="material-symbols-outlined text-sm">forward_to_inbox</span> 메일 작성
+                        </button>
+                        <button type="button" class="btn-text text-text-muted hover:!text-red-500 p-1" onclick="deleteSingleHistory('${escapeHtml(mainE.id)}')" title="이 기록 삭제">
+                            <span class="material-symbols-outlined text-sm">delete</span>
+                        </button>
+                    </div>
                 </div>
-                <div class="flex items-center gap-2 ml-auto">
-                    <button class="btn-text text-xs text-primary hover:underline flex items-center gap-1 font-bold" onclick="jumpToEquipTimeline('${escapeHtml(machineStr)}')">
-                        <span class="material-symbols-outlined text-sm">timeline</span> 설비 타임라인
+
+                <div class="mt-3">
+                    <div class="text-sm font-black text-text-main flex items-center justify-between gap-2">
+                        <span>${highlightHistoryText(dispTitle, highlightTerms)}</span>
+                        <span class="text-[10px] text-text-muted font-normal shrink-0">⏱️ ${savedStr}</span>
+                    </div>
+                    ${summaryBoxHtml}
+                </div>
+
+                <div class="mt-3 pt-2 border-t border-border/40 flex items-center justify-between">
+                    <button type="button" onclick="document.getElementById('${rawDetailId}').classList.toggle('hidden')"
+                        class="text-xs font-bold text-text-muted hover:text-primary flex items-center gap-1 transition-colors">
+                        <span class="material-symbols-outlined text-sm">description</span>
+                        <span>원본 메일 전문 펼치기 / 접기</span>
                     </button>
-                    ${typeof handleMailGenClick === "function" ? `
-                    <button class="btn-text text-xs text-text-muted hover:text-primary flex items-center gap-1" onclick="handleMailGenClick('${escapeHtml(e.id || '')}')">
-                        <span class="material-symbols-outlined text-sm">forward_to_inbox</span> 메일
-                    </button>` : ''}
                 </div>
-            </div>
-            <div class="text-sm font-bold text-text-main mt-1 cursor-pointer hover:text-primary transition-colors flex items-center justify-between"
-                 onclick="this.nextElementSibling.classList.toggle('hidden')">
-                <span>${escapeHtml(dispTitle)}</span>
-                <span class="material-symbols-outlined text-base text-text-muted">expand_more</span>
-            </div>
-            <div class="hidden mt-3 p-3 bg-background/50 border border-border/50 rounded text-xs text-text-muted whitespace-pre-wrap max-h-48 overflow-y-auto font-mono">
-                ${escapeHtml(e.rawText || e.content || "상세 원문 내용이 없습니다.")}
-            </div>
-        `;
+                <div id="${rawDetailId}" class="hidden mt-2.5 p-3.5 bg-background/90 border border-border rounded text-xs text-text-muted whitespace-pre-wrap max-h-72 overflow-y-auto font-mono leading-relaxed">${highlightHistoryText(mainE.rawText || mainE.content || '상세 원문 내용이 없습니다.', highlightTerms)}</div>
+            `;
+        } else {
+            // 🧵 연속 대응 쓰레드 그룹 카드 (2건 이상 연속 작업)
+            const newestDate = mainE.date || '날짜 미상';
+            const oldestDate = oldestE.date || newestDate;
+            const dateRange = newestDate === oldestDate ? newestDate : `${oldestDate} ~ ${newestDate}`;
+            const workers = Array.from(new Set(group.entries.map(x => x.worker).filter(Boolean))).join(', ') || '—';
+            const threadId = `hist_thread_${String(mainE.id || idx).replace(/[^a-zA-Z0-9_]/g, '_')}_${idx}`;
+            const mainRawId = `hist_main_raw_${mainE.id}_${idx}`;
+
+            // Error Code 또는 키워드 검색 시, 실제 해당 에러코드/키워드를 당일 조치한 회차를 대표 요약으로 우선 선택
+            let repE = mainE;
+            if (activeEcCodes.length > 0) {
+                const directEcEntry = group.entries.find(subE =>
+                    (subE._ownErrorCodes || []).some(c => activeEcCodes.some(ac => c.toLowerCase().includes(ac.toLowerCase())))
+                );
+                if (directEcEntry) repE = directEcEntry;
+            } else if (kwTokens.length > 0) {
+                const directKwEntry = group.entries.find(subE => {
+                    const topTxt = ((subE._coreSections && subE._coreSections.topMailText) || subE.content || '').toLowerCase();
+                    return kwTokens.every(t => topTxt.includes(t));
+                });
+                if (directKwEntry) repE = directKwEntry;
+            }
+
+            const repDateStr = repE.date || newestDate;
+            const mainSummaryHtml = buildEntrySummaryBoxHtml(repE, highlightTerms, activeEcCodes);
+            const autoExpandThread = activeEcCodes.length > 0;
+
+            // 일자별 타임라인 세부 내역 생성 (오래된 일자 1회차 -> 최신 회차 흐름)
+            const chronologicalEntries = group.entries.slice().sort((a, b) => {
+                const da = parseEntryDate(a.date, a.savedAt);
+                const db = parseEntryDate(b.date, b.savedAt);
+                return da.localeCompare(db);
+            });
+
+            const subTimelineHtml = chronologicalEntries.map((subE, sIdx) => {
+                const subSummary = buildEntrySummaryBoxHtml(subE, highlightTerms, activeEcCodes);
+                const subRawId = `hist_sub_raw_${subE.id}_${idx}_${sIdx}`;
+                const subTitle = typeof getDisplayContent === 'function' ? getDisplayContent(subE) : (subE.content || '—');
+                const ownEcs = subE._ownErrorCodes || [];
+                const displayEcs = ownEcs.length > 0 ? ownEcs : (subE._errorCodes || []);
+                const isDirectTargetEc = activeEcCodes.length > 0 && ownEcs.some(c => activeEcCodes.some(ac => c.toLowerCase().includes(ac.toLowerCase())));
+                const subEcs = displayEcs.map(c => `<span class="px-1.5 py-0.5 rounded ${ownEcs.includes(c) ? 'bg-red-600 text-white' : 'bg-red-500/10 text-red-600 dark:text-red-400'} text-[10px] font-mono font-bold">E/C ${escapeHtml(c)}</span>`).join(' ');
+                return `
+                    <div class="p-3.5 bg-surface rounded-md border ${isDirectTargetEc ? 'border-red-500/60 ring-1 ring-red-500/20' : 'border-border/80'} hover:border-primary/50 transition-all">
+                        <div class="flex items-center justify-between flex-wrap gap-2 pb-1.5 border-b border-border/50">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="px-2 py-0.5 bg-primary text-white font-black text-[10px] rounded">${sIdx + 1}일차 (${sIdx + 1}/${group.count})</span>
+                                <span class="text-xs font-black font-mono text-text-main">${escapeHtml(subE.date || '날짜 미상')}</span>
+                                <span class="text-xs font-bold text-primary">${highlightHistoryText(subTitle, highlightTerms)}</span>
+                                <span class="text-[11px] text-text-muted">👤 ${escapeHtml(subE.worker || '—')}</span>
+                                ${isDirectTargetEc ? '<span class="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[10px] font-black">🎯 당일 E/C 조치 회차</span>' : ''}
+                                ${subEcs}
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                <button type="button" onclick="document.getElementById('${subRawId}').classList.toggle('hidden')" class="text-[11px] text-text-muted hover:text-primary font-bold flex items-center gap-0.5">
+                                    <span class="material-symbols-outlined text-xs">description</span> 원문
+                                </button>
+                                <button type="button" onclick="deleteSingleHistory('${escapeHtml(subE.id)}')" class="text-text-muted hover:!text-red-500">
+                                    <span class="material-symbols-outlined text-sm">close</span>
+                                </button>
+                            </div>
+                        </div>
+                        ${subSummary}
+                        <div id="${subRawId}" class="hidden mt-2 p-3 bg-background border border-border rounded text-[11px] text-text-muted whitespace-pre-wrap max-h-56 overflow-y-auto font-mono">${highlightHistoryText(subE.rawText || subE.content || '', highlightTerms)}</div>
+                    </div>
+                `;
+            }).join('');
+
+            card.innerHTML = `
+                <div class="flex justify-between items-start flex-wrap gap-2 pb-2.5 border-b border-border/60">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <button type="button" onclick="filterHistoryByMachine('${escapeHtml(machineStr)}')"
+                            class="bg-primary text-white text-xs font-black font-mono px-2.5 py-1 rounded hover:opacity-90 transition-opacity flex items-center gap-1"
+                            title="클릭 시 [${escapeHtml(machineStr)}] 호기 작업만 필터링">
+                            <span class="material-symbols-outlined text-xs">precision_manufacturing</span>
+                            ${escapeHtml(machineStr)}
+                        </button>
+                        <span class="bg-surface border border-border text-text-muted text-[11px] font-bold px-2 py-0.5 rounded">
+                            ${escapeHtml(lineStr)}
+                        </span>
+                        <span class="px-2 py-0.5 bg-primary/15 border border-primary/40 text-primary text-xs font-black rounded flex items-center gap-1">
+                            <span class="material-symbols-outlined text-xs">forum</span> 연속 ${group.count}회차 대응
+                        </span>
+                        <span class="text-xs font-black text-text-main flex items-center gap-1 font-mono">
+                            <span class="material-symbols-outlined text-sm text-primary">date_range</span>
+                            ${escapeHtml(dateRange)}
+                        </span>
+                        <span class="text-xs text-text-muted flex items-center gap-1">
+                            <span class="material-symbols-outlined text-sm">group</span>
+                            ${highlightHistoryText(workers, highlightTerms)}
+                        </span>
+                        ${ecBadgesHtml}
+                    </div>
+                    <div class="flex items-center gap-1.5 ml-auto">
+                        <button type="button" class="btn-text text-xs text-primary hover:underline flex items-center gap-0.5 font-bold px-2 py-1 rounded bg-primary/5 border border-primary/20"
+                            onclick="openEquipDetailByMachine('${escapeHtml(machineStr)}', '${escapeHtml(mainE.sn || '')}')" title="Management 설비호기 상세페이지로 이동">
+                            <span class="material-symbols-outlined text-sm">open_in_new</span> 설비 상세
+                        </button>
+                        <button type="button" class="btn-text text-xs text-text-muted hover:text-primary flex items-center gap-0.5 px-2 py-1 rounded border border-border bg-surface"
+                            onclick="handleMailGenClick(this)" data-eq="${escapeHtml(machineStr)}" data-content="${escapeHtml(dispTitle)}">
+                            <span class="material-symbols-outlined text-sm">forward_to_inbox</span> 메일 작성
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mt-3">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-sm font-black text-primary">${highlightHistoryText(dispTitle, highlightTerms)} <span class="text-xs font-bold text-text-muted">(${repE !== mainE ? `E/C 조치 ${escapeHtml(repDateStr)} 회차 대표 요약` : `최신 ${escapeHtml(newestDate)} 기준 요약`})</span></span>
+                        <span class="text-[10px] text-text-muted shrink-0">⏱️ ${savedStr}</span>
+                    </div>
+                    ${mainSummaryHtml}
+                </div>
+
+                <div class="mt-3 pt-2.5 border-t border-border/50 flex items-center justify-between flex-wrap gap-2">
+                    <button type="button" onclick="document.getElementById('${mainRawId}').classList.toggle('hidden')"
+                        class="text-xs font-bold text-text-muted hover:text-primary flex items-center gap-1 transition-colors">
+                        <span class="material-symbols-outlined text-sm">description</span>
+                        <span>대표 메일 원문 전문 보기</span>
+                    </button>
+                    <button type="button" class="text-xs bg-primary/10 border border-primary/40 text-primary hover:bg-primary hover:text-white px-3 py-1.5 rounded flex items-center gap-1 font-black transition-all shadow-xs"
+                        onclick="(function(btn){
+                            var sub = document.getElementById('${threadId}');
+                            var icon = btn.querySelector('.thread-icon');
+                            var txt = btn.querySelector('.thread-txt');
+                            var isHidden = sub.classList.toggle('hidden');
+                            icon.textContent = isHidden ? 'expand_more' : 'expand_less';
+                            txt.textContent = isHidden ? '일자별 연속 대응 과정 펼쳐보기 (1일차 ➔ ${group.count}일차)' : '연속 대응 과정 접기';
+                        })(this)">
+                        <span class="material-symbols-outlined text-sm">timeline</span>
+                        <span class="thread-txt">${autoExpandThread ? '연속 대응 과정 접기' : `일자별 연속 대응 과정 펼쳐보기 (1일차 ➔ ${group.count}일차)`}</span>
+                        <span class="material-symbols-outlined text-sm thread-icon">${autoExpandThread ? 'expand_less' : 'expand_more'}</span>
+                    </button>
+                </div>
+
+                <div id="${mainRawId}" class="hidden mt-2.5 p-3.5 bg-background/90 border border-border rounded text-xs text-text-muted whitespace-pre-wrap max-h-72 overflow-y-auto font-mono leading-relaxed">${highlightHistoryText(repE.rawText || repE.content || '', highlightTerms)}</div>
+
+                <div id="${threadId}" class="${autoExpandThread ? '' : 'hidden'} mt-3 space-y-2.5 pl-4 border-l-2 border-primary py-1 bg-background/30 rounded-r-md p-3">
+                    <div class="text-xs font-black text-primary mb-2 flex items-center gap-1">
+                        <span class="material-symbols-outlined text-sm">history_edu</span>
+                        [${escapeHtml(machineStr)}] 일자별 트러블슈팅 진행 흐름 (시간순 1일차 ➔ ${group.count}일차)
+                    </div>
+                    ${subTimelineHtml}
+                </div>
+            `;
+        }
+
         listWrap.appendChild(card);
     });
 
     searchWrap.appendChild(listWrap);
 
-    if (matched.length > DISPLAY_LIMIT) {
-        const moreNotice = document.createElement("div");
-        moreNotice.className = "p-4 text-center text-xs text-text-muted bg-background/30 rounded border border-border/50";
-        moreNotice.textContent = `검색 결과 중 상위 ${DISPLAY_LIMIT}건이 표시되었습니다. 더 상세한 검색어를 입력하시면 더욱 신속하게 확인하실 수 있습니다.`;
-        searchWrap.appendChild(moreNotice);
+    if (groupedItems.length > historyDisplayLimit) {
+        const moreBtnWrap = document.createElement('div');
+        moreBtnWrap.className = 'pt-2 text-center';
+        const remain = groupedItems.length - historyDisplayLimit;
+        moreBtnWrap.innerHTML = `
+            <button type="button" onclick="loadMoreHistoryResults()" class="px-6 py-2.5 rounded-lg bg-surface border border-primary/40 text-primary hover:bg-primary hover:text-white text-xs font-black transition-all shadow-xs inline-flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-base">expand_more</span>
+                작업 이력 더보기 (${remain.toLocaleString()}건 남음)
+            </button>
+        `;
+        searchWrap.appendChild(moreBtnWrap);
     }
 }
 
-/** 🕒 작업 히스토리 타임라인 및 설비 칩 아코디언 렌더링 (메모리 캐싱 및 검색 전용 뷰 분기 탑재) */
-async function renderHistory() {
-    const searchVal = (document.getElementById("historySearch")?.value || "").trim();
-    const sortOrder = document.getElementById("historySortOrder")?.value || "desc";
-    const equipCard = document.getElementById("historyEquipCard");
-    const timelineWrap = document.getElementById("historyTimelineWrap");
-    const searchWrap = document.getElementById("historySearchResultsWrap");
-    const emptyEl = document.getElementById("historyEmpty");
-    const emptyText = document.getElementById("historyEmptyText");
-    const chipsWrap = document.getElementById("historyEquipChips");
+/** 하위 호환용 래퍼 */
+function renderSearchResults(searchVal, sortOrder) {
+    renderHistoryResultsOnly();
+}
 
-    // 0. 활성 부서 변경 시 메모리 캐시 강제 무효화 (사이트 간 이력 혼선 원천 차단)
+/** 하위 호환용 래퍼 */
+function renderHistoryTimeline(sortOrder) {
+    renderHistoryResultsOnly();
+}
+
+/** 🕒 작업 히스토리 통합 검색 & Error Code 트러블슈팅 대시보드 메인 렌더링 */
+async function renderHistory() {
+    // 0. 외부(maintenance.js 등)에서 selectedChip을 지정하고 진입한 경우 설비호기 필터로 자동 연동
+    if (selectedChip) {
+        const eqInp = document.getElementById('histEquipInput');
+        const eqClear = document.getElementById('histEquipClearBtn');
+        if (eqInp) {
+            eqInp.value = selectedChip;
+            if (eqClear) eqClear.classList.remove('hidden');
+        }
+        selectedChip = null;
+    }
+
+    // 1. 활성 부서 변경 시 메모리 캐시 강제 무효화
     if (lastRenderedDept !== currentDept) {
         invalidateHistoryCache();
         lastRenderedDept = currentDept;
     }
 
-    // 1. IndexedDB 캐시 검증
+    // 2. IndexedDB 로드 및 검색 키/에러코드 인덱싱
     if (isHistoryCacheDirty || !cachedRawHistory) {
         cachedRawHistory = await getIDBHistory();
         prepareHistorySearchKeys(cachedRawHistory);
         isHistoryCacheDirty = false;
         cachedExpandedHistory = null;
+        cachedEcDirectory = null;
     }
 
-    // 2. 검색어가 존재하는 경우: 검색 전용 결과 뷰 활성화
-    if (searchVal) {
-        if (equipCard) equipCard.classList.add("hidden");
-        if (timelineWrap) timelineWrap.classList.add("hidden");
-        renderSearchResults(searchVal, sortOrder);
-        return;
-    }
-
-    // 3. 검색어가 없는 경우: 기본 설비 칩 및 타임라인 뷰 복원
-    if (searchWrap) searchWrap.classList.add("hidden");
-    if (equipCard) equipCard.classList.remove("hidden");
-    if (timelineWrap) timelineWrap.classList.remove("hidden");
-    if (emptyEl) emptyEl.classList.add("hidden");
-
-    // 파싱 캐시 부재 시 확장 데이터 생성
-    if (!cachedExpandedHistory) {
+    // 3. 다중 호기 Fan-out 확장 및 Error Code 도감 생성 (캐싱)
+    if (!cachedExpandedHistory || !cachedEcDirectory) {
         const raw = cachedRawHistory || [];
         const valid = raw.filter(e => !e.isDeleted);
-        
-        if (valid.length === 0) {
-            if (equipCard) equipCard.classList.add("hidden");
-            if (timelineWrap) timelineWrap.classList.add("hidden");
-            if (emptyEl) {
-                emptyEl.classList.remove("hidden");
-                if (emptyText) emptyText.textContent = "등록된 작업 기록이 없습니다.";
-            }
-            return;
-        }
+        prepareHistorySearchKeys(valid);
 
         const expanded = [];
+        const machineSet = new Set();
+        const lineSet = new Set();
+
         valid.forEach(e => {
-            const targetMachines = typeof parseTargetMachines === "function" ? parseTargetMachines(e.machine, e.rawText) : [e.machine || "미상"];
+            const targetMachines = typeof parseTargetMachines === 'function' ? parseTargetMachines(e.machine, e.rawText) : [e.machine || '미상'];
             for (const singleM of targetMachines) {
-                const correctLine = typeof getCorrectLineForMachine === "function" ? getCorrectLineForMachine(singleM, e.line) : (e.line || "미상");
+                const mClean = (singleM || '미상').trim().toUpperCase();
+                const correctLine = typeof getCorrectLineForMachine === 'function' ? getCorrectLineForMachine(mClean, e.line) : (e.line || '미상');
+                if (mClean && mClean !== '미상') machineSet.add(mClean);
+                if (correctLine && correctLine !== '미상') lineSet.add(correctLine);
                 expanded.push({
                     ...e,
-                    machine: singleM,
+                    machine: mClean,
                     line: correctLine
                 });
             }
         });
 
-        const lineMap = {}; 
-        let firstMachine = null;
-        expanded.forEach(e => { 
-            const line = e.line || "미분류"; 
-            const m = (e.machine || "미상").trim();
-            if (!lineMap[line]) lineMap[line] = {}; 
-            if (!lineMap[line][m]) lineMap[line][m] = 0; 
-            lineMap[line][m]++; 
-            if (!firstMachine) firstMachine = m; 
-        });
-
         cachedExpandedHistory = expanded;
-        cachedLineMap = lineMap;
-    }
+        buildErrorCodeDirectory(expanded);
 
-    const expandedList = cachedExpandedHistory || [];
-    const lineMap = cachedLineMap || {};
-
-    let firstMachine = null;
-    for (let l in lineMap) {
-        for (let m in lineMap[l]) {
-            if (!firstMachine) firstMachine = m;
-            break;
+        // 설비호기 자동완성 datalist 업데이트
+        const dlMachines = document.getElementById('dlHistoryMachines');
+        if (dlMachines) {
+            const sortedM = Array.from(machineSet).sort();
+            dlMachines.innerHTML = sortedM.map(m => `<option value="${escapeHtml(m)}">`).join('');
         }
-        if (firstMachine) break;
-    }
 
-    let selectedLine = null; 
-    let isSelectedValid = false; 
-    for (let l in lineMap) { 
-        if (lineMap[l][selectedChip]) { 
-            isSelectedValid = true; 
-            selectedLine = l; 
-            break; 
-        } 
-    }
-    if (!selectedChip || !isSelectedValid) selectedChip = firstMachine; 
-    for (let l in lineMap) { 
-        if (lineMap[l][selectedChip]) { 
-            selectedLine = l; 
-            break; 
-        } 
-    }
-
-    // 칩 아코디언 렌더링 (초기 1회 또는 비어있을 때만)
-    if (chipsWrap && (!chipsWrap.hasChildNodes() || chipsWrap.innerHTML === "")) {
-        const stdLines = ["P1D", "P1F", "P2D", "P2F", "P3D", "P3F", "P4D", "P4H"];
-        chipsWrap.innerHTML = ""; 
-        chipsWrap.className = "flex flex-col gap-2 p-4 w-full";
-        Object.keys(lineMap).sort((a, b) => {
-            const idxA = stdLines.indexOf(a);
-            const idxB = stdLines.indexOf(b);
-            if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-            if (idxA !== -1) return -1;
-            if (idxB !== -1) return 1;
-            return a.localeCompare(b);
-        }).forEach(line => {
-            const ms = lineMap[line];
-            const mks = Object.keys(ms).sort();
-            const isOpen = line === selectedLine;
-
-            const groupDiv = document.createElement("div"); 
-            groupDiv.className = `border border-border/50 rounded overflow-hidden transition-colors ${isOpen ? 'accordion-open' : ''}`;
-            
-            const headerBtn = document.createElement("button"); 
-            headerBtn.className = "w-full px-4 py-3 bg-background/50 flex justify-between items-center hover:opacity-80 text-left";
-            headerBtn.onclick = function() { this.parentElement.classList.toggle('accordion-open'); };
-            headerBtn.innerHTML = `
-                <span class="label-base text-text-main !mb-0 flex items-center gap-2">
-                    <span class="material-symbols-outlined text-base text-primary">factory</span> ${escapeHtml(line)} 
-                    <span class="bg-primary text-white text-[9px] px-1.5 py-0.5 rounded">${mks.reduce((sum, m) => sum + ms[m], 0)}건</span>
-                </span>
-                <span class="material-symbols-outlined accordion-rotate text-text-main">expand_more</span>
-            `;
-            
-            const contentDiv = document.createElement("div"); 
-            contentDiv.className = "accordion-content bg-surface/50";
-            
-            const chipsContainer = document.createElement("div"); 
-            chipsContainer.className = "p-4 flex flex-wrap gap-2 border-t border-border/50";
-            
-            mks.forEach(m => {
-                const active = m === selectedChip; 
-                const chip = document.createElement("button");
-                chip.setAttribute("data-machine", m);
-                chip.className = `px-4 py-2 text-xs font-bold uppercase tracking-widest border transition-all flex items-center gap-2 rounded ${active ? "bg-primary text-white border-primary" : "bg-surface/50 text-text-muted border-border hover:border-primary hover:text-primary"}`;
-                chip.innerHTML = `
-                    <span class="material-symbols-outlined text-sm">precision_manufacturing</span> ${escapeHtml(m)} 
-                    <span class="ml-1 ${active ? 'bg-surface text-primary' : 'bg-background text-text-muted'} text-[9px] font-black px-1.5 py-0.5 rounded badge-count">${ms[m]}</span>
-                `;
-                chip.onclick = function() { selectHistoryEquipChip(m, this); }; 
-                chipsContainer.appendChild(chip);
+        // 라인 필터 셀렉트 옵션 업데이트
+        const lineSelect = document.getElementById('histLineSelect');
+        if (lineSelect) {
+            const prevVal = lineSelect.value || 'ALL';
+            const stdLines = ['P1D', 'P1F', 'P2D', 'P2F', 'P3D', 'P3F', 'P4D', 'P4H'];
+            const sortedLines = Array.from(lineSet).sort((a, b) => {
+                const ia = stdLines.indexOf(a);
+                const ib = stdLines.indexOf(b);
+                if (ia !== -1 && ib !== -1) return ia - ib;
+                if (ia !== -1) return -1;
+                if (ib !== -1) return 1;
+                return a.localeCompare(b);
             });
-            
-            contentDiv.appendChild(chipsContainer); 
-            groupDiv.appendChild(headerBtn); 
-            groupDiv.appendChild(contentDiv); 
-            chipsWrap.appendChild(groupDiv);
-        });
+            lineSelect.innerHTML = `<option value="ALL">전체 라인</option>` + sortedLines.map(l => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
+            if (sortedLines.includes(prevVal)) lineSelect.value = prevVal;
+        }
     }
 
-    renderHistoryTimeline(sortOrder);
-}
-
-/** 🕒 선택된 호기의 타임라인 렌더링 (부분 렌더링 및 가상 렌더링 최적화) */
-function renderHistoryTimeline(sortOrder) {
-    const timelineWrap = document.getElementById("historyTimelineWrap");
-    if (!timelineWrap) return;
-
-    const expandedList = cachedExpandedHistory || [];
-    const entries = expandedList.filter(e => (e.machine || "미상").trim() === selectedChip).sort((a, b) => { 
-        const dateA = parseEntryDate(a.date, a.savedAt);
-        const dateB = parseEntryDate(b.date, b.savedAt);
-        if (dateA !== dateB) {
-            return sortOrder === "desc" ? dateB.localeCompare(dateA) : dateA.localeCompare(dateB);
-        }
-        const sa = new Date(a.savedAt || a.updatedAt || 0).getTime();
-        const sb = new Date(b.savedAt || b.updatedAt || 0).getTime();
-        return sortOrder === "desc" ? sb - sa : sa - sb;
-    });
-
-    timelineWrap.innerHTML = ""; 
-    const wrap = document.createElement("div"); 
-    wrap.className = "card-base overflow-hidden rounded-md shadow-sm";
-    wrap.innerHTML = `
-        <div class="px-6 py-4 bg-background/50 border-b border-border flex justify-between items-center">
-            <div>
-                <span class="text-sm font-black text-primary uppercase tracking-widest">${escapeHtml(selectedChip || "")}</span>
-                <span class="ml-3 text-xs text-text-muted">총 ${entries.length}건 기록</span>
-            </div>
-            <button class="btn-text hover:!text-red-600" onclick="deleteEquipHistory('${escapeHtml(selectedChip || "")}')">
-                <span class="material-symbols-outlined text-sm">delete</span> 삭제
-            </button>
-        </div>
-    `;
-
-    // 설비 특이사항 메모 영역
-    const noteDiv = document.createElement("div"); 
-    noteDiv.className = "p-6 border-b border-border/50 bg-background/30";
-    let rawNote = null;
-    try {
-        rawNote = JSON.parse(localStorage.getItem("machineNotes") || "{}")[selectedChip];
-    } catch (_) { rawNote = null; }
-    const noteContent = typeof getNoteText === 'function' ? getNoteText(rawNote) : (typeof rawNote === 'string' ? rawNote : rawNote?.text || "");
-    const noteItems = noteContent.split(/\n\n+/).filter(s => s.trim());
-    const noteListHtml = noteItems.length ? noteItems.map(item => {
-        const lines = item.trim().split('\n');
-        const header = lines[0];
-        const body = lines.slice(1).join('\n').trim();
-        return `
-            <div class="border border-border rounded p-2 mb-2 bg-background text-xs">
-                <div class="font-bold text-primary mb-1">${escapeHtml(header)}</div>
-                ${body ? `<div class="text-text-muted whitespace-pre-wrap">${escapeHtml(body)}</div>` : ''}
-            </div>
-        `;
-    }).join('') : '<p class="text-text-muted text-xs">등록된 특이사항이 없습니다.</p>';
-
-    noteDiv.innerHTML = `
-        <label class="label-base text-primary mb-2 flex items-center gap-1">
-            <span class="material-symbols-outlined text-[16px]">edit_note</span>
-            [${escapeHtml(selectedChip || "")}] 특이사항 및 부품차용
-            <button onclick="(function(btn){
-                    var rv=document.getElementById('noteReadView_${escapeHtml(selectedChip || "")}');
-                    var ea=document.getElementById('noteEditArea_${escapeHtml(selectedChip || "")}');
-                    var isEdit=!ea.classList.contains('hidden');
-                    rv.classList.toggle('hidden');
-                    ea.classList.toggle('hidden');
-                    btn.textContent=isEdit?'편집':'목록';
-                })(this)"
-                class="ml-auto text-[10px] bg-surface border border-border px-2 py-0.5 rounded hover:bg-primary hover:text-white transition-colors">
-                편집
-            </button>
-        </label>
-        <div id="noteReadView_${escapeHtml(selectedChip || "")}" class="mb-3 max-h-40 overflow-y-auto">
-            ${noteListHtml}
-        </div>
-        <textarea class="input-base h-20 p-3 resize-y rounded hidden" id="noteEditArea_${escapeHtml(selectedChip || "")}"
-            placeholder="메모 입력\\n\\n새 항목은 기존 내용 아래에 이어서 작성하세요.\\n예) [Laser 교체]\\n상세 내용"
-            onchange="saveMachineNote('${escapeHtml(selectedChip || "")}', this.value)">${escapeHtml(noteContent)}</textarea>
-    `;
-    wrap.appendChild(noteDiv);
-
-    // 타임라인 리스트
-    const body = document.createElement("div"); 
-    body.className = "p-8"; 
-    const ul = document.createElement("ul"); 
-    ul.className = "relative space-y-0 pl-8";
-    ul.innerHTML = '<div class="timeline-line"></div>';
-
-    const renderItems = isHistoryThreadMode ? groupEntriesByThread(entries) : entries.map(e => ({ isThread: false, title: getDisplayContent(e), entries: [e], count: 1 }));
-
-    renderItems.forEach((group, idx) => {
-        const li = document.createElement("li"); 
-        li.className = "timeline-item relative flex gap-5 pb-8"; 
-        li.style.animationDelay = `${idx * 20}ms`;
-        li.style.contentVisibility = "auto";
-        li.style.containIntrinsicSize = "0 80px";
-
-        if (!group.isThread) {
-            const e = group.entries[0];
-            const savedDate = new Date(e.savedAt); 
-            const savedStr = `${savedDate.getFullYear()}.${savedDate.getMonth() + 1}.${savedDate.getDate()} ${savedDate.getHours()}:${String(savedDate.getMinutes()).padStart(2, '0')}`;
-            
-            const displayTitle = getDisplayContent(e);
-            const hasDetail = Boolean(e.rawText || (e.content && e.content !== displayTitle && e.content.length > displayTitle.length));
-            const detailText = e.rawText || e.content;
-
-            li.innerHTML = `
-                <div class="timeline-dot mt-1"></div>
-                <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2 mb-1">
-                        <span class="px-2 py-0.5 border border-border text-primary text-[10px] font-bold rounded">EVENT</span>
-                        <span class="text-sm font-black text-text-main">${escapeHtml(e.date || "날짜 미상")}</span>
-                    </div>
-                    <div class="${hasDetail ? 'cursor-pointer hover:text-primary transition-colors' : ''}" ${hasDetail ? `onclick="document.getElementById('rawText_${e.id}').classList.toggle('hidden')"` : ''}>
-                        <p class="text-sm text-text-main font-bold leading-relaxed">${escapeHtml(displayTitle)}</p>
-                        ${hasDetail ? '<span class="material-symbols-outlined text-sm text-text-muted mt-1 block">open_in_full</span>' : ''}
-                    </div>
-                    ${hasDetail ? `<div id="rawText_${e.id}" class="hidden mt-3 p-4 bg-background/70 text-text-main border border-border text-xs leading-relaxed whitespace-pre-wrap rounded backdrop-blur-sm">${escapeHtml(detailText)}</div>` : ''}
-                    <div class="mt-3 text-[10px] text-text-muted flex gap-3 items-center flex-wrap">
-                        <span>👤 ${escapeHtml(e.worker || "—")}</span>
-                        <span>⏱️ Recorded: ${savedStr}</span>
-                        <button class="ml-2 bg-text-main text-surface px-2 py-1 rounded hover:bg-primary font-bold transition-colors" onclick="handleMailGenClick(this)" data-eq="${escapeHtml(e.machine)}" data-content="${escapeHtml(displayTitle)}">메일 작성</button>
-                    </div>
-                </div>
-                <button class="btn-text self-start mt-1 ml-2 hover:!text-red-500" onclick="deleteSingleHistory('${e.id}')">
-                    <span class="material-symbols-outlined text-base">close</span>
-                </button>
-            `;
-        } else {
-            // 🧵 쓰레드 그룹 (2건 이상 연속 동일 작업)
-            const mainE = group.entries[0];
-            const oldestE = group.entries[group.entries.length - 1];
-            const threadId = "thread_hist_" + String(mainE.id || idx).replace(/[^a-zA-Z0-9_]/g, "_");
-            const newestDate = mainE.date || "날짜 미상";
-            const oldestDate = oldestE.date || newestDate;
-            const dateRange = newestDate === oldestDate ? newestDate : (sortOrder === "desc" ? `${newestDate} ~ ${oldestDate}` : `${oldestDate} ~ ${newestDate}`);
-            const workers = Array.from(new Set(group.entries.map(x => x.worker).filter(Boolean))).join(", ") || "—";
-
-            let subItemsHtml = "";
-            group.entries.forEach((e, subIdx) => {
-                const savedDate = new Date(e.savedAt);
-                const savedStr = `${savedDate.getFullYear()}.${savedDate.getMonth() + 1}.${savedDate.getDate()} ${savedDate.getHours()}:${String(savedDate.getMinutes()).padStart(2, '0')}`;
-                const displayTitle = getDisplayContent(e);
-                const hasDetail = Boolean(e.rawText || (e.content && e.content !== displayTitle && e.content.length > displayTitle.length));
-                const detailText = e.rawText || e.content;
-                const turnNo = sortOrder === "desc" ? (group.count - subIdx) : (subIdx + 1);
-
-                subItemsHtml += `
-                    <div class="p-3 bg-surface/80 rounded border border-border/70 hover:border-primary/50 transition-all text-xs">
-                        <div class="flex items-center justify-between mb-1.5 flex-wrap gap-2">
-                            <div class="flex items-center gap-2">
-                                <span class="px-1.5 py-0.5 bg-primary/20 text-primary font-bold text-[10px] rounded">${turnNo}회차</span>
-                                <span class="font-bold text-text-main">${escapeHtml(e.date || "날짜 미상")}</span>
-                            </div>
-                            <button class="btn-text hover:!text-red-500 text-[11px]" onclick="deleteSingleHistory('${e.id}')">
-                                <span class="material-symbols-outlined text-sm">close</span>
-                            </button>
-                        </div>
-                        <div class="${hasDetail ? 'cursor-pointer hover:text-primary transition-colors' : ''}" ${hasDetail ? `onclick="document.getElementById('rawText_${e.id}').classList.toggle('hidden')"` : ''}>
-                            <p class="text-xs text-text-main leading-relaxed">${escapeHtml(displayTitle)}</p>
-                            ${hasDetail ? '<span class="material-symbols-outlined text-xs text-text-muted mt-0.5 block">open_in_full</span>' : ''}
-                        </div>
-                        ${hasDetail ? `<div id="rawText_${e.id}" class="hidden mt-2 p-3 bg-background/90 text-text-main border border-border text-[11px] leading-relaxed whitespace-pre-wrap rounded">${escapeHtml(detailText)}</div>` : ''}
-                        <div class="mt-2 text-[10px] text-text-muted flex gap-2 items-center flex-wrap">
-                            <span>👤 ${escapeHtml(e.worker || "—")}</span>
-                            <span>⏱️ Recorded: ${savedStr}</span>
-                            <button class="ml-auto bg-text-main text-surface px-2 py-0.5 rounded hover:bg-primary font-bold transition-colors" onclick="handleMailGenClick(this)" data-eq="${escapeHtml(e.machine)}" data-content="${escapeHtml(displayTitle)}">메일 작성</button>
-                        </div>
-                    </div>
-                `;
-            });
-
-            li.innerHTML = `
-                <div class="timeline-dot mt-1 !bg-primary ring-4 ring-primary/20"></div>
-                <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2 mb-1 flex-wrap">
-                        <span class="px-2 py-0.5 bg-primary/10 border border-primary/30 text-primary text-[10px] font-black rounded flex items-center gap-1">
-                            <span class="material-symbols-outlined text-[12px]">forum</span> 연속 ${group.count}건
-                        </span>
-                        <span class="text-sm font-black text-text-main">${escapeHtml(dateRange)}</span>
-                    </div>
-                    <div>
-                        <p class="text-sm text-primary font-black leading-relaxed">${escapeHtml(group.title)}</p>
-                    </div>
-                    <div class="mt-2 text-[10px] text-text-muted flex gap-3 items-center flex-wrap">
-                        <span>👥 작업자: ${escapeHtml(workers)}</span>
-                        <span>총 ${group.count}회차 누적</span>
-                        <button class="ml-auto text-xs bg-surface border border-primary/40 text-primary hover:bg-primary hover:text-white px-3 py-1 rounded flex items-center gap-1 font-bold transition-all shadow-sm"
-                            onclick="(function(btn){
-                                var sub = document.getElementById('${threadId}');
-                                var icon = btn.querySelector('.thread-icon');
-                                var txt = btn.querySelector('.thread-txt');
-                                var isHidden = sub.classList.toggle('hidden');
-                                icon.textContent = isHidden ? 'expand_more' : 'expand_less';
-                                txt.textContent = isHidden ? '전체 펼치기 (${group.count}건)' : '접기';
-                            })(this)">
-                            <span class="thread-txt">전체 펼치기 (${group.count}건)</span>
-                            <span class="material-symbols-outlined text-sm thread-icon">expand_more</span>
-                        </button>
-                    </div>
-                    <div id="${threadId}" class="hidden mt-4 space-y-2.5 pl-4 border-l-2 border-primary/40 py-1">
-                        ${subItemsHtml}
-                    </div>
-                </div>
-            `;
-        }
-
-        ul.appendChild(li);
-    });
-
-    body.appendChild(ul); 
-    wrap.appendChild(body); 
-    timelineWrap.appendChild(wrap);
+    // 4. Error Code 도감 및 검색 결과 리스트 렌더링
+    renderEcDirectorySection();
+    renderHistoryResultsOnly();
 }
 
 /** 새 작업 이력 저장 (⚡ 초고속 증분 저장 및 연월 기반 경량 중복 검증) */
@@ -9033,6 +9791,7 @@ async function saveHistoryEntry(entry) {
         if (typeof prepareHistorySearchKeys === 'function') prepareHistorySearchKeys([entry]);
         cachedExpandedHistory = null;
         cachedLineMap = null;
+        cachedEcDirectory = null;
     } else {
         if (typeof invalidateHistoryCache === 'function') invalidateHistoryCache();
     }
@@ -9075,8 +9834,7 @@ async function deleteSingleHistory(id) {
     await putIDBHistory(h); 
     invalidateHistoryCache();
     await updateHistoryBadge(); 
-    const sortOrder = document.getElementById("historySortOrder")?.value || "desc";
-    renderHistoryTimeline(sortOrder);
+    await renderHistory();
     autoMergeAndSave({ scope: 'history', yearMonths: ym ? [ym] : [] }); 
 }
 
