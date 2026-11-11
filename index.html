@@ -503,9 +503,9 @@
 
         <div id="extractResult" class="card-base overflow-hidden rounded-md" style="display:none;">
             <div class="bg-background px-6 py-3 border-b border-border flex justify-between items-center transition-colors">
-                <div class="flex items-center gap-3 flex-wrap">
+                <div class="flex items-center gap-3">
                     <span class="label-base !mb-0">분석 결과 확인</span>
-                    <span id="autoSavedBadge" class="save-badge hidden rounded-sm transition-all"><span class="material-symbols-outlined text-xs">save</span> 로컬 자동 저장됨</span>
+                    <span id="autoSavedBadge" class="save-badge hidden rounded-sm"><span class="material-symbols-outlined text-xs">save</span> 로컬 자동 저장됨</span>
                 </div>
                 <div class="flex gap-4">
                     <a href="https://hitachigroup.sharepoint.com/:x:/s/ISDI315/IQCHG_kQLwrYQLwjM1Hjie_8AbOJ3qU0JAaF31fNxUyFYI0?e=JeqecE" target="_blank" class="btn-text text-text-main">
@@ -2266,7 +2266,6 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
                     master_config: { revision: 1, updatedAt: Date.now(), updatedBy: "System" },
                     notes: { revision: 1, updatedAt: Date.now(), updatedBy: "System" },
                     maintenance: { revision: 1, updatedAt: Date.now(), updatedBy: "System" },
-                    asset_tracker: { revision: 1, updatedAt: Date.now(), updatedBy: "System" },
                     history: {}
                 }
             };
@@ -2274,7 +2273,6 @@ async function pullPartitionedTeamData(dirHandle, isUserGesture = false, isManua
             await writeJsonToDir(dirHandle, 'master_config.json', { equipment: [], recipient: {} });
             await writeJsonToDir(dirHandle, 'notes.json', { machineNotes: {} });
             await writeJsonToDir(dirHandle, 'maintenance.json', { equipMaintenance: {} });
-            await writeJsonToDir(dirHandle, 'asset_tracker.json', { assetMaster: [], eventLogs: [] });
             meta = initialMeta;
         } else {
             if (progressCb) progressCb(8, '레거시 데이터 변환', '이전 버전 데이터를 신규 분할 구조로 변환 중...', '');
@@ -2887,58 +2885,16 @@ function combinePushScopes(prevScope, newScope) {
 }
 
 /**
- * 🔐 사용자 클릭 제스처(User Activation)가 살아있는 즉시 DATA 폴더 쓰기 권한을 선제 확보합니다.
- * (타이머 지연 후 브라우저가 requestPermission을 차단하는 사각지대 원천 방지)
- */
-async function ensureBoxWritePermissionOnGesture() {
-    try {
-        const baseDirHandle = await getFileHandle('boxDirectoryHandle');
-        const legacyFileHandle = await getFileHandle('boxBackupFile');
-        const handle = baseDirHandle || legacyFileHandle;
-        if (!handle) {
-            return { connected: false, permitted: false, handleType: 'none' };
-        }
-        const permitted = await verifyPermission(handle, true, true);
-        return {
-            connected: true,
-            permitted: Boolean(permitted),
-            handleType: baseDirHandle ? 'dir' : 'file'
-        };
-    } catch (e) {
-        console.warn('DATA 폴더 권한 선제 확인 중 알림:', e);
-        return { connected: false, permitted: false, handleType: 'none' };
-    }
-}
-
-/**
- * 0.7초 디바운스를 거쳐 변경사항을 Box에 자동 Push합니다. (스코프 누적 및 즉시 권한 확보 지원)
+ * 0.7초 디바운스를 거쳐 변경사항을 Box에 자동 Push합니다. (스코프 누적 지원)
  */
 function autoMergeAndSave(scope = { scope: 'all' }) {
     clearTimeout(_autoSyncDebounceTimer);
     _pendingPushScope = combinePushScopes(_pendingPushScope, scope);
-    // 클릭 이벤트 스택에서 즉시 권한 점검 트리거
-    ensureBoxWritePermissionOnGesture();
     _autoSyncDebounceTimer = setTimeout(() => {
         const targetScope = _pendingPushScope || { scope: 'all' };
         _pendingPushScope = null;
         syncWithBox(true, true, false, targetScope);
     }, 700);
-}
-
-/**
- * ⚡ 대기 중인 Push 스코프를 0.7초 지연 없이 즉시 DATA 폴더에 기록하고 성공 여부를 반환합니다.
- * @param {Object} [extraScope=null] 추가로 병합할 스코프
- * @returns {Promise<boolean>} DATA 폴더 실제 파일 저장 성공 여부
- */
-async function flushAutoMergeAndSaveNow(extraScope = null) {
-    clearTimeout(_autoSyncDebounceTimer);
-    _autoSyncDebounceTimer = null;
-    if (extraScope) {
-        _pendingPushScope = combinePushScopes(_pendingPushScope, extraScope);
-    }
-    const targetScope = _pendingPushScope || { scope: 'all' };
-    _pendingPushScope = null;
-    return await syncWithBox(true, true, false, targetScope);
 }
 
 /**
@@ -3273,14 +3229,6 @@ async function handleMobileDB(event) {
             if (boxData.equipMaintenance) {
                 applyIncomingMaintenance(boxData.equipMaintenance);
             }
-            if (boxData.assetTracker && typeof mergeAssetTracker === 'function') {
-                const localMaster = JSON.parse(localStorage.getItem("assetMasterData") || "[]");
-                const localEvents = JSON.parse(localStorage.getItem("assetEventLogs") || "[]");
-                const mergedAsset = mergeAssetTracker(boxData.assetTracker, { assetMaster: localMaster, eventLogs: localEvents });
-                boxData.assetTracker = mergedAsset;
-                localStorage.setItem("assetMasterData", JSON.stringify(mergedAsset.assetMaster));
-                localStorage.setItem("assetEventLogs", JSON.stringify(mergedAsset.eventLogs));
-            }
 
             await updateHistoryBadge();
             if (document.getElementById('history')?.classList.contains('block')) {
@@ -3330,8 +3278,6 @@ async function executeBackupDownload(isManual = false) {
         let recipient = JSON.parse(localStorage.getItem("recipientData") || "{}");
         let machineNotes = JSON.parse(localStorage.getItem("machineNotes") || "{}");
         let equipMaintenance = JSON.parse(localStorage.getItem("equipMaintenance") || "{}");
-        let assetMaster = JSON.parse(localStorage.getItem("assetMasterData") || "[]");
-        let assetEvents = JSON.parse(localStorage.getItem("assetEventLogs") || "[]");
 
         let backupData = {
             workHistory: history,
@@ -3339,10 +3285,6 @@ async function executeBackupDownload(isManual = false) {
             recipient: recipient,
             machineNotes: machineNotes,
             equipMaintenance: equipMaintenance,
-            assetTracker: {
-                assetMaster: assetMaster,
-                eventLogs: assetEvents
-            },
             backupDate: new Date().toISOString()
         };
 
@@ -3739,67 +3681,11 @@ function extractDongtanMailData(text) {
 }
 
 /**
- * 🏷️ 메일 추출 결과 영역의 저장 상태 배지(autoSavedBadge) UI 상태 전환
- * @param {'syncing'|'box_saved'|'duplicate_box_saved'|'local_only'|'unknown_machine'} state 상태 키
- * @param {string} [detailText=''] 배지에 표시할 문구
- */
-function setExtractSaveBadgeState(state, detailText = '') {
-    const badge = document.getElementById('autoSavedBadge');
-    if (!badge) return;
-
-    badge.classList.remove('hidden');
-    badge.onclick = null;
-    badge.style.cursor = 'default';
-    badge.title = '';
-
-    const baseStyle = 'display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;padding:3px 10px;border-radius:4px;';
-
-    if (state === 'syncing') {
-        badge.style.cssText = baseStyle + 'background:#2563eb;color:#ffffff;';
-        badge.innerHTML = `<span class="material-symbols-outlined text-xs animate-spin">sync</span> <span>${escapeHtml(detailText || '로컬 저장 완료 · DATA 폴더 저장 중...')}</span>`;
-    } else if (state === 'box_saved') {
-        badge.style.cssText = baseStyle + 'background:#059669;color:#ffffff;';
-        badge.innerHTML = `<span class="material-symbols-outlined text-xs">cloud_done</span> <span>${escapeHtml(detailText || 'DATA 폴더 즉시 저장 완료')}</span>`;
-    } else if (state === 'duplicate_box_saved') {
-        badge.style.cssText = baseStyle + 'background:#0d9488;color:#ffffff;';
-        badge.innerHTML = `<span class="material-symbols-outlined text-xs">verified</span> <span>${escapeHtml(detailText || '기등록 중복 메일 · DATA 폴더 동기화 완료')}</span>`;
-    } else if (state === 'local_only') {
-        badge.style.cssText = baseStyle + 'background:#d97706;color:#ffffff;cursor:pointer;';
-        badge.title = '클릭하여 DATA 폴더를 연결하거나 권한을 승인하고 즉시 저장합니다.';
-        badge.innerHTML = `<span class="material-symbols-outlined text-xs">warning</span> <span>${escapeHtml(detailText || '로컬에만 저장됨 (클릭하여 DATA 폴더 연결/저장)')}</span>`;
-        badge.onclick = async function () {
-            const perm = typeof ensureBoxWritePermissionOnGesture === 'function'
-                ? await ensureBoxWritePermissionOnGesture()
-                : { connected: false, permitted: false };
-            if (!perm.connected) {
-                if (typeof linkBoxFile === 'function') await linkBoxFile();
-            } else {
-                const ok = typeof flushAutoMergeAndSaveNow === 'function'
-                    ? await flushAutoMergeAndSaveNow({ scope: 'all' })
-                    : false;
-                if (ok) {
-                    setExtractSaveBadgeState('box_saved', 'DATA 폴더 즉시 저장 완료');
-                    showToast('DATA 폴더 저장 완료', '연결된 DATA 폴더에 모든 추출 데이터가 안전하게 기록되었습니다.');
-                }
-            }
-        };
-    } else if (state === 'unknown_machine') {
-        badge.style.cssText = baseStyle + 'background:#dc2626;color:#ffffff;';
-        badge.innerHTML = `<span class="material-symbols-outlined text-xs">error</span> <span>${escapeHtml(detailText || '설비호기 미상 · 자동 저장 제외됨')}</span>`;
-    }
-}
-
-/**
- * 📩 작업 메일 텍스트 분석 및 정보 추출 (데이터 추출 실행 - ⚡ 즉각 반응 및 DATA 폴더 즉시 저장 보장)
+ * 📩 작업 메일 텍스트 분석 및 정보 추출 (데이터 추출 실행 - ⚡ 즉각 반응 최적화)
  */
 async function extractData() {
     const text = document.getElementById("mailInput").value; 
     if (!text.trim()) return alert("메일 내용을 입력하세요.");
-
-    // 🔐 0) 사용자 클릭 제스처(User Activation)가 살아있는 최상단에서 즉시 DATA 폴더 쓰기 권한 선제 확보
-    const boxPerm = typeof ensureBoxWritePermissionOnGesture === "function"
-        ? await ensureBoxWritePermissionOnGesture()
-        : { connected: false, permitted: false };
 
     // 추출 알고리즘 판별 (부서 설정 또는 탭 내 수동 선택 지원)
     const selectEl = document.getElementById("extractAlgoDept");
@@ -3882,18 +3768,8 @@ async function extractData() {
         }
     }
     
-    // 5) 다중 설비 파싱 및 S/N 기반 설비 마스터 역추적 보강
-    let targetMachines = parseTargetMachines(machine, text);
-    if ((targetMachines.length === 0 || targetMachines[0] === "미상") && detectedSn) {
-        try {
-            const eqList = JSON.parse(localStorage.getItem("equipmentData") || "[]");
-            const bySn = eqList.find(e => String(e.sn || "").trim().toUpperCase() === detectedSn.toUpperCase());
-            if (bySn && bySn.name) {
-                targetMachines = [String(bySn.name).trim().toUpperCase()];
-            }
-        } catch (_) {}
-    }
-
+    // 5) 다중 설비 파싱 및 정규 라인 자동 교정
+    const targetMachines = parseTargetMachines(machine, text);
     const displayMachine = targetMachines.join(", ") || machine;
     const finalLine = targetMachines.length > 0 ? getCorrectLineForMachine(targetMachines[0], rawLine) : rawLine;
 
@@ -3906,40 +3782,29 @@ async function extractData() {
     document.getElementById("resWorker").innerText = worker; 
     document.getElementById("extractResult").style.display = "block";
     
-    // 6) 유효한 설비인 경우 히스토리 저장 및 유지보수 특이사항 자동 반영 + DATA 폴더 즉시 동기화
+    // 6) 유효한 설비인 경우 히스토리 저장 및 유지보수 특이사항 자동 반영
     if (targetMachines.length > 0 && targetMachines[0] !== "미상") {
-        setExtractSaveBadgeState('syncing', '로컬 저장 완료 · DATA 폴더 저장 중...');
-
-        let savedCount = 0;
-        let dupCount = 0;
-        const touchedMonths = new Set();
-
         for (const singleM of targetMachines) {
             const singleLine = getCorrectLineForMachine(singleM, rawLine);
-            const saveRes = await saveHistoryEntry({ 
+            await saveHistoryEntry({ 
                 machine: singleM, 
                 line: singleLine, 
                 date: df, 
                 content, 
                 worker, 
-                sn: detectedSn || undefined,
                 rawText: text, 
                 savedAt: new Date().toISOString() 
             });
-            if (saveRes && saveRes.yearMonth) touchedMonths.add(saveRes.yearMonth);
-            if (saveRes && saveRes.saved) savedCount++;
-            else if (saveRes && saveRes.duplicate) dupCount++;
         }
+        document.getElementById("autoSavedBadge").classList.remove("hidden"); 
 
         const extraNote = document.getElementById("extraNoteInput") ? document.getElementById("extraNoteInput").value.trim() : "";
         const extraCategory = document.getElementById("extraNoteCategory") ? document.getElementById("extraNoteCategory").value.trim() : "";
-        let hasExtraSaved = false;
         
         for (const singleM of targetMachines) {
             let maintSummary = "";
             if (extraCategory) {
                 maintSummary = applyExtractedMaintenance(singleM, extraCategory, df);
-                if (maintSummary) hasExtraSaved = true;
             }
             
             if (extraNote || extraCategory) {
@@ -3952,7 +3817,6 @@ async function extractData() {
                 const combined = prevNote ? (prevNote + "\n\n" + newEntry) : newEntry;
                 ns[singleM] = { text: combined, updatedAt: Date.now() };
                 localStorage.setItem("machineNotes", JSON.stringify(ns));
-                hasExtraSaved = true;
             }
         }
         if (extraNote || extraCategory) {
@@ -3961,50 +3825,6 @@ async function extractData() {
             document.getElementById("extraNoteCategory").value = "";
             onExtraCategoryChange();
         }
-
-        // 소모품 현황판 및 매트릭스 캐시 즉시 최신화
-        if (typeof cachedMatrixData !== "undefined") cachedMatrixData = null;
-        if (typeof renderConsumableFleetSection === "function" && document.getElementById("database")?.classList.contains("block")) {
-            renderConsumableFleetSection();
-        }
-
-        // 7) 0.7초 대기 없이 즉시 DATA 폴더에 파일 쓰기 실행 및 결과 검증
-        const ymList = Array.from(touchedMonths);
-        const ymLabel = ymList.length > 0 ? `history/${ymList.join(', ')}.json` : 'history';
-        const extraLabel = hasExtraSaved ? ' + 유지보수/메모' : '';
-
-        if (boxPerm.connected && boxPerm.permitted && typeof flushAutoMergeAndSaveNow === "function") {
-            const explicitScope = hasExtraSaved
-                ? { scope: 'all' }
-                : { scope: 'history', yearMonths: ymList };
-            const pushOk = await flushAutoMergeAndSaveNow(explicitScope);
-            if (pushOk) {
-                if (savedCount > 0) {
-                    setExtractSaveBadgeState('box_saved', `DATA 폴더 즉시 저장 완료 (${ymLabel}${extraLabel})`);
-                } else if (hasExtraSaved) {
-                    setExtractSaveBadgeState('box_saved', `특이사항/유지보수 DATA 폴더 저장 완료 (${ymLabel})`);
-                } else {
-                    setExtractSaveBadgeState('duplicate_box_saved', `기등록 중복 메일 · DATA 폴더 동기화 확인 (${ymLabel})`);
-                    showToast('중복 메일 안내', '이미 동일한 날짜·내용으로 등록된 메일입니다. DATA 폴더 동기화 상태를 확인했습니다.');
-                }
-            } else {
-                setExtractSaveBadgeState('local_only', '로컬 저장됨 · DATA 폴더 쓰기 실패 (클릭하여 재시도)');
-                showToast('DATA 폴더 저장 실패', '로컬 브라우저에는 저장되었으나 DATA 폴더 파일 쓰기에 실패했습니다.');
-            }
-        } else {
-            const reasonMsg = !boxPerm.connected
-                ? (savedCount > 0 || hasExtraSaved
-                    ? '로컬에만 저장됨 (DATA 폴더 미연결 · 클릭하여 폴더 연결)'
-                    : '기등록 중복 메일 (DATA 폴더 미연결 · 클릭하여 폴더 연결)')
-                : '로컬에만 저장됨 (DATA 폴더 쓰기 권한 필요 · 클릭하여 승인)';
-            setExtractSaveBadgeState('local_only', reasonMsg);
-            showToast('로컬 저장 완료 (폴더 미동기화)', !boxPerm.connected
-                ? '브라우저 로컬 DB에 저장되었습니다. DATA 폴더에도 저장하려면 배지나 좌측 [DB 폴더 연결]을 눌러주세요.'
-                : 'DATA 폴더 쓰기 권한이 승인되지 않아 로컬에만 저장되었습니다. 배지를 클릭해 권한을 허용해주세요.');
-        }
-    } else {
-        setExtractSaveBadgeState('unknown_machine', '설비호기 미상 · 자동 저장 제외됨 (메일 내 호기명을 확인하세요)');
-        showToast('설비호기 미상 경고', '메일에서 설비호기명을 찾지 못해 이력 및 DATA 폴더에 자동 저장되지 않았습니다.');
     }
 }
 
@@ -4041,17 +3861,13 @@ function applyExtractedMaintenance(machine, category, mailDate) {
             const oldAuto = elapsedParts(l.replaceDate);
             const oldManual = l.offsetHours !== undefined ? l.offsetHours : (l.offsetDays ? l.offsetDays * 24 : 0);
             const totalHours = (oldAuto.days * 24) + oldAuto.hours + oldManual;
-            const nowTs = Date.now();
             l.history.push({
-                id: 'LASER_' + nowTs.toString(36) + Math.random().toString(36).slice(2, 6),
                 date: l.replaceDate,
                 usedDays: Math.floor(totalHours / 24),
                 usedHours: totalHours,
                 headSN: l.headSN || "-",
                 psSN: l.psSN || "-",
-                diodeSN: l.diodeSN || "-",
-                isDeleted: false,
-                updatedAt: nowTs
+                diodeSN: l.diodeSN || "-"
             });
         }
         l.replaceDate = dtVal;
@@ -4113,14 +3929,11 @@ function applyExtractedMaintenance(machine, category, mailDate) {
             return "";
         }
         const data = getMaintData(snKey);
-        const nowTs = Date.now();
         data.consumables.push({
-            id: 'CONS_' + nowTs.toString(36) + Math.random().toString(36).slice(2, 6),
+            id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
             name: cName,
             date: cDate,
             note: cNote,
-            isDeleted: false,
-            updatedAt: nowTs,
             savedAt: new Date().toISOString()
         });
         saveMaintData(snKey, data);
@@ -10197,9 +10010,7 @@ async function saveHistoryEntry(entry) {
         return false;
     });
     
-    if (isDup) {
-        return { saved: false, duplicate: true, yearMonth: entry.yearMonth, entry };
-    }
+    if (isDup) return;
 
     // ⚡ 2000건 전체 덮어쓰기 대신 단 1건만 IndexedDB에 즉시 삽입 (1ms 완료)
     await upsertIDBHistoryItems([entry]);
@@ -10216,7 +10027,6 @@ async function saveHistoryEntry(entry) {
 
     await updateHistoryBadge(); 
     autoMergeAndSave({ scope: 'history', yearMonths: [entry.yearMonth] }); 
-    return { saved: true, duplicate: false, yearMonth: entry.yearMonth, entry };
 }
 
 /** 특정 설비의 이력 일괄 삭제 (소프트 삭제) */
@@ -10286,8 +10096,6 @@ async function resetAllData() {
     localStorage.setItem("recipientData", "{}"); 
     localStorage.setItem("machineNotes", "{}"); 
     localStorage.setItem("equipMaintenance", "{}"); 
-    localStorage.setItem("assetMasterData", "[]"); 
-    localStorage.setItem("assetEventLogs", "[]"); 
     await putIDBHistory([]);
     invalidateHistoryCache();
     renderTable(); 
