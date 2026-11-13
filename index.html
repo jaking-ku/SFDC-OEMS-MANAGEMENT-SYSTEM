@@ -414,6 +414,13 @@
                 <span id="syncIcon" class="material-symbols-outlined text-base mr-3">sync</span>
                 <span id="syncText" class="text-xs uppercase tracking-widest">강제 최신화</span>
             </button>
+            <button class="btn-text w-full px-3 py-2.5 rounded hover:bg-background hover:!text-amber-500 justify-start transition-all" onclick="exportManagerDiagnostics()" title="디버그 진단 로그 다운로드 (단축키: Ctrl+Shift+D)">
+                <span class="material-symbols-outlined text-base mr-3 text-amber-500">bug_report</span>
+                <span class="text-xs uppercase tracking-widest flex items-center justify-between w-full">
+                    <span>디버그 로그</span>
+                    <span class="text-[9px] opacity-60 normal-case">Ctrl+Shift+D</span>
+                </span>
+            </button>
         </div>
     </aside>
 
@@ -10421,6 +10428,258 @@ window.addEventListener('load', () => {
         openEquipDetail(sn);
     }
 });
+
+// [Module: debug_logger.js]
+// ============================================================
+// 🛠️ SFDC OEMS Manager 개발자 전용 디버그 진단 및 Flight Recorder 모듈
+// 단축키: Ctrl + Shift + D (또는 F2)
+// 기능: 런타임 상태, Box 동기화 상태, 설비/자산 데이터, 
+//       최근 콘솔 로그 및 에러를 완결된 JSON 파일로 추출 및 클립보드 복사
+// ============================================================
+
+(function() {
+    const MAX_FLIGHT_LOGS = 300;
+    window.__managerFlightLogs = [];
+
+    // 1. 콘솔 로그 인터셉트 (Flight Recorder)
+    function pushFlightLog(level, args) {
+        try {
+            const formatted = Array.from(args).map(item => {
+                if (item === null) return 'null';
+                if (item === undefined) return 'undefined';
+                if (typeof item === 'object') {
+                    try { return JSON.stringify(item); } catch (_) { return String(item); }
+                }
+                return String(item);
+            }).join(' ');
+
+            window.__managerFlightLogs.push({
+                time: new Date().toISOString(),
+                level: level,
+                message: formatted
+            });
+
+            if (window.__managerFlightLogs.length > MAX_FLIGHT_LOGS) {
+                window.__managerFlightLogs.shift();
+            }
+        } catch (_) {}
+    }
+
+    const levels = ['log', 'info', 'warn', 'error'];
+    levels.forEach(lvl => {
+        const originalFn = console[lvl];
+        console[lvl] = function(...args) {
+            pushFlightLog(lvl, args);
+            if (originalFn) {
+                originalFn.apply(console, args);
+            }
+        };
+    });
+
+    // 2. 잡히지 않은 런타임 에러 자동 감지
+    window.addEventListener('error', function(ev) {
+        pushFlightLog('unhandled_error', [
+            ev.message || 'Unknown error',
+            'at ' + (ev.filename || '') + ':' + (ev.lineno || '') + ':' + (ev.colno || ''),
+            ev.error && ev.error.stack ? ev.error.stack : ''
+        ]);
+    });
+
+    window.addEventListener('unhandledrejection', function(ev) {
+        pushFlightLog('unhandled_rejection', [
+            ev.reason ? (ev.reason.stack || ev.reason) : 'Promise rejected'
+        ]);
+    });
+
+    // 3. 시스템 진단 데이터 종합 수집
+    window.captureManagerDiagnostics = function() {
+        const now = new Date();
+
+        // 현재 열려있는 모달 목록 파악
+        const openModals = Array.from(document.querySelectorAll('.fixed.inset-0:not(.hidden)'))
+            .map(el => el.id || el.className)
+            .filter(Boolean);
+
+        // 현재 활성화된 메인 뷰 파악
+        const activeViews = Array.from(document.querySelectorAll('main > div, main > section'))
+            .filter(el => !el.classList.contains('hidden'))
+            .map(el => el.id || el.className);
+
+        // 클라이언트 환경 및 메모리
+        const memInfo = (performance && performance.memory) ? {
+            jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
+            totalJSHeapSize: performance.memory.totalJSHeapSize,
+            usedJSHeapSize: performance.memory.usedJSHeapSize
+        } : null;
+
+        // 활성 부서
+        const dept = typeof getCurrentDept === 'function' ? getCurrentDept() : (typeof currentDept !== 'undefined' ? currentDept : 'dept4');
+
+        // 자산 트래커 통계
+        const assetMasterCount = (typeof assetMasterData !== 'undefined' && Array.isArray(assetMasterData)) ? assetMasterData.length : 0;
+        const assetEventsCount = (typeof assetEventLogs !== 'undefined' && Array.isArray(assetEventLogs)) ? assetEventLogs.length : 0;
+
+        return {
+            reportTitle: 'HITACHI SFDC OEMS Manager System Diagnostics Snapshot',
+            timestampIso: now.toISOString(),
+            timestampLocal: now.toLocaleString(),
+            client: {
+                userAgent: navigator.userAgent,
+                language: navigator.language,
+                online: navigator.onLine,
+                viewport: `${window.innerWidth}x${window.innerHeight}`,
+                screen: `${window.screen.width}x${window.screen.height}`,
+                devicePixelRatio: window.devicePixelRatio,
+                pageUrl: window.location.href,
+                memory: memInfo
+            },
+            appRuntime: {
+                currentDept: dept,
+                currentMailTemplate: typeof currentMailTemplate !== 'undefined' ? currentMailTemplate : null,
+                isSyncing: typeof isSyncing !== 'undefined' ? isSyncing : false,
+                pendingPush: typeof pendingPush !== 'undefined' ? pendingPush : false,
+                selectedChip: typeof selectedChip !== 'undefined' ? selectedChip : null,
+                activeViews: activeViews,
+                openModals: openModals
+            },
+            storageState: {
+                teamDbRevision: localStorage.getItem('teamDbRevision') || '0',
+                lastSyncSuccessAt: localStorage.getItem('lastSyncSuccessAt') || '미기록',
+                lastBackupDate: localStorage.getItem('lastBackupDate') || '미기록',
+                hasCompletedInitialSync: localStorage.getItem('hasCompletedInitialSync') || 'false',
+                selectedDeptStored: localStorage.getItem('selectedDept') || 'dept4'
+            },
+            dataSummary: {
+                equipmentCount: (typeof equipmentData !== 'undefined' && Array.isArray(equipmentData)) ? equipmentData.length : 0,
+                recipientCount: (typeof recipientData !== 'undefined' && Array.isArray(recipientData)) ? recipientData.length : 0,
+                maintenanceCount: (typeof equipMaintenance !== 'undefined' && equipMaintenance) ? Object.keys(equipMaintenance).length : 0,
+                machineNotesCount: (typeof machineNotes !== 'undefined' && machineNotes) ? Object.keys(machineNotes).length : 0,
+                assetMasterCount: assetMasterCount,
+                assetEventLogsCount: assetEventsCount
+            },
+            flightLogs: (window.__managerFlightLogs || []).slice(-200),
+            dataSnapshot: {
+                equipmentData: typeof equipmentData !== 'undefined' ? equipmentData : [],
+                recipientData: typeof recipientData !== 'undefined' ? recipientData : [],
+                equipMaintenance: typeof equipMaintenance !== 'undefined' ? equipMaintenance : {},
+                machineNotes: typeof machineNotes !== 'undefined' ? machineNotes : {},
+                assetMasterData: typeof assetMasterData !== 'undefined' ? assetMasterData : [],
+                assetEventLogsRecent: (typeof assetEventLogs !== 'undefined' && Array.isArray(assetEventLogs)) ? assetEventLogs.slice(-100) : []
+            }
+        };
+    };
+
+    // 4. 진단 데이터 JSON 파일 다운로드 및 클립보드 복사 실행
+    window.exportManagerDiagnostics = async function() {
+        const diagnostics = window.captureManagerDiagnostics();
+        const jsonString = JSON.stringify(diagnostics, null, 2);
+
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const fileTimestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+        const fileName = `sfdc_oems_manager_debug_${fileTimestamp}.json`;
+
+        // 1) JSON 파일 자동 다운로드
+        try {
+            const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8;' });
+            const blobUrl = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = blobUrl;
+            anchor.setAttribute('download', fileName);
+            document.body.appendChild(anchor);
+            anchor.click();
+            document.body.removeChild(anchor);
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+        } catch (downloadErr) {
+            console.error('진단 파일 다운로드 오류:', downloadErr);
+        }
+
+        // 2) 클립보드 복사 시도
+        let clipboardCopied = false;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            try {
+                await navigator.clipboard.writeText(jsonString);
+                clipboardCopied = true;
+            } catch (_) {
+                clipboardCopied = false;
+            }
+        }
+
+        // 3) 사용자 피드백 안내 모달 표시
+        showManagerDebugExportModal(fileName, diagnostics, clipboardCopied);
+    };
+
+    // 5. 디버그 추출 결과 안내 모달 표시
+    function showManagerDebugExportModal(fileName, diag, copied) {
+        let modal = document.getElementById('manager-debug-export-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'manager-debug-export-modal';
+            modal.className = 'fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4';
+            document.body.appendChild(modal);
+        }
+
+        const deptName = diag.appRuntime.currentDept === 'dept5' ? '평가 5부 (동탄 Site)' : '평가 4부 (평택 Site)';
+
+        modal.innerHTML = `
+            <div class="bg-surface border border-border rounded-2xl shadow-2xl max-w-lg w-full p-6 text-text-main flex flex-col gap-4">
+                <div class="flex items-center justify-between border-b border-border pb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined text-amber-500 text-[26px]">bug_report</span>
+                        <h3 class="text-base font-black">SFDC OEMS Manager 진단 로그 추출 완료</h3>
+                    </div>
+                    <button type="button" onclick="closeManagerDebugExportModal()" class="text-text-muted hover:text-red-500">
+                        <span class="material-symbols-outlined text-[20px]">close</span>
+                    </button>
+                </div>
+                <div class="text-xs space-y-2.5">
+                    <p class="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                        <span class="material-symbols-outlined text-[18px]">check_circle</span>
+                        진단 파일(JSON)이 즉시 다운로드되었습니다!
+                    </p>
+                    <div class="bg-body rounded-xl p-3 border border-border space-y-1 font-mono text-[11px]">
+                        <div>파일명: <b class="text-primary">${fileName}</b></div>
+                        <div>활성 사이트: <b class="text-blue-600 dark:text-blue-400">${deptName}</b></div>
+                        <div>설비 목록: <b>${diag.dataSummary.equipmentCount}대</b> / 수신자: <b>${diag.dataSummary.recipientCount}명</b></div>
+                        <div>자산 마스터: <b>${diag.dataSummary.assetMasterCount}건</b> / 자산 로그: <b>${diag.dataSummary.assetEventLogsCount}건</b></div>
+                        <div>DB 리비전: <b>Rev.${diag.storageState.teamDbRevision}</b> (최근 Sync: ${diag.storageState.lastSyncSuccessAt})</div>
+                        <div>최근 콘솔 로그: <b>${diag.flightLogs.length}건</b></div>
+                        <div>클립보드 복사: <b class="${copied ? 'text-green-600' : 'text-amber-600'}">${copied ? '복사 성공 (Ctrl+V 가능)' : '미지원 또는 권한필요'}</b></div>
+                    </div>
+                    <div class="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl p-3 text-amber-900 dark:text-amber-200">
+                        <p class="font-bold mb-1">💡 AI 어시스턴트 전달 방법:</p>
+                        <p class="opacity-90">다운로드된 JSON 파일 또는 클립보드에 복사된 내용을 대화창에 그대로 붙여넣어 주시면, 동기화 오류, 자산 추적 이상, 파싱 오류 등을 즉시 정밀 분석할 수 있습니다.</p>
+                    </div>
+                </div>
+                <div class="flex justify-end pt-2">
+                    <button type="button" onclick="closeManagerDebugExportModal()" class="px-5 py-2 bg-primary text-white text-xs font-bold rounded-lg hover:opacity-90">
+                        확인
+                    </button>
+                </div>
+            </div>
+        `;
+        modal.classList.remove('hidden');
+    }
+
+    window.closeManagerDebugExportModal = function() {
+        const modal = document.getElementById('manager-debug-export-modal');
+        if (modal) modal.classList.add('hidden');
+    };
+
+    // 6. 단축키 리스너 등록: Ctrl + Shift + D 또는 F2
+    document.addEventListener('keydown', function(e) {
+        const isCtrlShiftD = (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'D' || e.key === 'd');
+        const isF2 = e.key === 'F2';
+
+        if (isCtrlShiftD || isF2) {
+            e.preventDefault();
+            e.stopPropagation();
+            window.exportManagerDiagnostics();
+        }
+    });
+
+    console.log('🛠️ [Manager Debug Logger] SFDC OEMS 디버그 모듈 및 Flight Recorder 활성화 완료 (단축키: Ctrl+Shift+D)');
+})();
 </script>
 </body>
 </html>
