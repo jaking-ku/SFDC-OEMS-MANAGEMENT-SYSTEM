@@ -10431,15 +10431,55 @@ window.addEventListener('load', () => {
 
 // [Module: debug_logger.js]
 // ============================================================
-// 🛠️ SFDC OEMS Manager 개발자 전용 디버그 진단 및 Flight Recorder 모듈
+// 🛠️ SFDC OEMS Manager 심층 디버그 진단 · 감사 추적 · Flight Recorder 모듈
 // 단축키: Ctrl + Shift + D (또는 F2)
-// 기능: 런타임 상태, Box 동기화 상태, 설비/자산 데이터, 
-//       최근 콘솔 로그 및 에러를 완결된 JSON 파일로 추출 및 클립보드 복사
+// 기능: 콘솔/런타임 에러, 메일 추출/히스토리 저장/소모품 입력 감사 로그,
+//       IndexedDB 작업 이력 실데이터 및 소모품 누락 무결성 진단 JSON 추출
 // ============================================================
 
 (function() {
     const MAX_FLIGHT_LOGS = 300;
+    const MAX_AUDIT_TRAIL = 100;
+    const AUDIT_STORAGE_KEY = 'sfdc_manager_audit_trail';
+
     window.__managerFlightLogs = [];
+    window.__managerAuditTrail = [];
+
+    // 0. sessionStorage에서 직전 세션 감사 로그 복원 (새로고침 후에도 추적 유지)
+    try {
+        const savedAudit = sessionStorage.getItem(AUDIT_STORAGE_KEY);
+        if (savedAudit) {
+            const parsed = JSON.parse(savedAudit);
+            if (Array.isArray(parsed)) {
+                window.__managerAuditTrail = parsed.slice(-MAX_AUDIT_TRAIL);
+            }
+        }
+    } catch (_) {}
+
+    function persistAuditTrail() {
+        try {
+            sessionStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(window.__managerAuditTrail));
+        } catch (_) {}
+    }
+
+    function pushAuditEvent(type, detail) {
+        try {
+            const dept = typeof getCurrentDept === 'function'
+                ? getCurrentDept()
+                : (typeof currentDept !== 'undefined' ? currentDept : 'dept4');
+            window.__managerAuditTrail.push({
+                time: new Date().toISOString(),
+                dept: dept,
+                type: type,
+                detail: detail || {}
+            });
+            if (window.__managerAuditTrail.length > MAX_AUDIT_TRAIL) {
+                window.__managerAuditTrail.shift();
+            }
+            persistAuditTrail();
+        } catch (_) {}
+    }
+    window.pushManagerAuditEvent = pushAuditEvent;
 
     // 1. 콘솔 로그 인터셉트 (Flight Recorder)
     function pushFlightLog(level, args) {
@@ -10478,21 +10518,515 @@ window.addEventListener('load', () => {
 
     // 2. 잡히지 않은 런타임 에러 자동 감지
     window.addEventListener('error', function(ev) {
-        pushFlightLog('unhandled_error', [
+        const errInfo = [
             ev.message || 'Unknown error',
             'at ' + (ev.filename || '') + ':' + (ev.lineno || '') + ':' + (ev.colno || ''),
             ev.error && ev.error.stack ? ev.error.stack : ''
-        ]);
+        ];
+        pushFlightLog('unhandled_error', errInfo);
+        pushAuditEvent('UNHANDLED_ERROR', { message: errInfo.join(' | ') });
     });
 
     window.addEventListener('unhandledrejection', function(ev) {
-        pushFlightLog('unhandled_rejection', [
-            ev.reason ? (ev.reason.stack || ev.reason) : 'Promise rejected'
-        ]);
+        const reason = ev.reason ? (ev.reason.stack || String(ev.reason)) : 'Promise rejected';
+        pushFlightLog('unhandled_rejection', [reason]);
+        pushAuditEvent('UNHANDLED_REJECTION', { reason: reason });
     });
 
-    // 3. 시스템 진단 데이터 종합 수집
-    window.captureManagerDiagnostics = function() {
+    // 3. 소모품 키워드 매칭 및 Near miss 진단 헬퍼
+    function diagnoseConsumablesForText(contentText, rawText) {
+        const content = String(contentText || '').trim();
+        const raw = String(rawText || '').slice(0, 800);
+        const matchedItems = [];
+        const nearMissItems = [];
+
+        const hasReplaceAct = /교체|교환|replace|change/i.test(content) || /교체|교환/i.test(raw);
+
+        // 일반 6대 + Laser/Scale Head 키워드 점검
+        if (/laser|레이저|ld\s*교체/i.test(content) || /laser|레이저/i.test(raw)) {
+            if (hasReplaceAct) matchedItems.push('laser');
+            else nearMissItems.push({ item: 'laser', reason: '부품 키워드 존재하나 교체/교환 동사 미감지' });
+        }
+        if (/scale\s*head|스케일\s*헤드|스케일헤드/i.test(content) || /scale\s*head|스케일\s*헤드/i.test(raw)) {
+            if (hasReplaceAct) matchedItems.push('scale_head');
+            else nearMissItems.push({ item: 'scale_head', reason: '부품 키워드 존재하나 교체/교환 동사 미감지' });
+        }
+        if (/revolver|revolover|리볼버/i.test(content) || /revolver|리볼버/i.test(raw)) {
+            if (hasReplaceAct) matchedItems.push('revolver');
+            else nearMissItems.push({ item: 'revolver', reason: '부품 키워드 존재하나 교체/교환 동사 미감지' });
+        }
+        if (/robot|로봇/i.test(content) || /robot|로봇/i.test(raw)) {
+            if (hasReplaceAct) matchedItems.push('robot');
+            else nearMissItems.push({ item: 'robot', reason: '부품 키워드 존재하나 교체/교환 동사 미감지' });
+        }
+        if (/tdi/i.test(content) || /tdi/i.test(raw)) {
+            if (hasReplaceAct) matchedItems.push('tdi');
+            else nearMissItems.push({ item: 'tdi', reason: '부품 키워드 존재하나 교체/교환 동사 미감지' });
+        }
+        const hasZ = /z축|z\s*축|stage\s*z/i.test(content) || /z축|z\s*축/i.test(raw);
+        const hasCyl = /cylinder|실린더|낙하방지/i.test(content) || /cylinder|실린더|낙하방지/i.test(raw);
+        if (hasCyl) {
+            if (hasZ || (/낙하방지/i.test(content) && hasReplaceAct)) matchedItems.push('z_cylinder');
+            else nearMissItems.push({ item: 'z_cylinder', reason: '실린더 언급 있으나 Z축 또는 낙하방지+교체 조건 미충족' });
+        }
+        const nhPart = /new\s*hand|뉴\s*핸드|뉴핸드/i;
+        const nhAct = /교체|교환|개조|신규|설치|replace|change/i;
+        if (nhPart.test(content) || nhPart.test(raw)) {
+            if (nhAct.test(content) || nhAct.test(raw)) matchedItems.push('new_hand');
+            else nearMissItems.push({ item: 'new_hand', reason: 'New Hand 키워드 존재하나 교체/신규/개조 동사 미감지' });
+        }
+        const ionPart = /ionizer|아이오나이저|이오나이저/i;
+        const ionAct = /탈착|탈거|제거|해체|분리|철거|무효화|교체|교환|remove|detach/i;
+        if (ionPart.test(content) || ionPart.test(raw)) {
+            if ((ionPart.test(content) && ionAct.test(content)) || (ionPart.test(raw) && ionAct.test(raw))) {
+                matchedItems.push('ionizer');
+            } else {
+                nearMissItems.push({ item: 'ionizer', reason: 'Ionizer 언급 있으나 탈착/제거/교체 동사 미감지' });
+            }
+        }
+
+        return { matchedItems, nearMissItems };
+    }
+
+    function getElVal(id) {
+        const el = document.getElementById(id);
+        return el ? (el.value !== undefined ? String(el.value) : String(el.innerText || '')) : null;
+    }
+
+    function getElText(id) {
+        const el = document.getElementById(id);
+        return el ? String(el.innerText || el.textContent || '') : null;
+    }
+
+    function readCurrentExtractFormSnapshot() {
+        const mailRaw = getElVal('mailInput') || '';
+        const scaleInputs = {};
+        if (typeof SCALE_AXES !== 'undefined' && Array.isArray(SCALE_AXES)) {
+            SCALE_AXES.forEach(a => {
+                scaleInputs[a.key] = {
+                    date: getElVal('extraShDate_' + a.key),
+                    sn: getElVal('extraShSn_' + a.key)
+                };
+            });
+        }
+        return {
+            algoDept: getElVal('extractAlgoDept'),
+            mailTextLength: mailRaw.length,
+            mailTextPreview: mailRaw.slice(0, 1000),
+            extraNoteCategory: getElVal('extraNoteCategory'),
+            extraNoteInput: getElVal('extraNoteInput'),
+            extraLaser: {
+                date: getElVal('extraLaserDate'),
+                headSN: getElVal('extraLaserHead'),
+                psSN: getElVal('extraLaserPs'),
+                diodeSN: getElVal('extraLaserDiode')
+            },
+            extraScaleHead: scaleInputs,
+            extraConsumable: {
+                name: getElVal('extraConsumName'),
+                date: getElVal('extraConsumDate'),
+                note: getElVal('extraConsumNote')
+            },
+            renderedResult: {
+                date: getElText('resDate'),
+                machine: getElText('resMachine'),
+                line: getElText('resLine'),
+                content: getElText('resContent'),
+                worker: getElText('resWorker'),
+                saveBadgeText: getElText('autoSavedBadge')
+            }
+        };
+    }
+
+    // 4. 핵심 비즈니스 트랜잭션 비침투적 감사 래퍼(Hook) 장착
+    function installTransactionAuditHooks() {
+        if (window.__managerAuditHooksInstalled) return;
+        window.__managerAuditHooksInstalled = true;
+
+        // 4-1. extractData 래핑 (메일 정보 추출)
+        if (typeof window.extractData === 'function') {
+            const origExtractData = window.extractData;
+            window.extractData = async function() {
+                const preForm = readCurrentExtractFormSnapshot();
+                const startTs = Date.now();
+                try {
+                    const res = await origExtractData.apply(this, arguments);
+                    const postForm = readCurrentExtractFormSnapshot();
+                    const resMachine = (postForm.renderedResult.machine || '').trim();
+                    const diagnosis = (!resMachine || resMachine === '미상')
+                        ? 'UNKNOWN_MACHINE_SKIPPED'
+                        : 'EXTRACTED_OK';
+
+                    pushAuditEvent('EXTRACT_DATA', {
+                        durationMs: Date.now() - startTs,
+                        diagnosis: diagnosis,
+                        algoDept: preForm.algoDept,
+                        mailTextLength: preForm.mailTextLength,
+                        mailTextPreview: preForm.mailTextPreview,
+                        extraCategory: preForm.extraNoteCategory,
+                        extraInputs: {
+                            note: preForm.extraNoteInput,
+                            laser: preForm.extraLaser,
+                            scaleHead: preForm.extraScaleHead,
+                            consumable: preForm.extraConsumable
+                        },
+                        result: postForm.renderedResult
+                    });
+                    return res;
+                } catch (err) {
+                    pushAuditEvent('EXTRACT_DATA_ERROR', {
+                        durationMs: Date.now() - startTs,
+                        error: err && err.message ? err.message : String(err),
+                        mailTextPreview: preForm.mailTextPreview
+                    });
+                    throw err;
+                }
+            };
+        }
+
+        // 4-2. saveHistoryEntry 래핑 (작업 히스토리 저장 및 중복 탈락 이유 추적)
+        if (typeof window.saveHistoryEntry === 'function') {
+            const origSaveHistoryEntry = window.saveHistoryEntry;
+            window.saveHistoryEntry = async function(entry) {
+                const attemptSummary = entry ? {
+                    machine: entry.machine,
+                    line: entry.line,
+                    date: entry.date,
+                    content: entry.content,
+                    worker: entry.worker,
+                    sn: entry.sn || ''
+                } : null;
+
+                try {
+                    const res = await origSaveHistoryEntry.apply(this, arguments);
+                    let dupMatch = null;
+                    if (res && res.duplicate && entry) {
+                        let searchPool = (typeof cachedRawHistory !== 'undefined' && Array.isArray(cachedRawHistory) && cachedRawHistory.length > 0)
+                            ? cachedRawHistory
+                            : [];
+                        if (searchPool.length === 0 && typeof getIDBHistoryByMonth === 'function') {
+                            try {
+                                const ym = res.yearMonth || (typeof getYearMonthFromDate === 'function' ? getYearMonthFromDate(entry.date, entry.savedAt) : '');
+                                if (ym) searchPool = await getIDBHistoryByMonth(ym);
+                            } catch (_) {}
+                        }
+                        const found = searchPool.find(e => {
+                            if (!e || e.isDeleted || e.machine !== entry.machine) return false;
+                            const eDate = typeof normalizeEntryDateStr === 'function' ? normalizeEntryDateStr(e.date || e.savedAt) : (e.date || '');
+                            return eDate === entry.date || (e.content && entry.content && e.content === entry.content);
+                        });
+                        if (found) {
+                            dupMatch = {
+                                id: found.id,
+                                date: found.date,
+                                machine: found.machine,
+                                content: found.content,
+                                savedAt: found.savedAt
+                            };
+                        }
+                    }
+
+                    const consumDiag = entry ? diagnoseConsumablesForText(entry.content, entry.rawText) : null;
+
+                    pushAuditEvent('SAVE_HISTORY_ENTRY', {
+                        attempt: attemptSummary,
+                        saved: !!(res && res.saved),
+                        duplicate: !!(res && res.duplicate),
+                        yearMonth: res ? res.yearMonth : null,
+                        diagnosis: (res && res.saved) ? 'SAVED_TO_IDB' : ((res && res.duplicate) ? 'SKIPPED_AS_DUPLICATE' : 'NOT_SAVED'),
+                        matchedDuplicateRecord: dupMatch,
+                        consumableAutoDetect: consumDiag
+                    });
+                    return res;
+                } catch (err) {
+                    pushAuditEvent('SAVE_HISTORY_ENTRY_ERROR', {
+                        attempt: attemptSummary,
+                        error: err && err.message ? err.message : String(err)
+                    });
+                    throw err;
+                }
+            };
+        }
+
+        // 4-3. applyExtractedMaintenance 래핑 (추출 시 소모품 이력 자동 반영 누락 추적)
+        if (typeof window.applyExtractedMaintenance === 'function') {
+            const origApplyMaint = window.applyExtractedMaintenance;
+            window.applyExtractedMaintenance = function(machine, category, mailDate) {
+                const preSnap = readCurrentExtractFormSnapshot();
+                let preDiagnosis = 'OK';
+                try {
+                    const eqList = JSON.parse(localStorage.getItem('equipmentData') || '[]');
+                    const eq = eqList.find(e => e.name === machine);
+                    if (!eq) preDiagnosis = 'MISSING_EQUIP_IN_MASTER';
+                    else if (!eq.sn) preDiagnosis = 'MISSING_EQUIP_SN';
+                    else if (category === 'Scale Head') {
+                        const hasAnyDate = Object.values(preSnap.extraScaleHead || {}).some(v => v && String(v.date || '').trim() !== '');
+                        if (!hasAnyDate) preDiagnosis = 'EMPTY_SCALE_HEAD_DATE';
+                    } else if (category === '기타 소모품') {
+                        if (!preSnap.extraConsumable || !String(preSnap.extraConsumable.name || '').trim()) {
+                            preDiagnosis = 'EMPTY_CONSUMABLE_NAME';
+                        }
+                    }
+                } catch (_) {}
+
+                const summary = origApplyMaint.apply(this, arguments);
+                pushAuditEvent('APPLY_EXTRACTED_MAINTENANCE', {
+                    machine: machine,
+                    category: category,
+                    mailDate: mailDate,
+                    diagnosis: summary ? 'APPLIED' : (preDiagnosis !== 'OK' ? preDiagnosis : 'RETURNED_EMPTY_SUMMARY'),
+                    returnedSummary: summary || '',
+                    formSnapshot: {
+                        laser: preSnap.extraLaser,
+                        scaleHead: preSnap.extraScaleHead,
+                        consumable: preSnap.extraConsumable
+                    }
+                });
+                return summary;
+            };
+        }
+
+        // 4-4. saveMaintData 래핑 (소모품/유지보수 저장 추적)
+        if (typeof window.saveMaintData === 'function') {
+            const origSaveMaintData = window.saveMaintData;
+            window.saveMaintData = function(key, data) {
+                let beforeSummary = null;
+                try {
+                    const prevAll = JSON.parse(localStorage.getItem('equipMaintenance') || '{}');
+                    const prev = prevAll[key];
+                    if (prev) {
+                        beforeSummary = {
+                            laserDate: prev.laser ? prev.laser.replaceDate : null,
+                            consumablesCount: Array.isArray(prev.consumables) ? prev.consumables.length : 0
+                        };
+                    }
+                } catch (_) {}
+
+                const res = origSaveMaintData.apply(this, arguments);
+                const afterSummary = data ? {
+                    laserDate: data.laser ? data.laser.replaceDate : null,
+                    laserHistoryCount: (data.laser && Array.isArray(data.laser.history)) ? data.laser.history.length : 0,
+                    consumablesCount: Array.isArray(data.consumables) ? data.consumables.length : 0
+                } : null;
+
+                pushAuditEvent('SAVE_MAINT_DATA', {
+                    key: key,
+                    before: beforeSummary,
+                    after: afterSummary
+                });
+                return res;
+            };
+        }
+
+        // 4-5. Quick Record 저장 함수들 래핑
+        if (typeof window.saveConsumableQuickRecord === 'function') {
+            const origQuickCons = window.saveConsumableQuickRecord;
+            window.saveConsumableQuickRecord = async function(equipSn, itemKey) {
+                const dateVal = getElVal('quickConsumDate');
+                const noteVal = getElVal('quickConsumNote');
+                pushAuditEvent('QUICK_SAVE_CONSUMABLE_START', { equipSn, itemKey, dateVal, noteVal });
+                return await origQuickCons.apply(this, arguments);
+            };
+        }
+
+        if (typeof window.saveLaserQuickRecord === 'function') {
+            const origQuickLaser = window.saveLaserQuickRecord;
+            window.saveLaserQuickRecord = async function(equipSn) {
+                const dateVal = getElVal('quickLaserDate');
+                const headSn = getElVal('quickLaserHeadSn');
+                pushAuditEvent('QUICK_SAVE_LASER_START', { equipSn, dateVal, headSn });
+                return await origQuickLaser.apply(this, arguments);
+            };
+        }
+
+        if (typeof window.saveScaleHeadAxisQuickRecord === 'function') {
+            const origQuickScale = window.saveScaleHeadAxisQuickRecord;
+            window.saveScaleHeadAxisQuickRecord = async function(equipSn, axisKey) {
+                const dateVal = getElVal('quickScaleDate_' + axisKey);
+                const snVal = getElVal('quickScaleSn_' + axisKey);
+                pushAuditEvent('QUICK_SAVE_SCALE_START', { equipSn, axisKey, dateVal, snVal });
+                return await origQuickScale.apply(this, arguments);
+            };
+        }
+
+        // 4-6. syncWithBox 및 flushAutoMergeAndSaveNow 래핑
+        if (typeof window.syncWithBox === 'function') {
+            const origSyncWithBox = window.syncWithBox;
+            window.syncWithBox = async function(isManual, isPush, showAlert, pushScope) {
+                const startTs = Date.now();
+                try {
+                    const ok = await origSyncWithBox.apply(this, arguments);
+                    pushAuditEvent('SYNC_WITH_BOX', {
+                        durationMs: Date.now() - startTs,
+                        isManual: !!isManual,
+                        isPush: !!isPush,
+                        pushScope: pushScope || null,
+                        success: !!ok,
+                        teamDbRevision: localStorage.getItem('teamDbRevision') || '0'
+                    });
+                    return ok;
+                } catch (err) {
+                    pushAuditEvent('SYNC_WITH_BOX_ERROR', {
+                        durationMs: Date.now() - startTs,
+                        isPush: !!isPush,
+                        error: err && err.message ? err.message : String(err)
+                    });
+                    throw err;
+                }
+            };
+        }
+    }
+
+    // 스크립트 로드 시 즉시 Hook 장착 (DOMContentLoaded에서도 안전 재점검)
+    installTransactionAuditHooks();
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', installTransactionAuditHooks);
+    }
+
+    // 5. 타임아웃 보호가 포함된 IndexedDB 히스토리 조회 및 정밀 진단
+    async function inspectWorkHistoryAndConsumables(equipList, allMaint) {
+        let rawHistory = [];
+        let idbStatus = 'ok';
+        let idbError = null;
+
+        if (typeof window.getIDBHistory === 'function') {
+            try {
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('getIDBHistory timeout (1500ms)')), 1500)
+                );
+                rawHistory = await Promise.race([window.getIDBHistory(), timeoutPromise]);
+                if (!Array.isArray(rawHistory)) rawHistory = [];
+            } catch (e) {
+                idbStatus = 'error_or_timeout';
+                idbError = e && e.message ? e.message : String(e);
+                if (typeof cachedRawHistory !== 'undefined' && Array.isArray(cachedRawHistory)) {
+                    rawHistory = cachedRawHistory;
+                    idbStatus = 'fallback_to_memory_cache';
+                }
+            }
+        } else if (typeof cachedRawHistory !== 'undefined' && Array.isArray(cachedRawHistory)) {
+            rawHistory = cachedRawHistory;
+            idbStatus = 'memory_cache_only';
+        }
+
+        const activeEntries = rawHistory.filter(e => e && !e.isDeleted);
+        const deletedEntries = rawHistory.filter(e => e && e.isDeleted);
+
+        // 연월별 집계
+        const yearMonthDistribution = {};
+        activeEntries.forEach(e => {
+            const ym = e.yearMonth || (typeof getYearMonthFromDate === 'function' ? getYearMonthFromDate(e.date, e.savedAt) : '미상');
+            yearMonthDistribution[ym] = (yearMonthDistribution[ym] || 0) + 1;
+        });
+
+        // 최근 저장/수정 상위 30건 추출 + 소모품 매칭 진단
+        const sortedRecent = activeEntries.slice().sort((a, b) => {
+            const ta = a.updatedAt || (a.savedAt ? new Date(a.savedAt).getTime() : 0) || 0;
+            const tb = b.updatedAt || (b.savedAt ? new Date(b.savedAt).getTime() : 0) || 0;
+            return tb - ta;
+        }).slice(0, 30);
+
+        const nearMissConsumablesInRecentHistory = [];
+        const recentHistoryEntries = sortedRecent.map(e => {
+            const cDiag = diagnoseConsumablesForText(e.content, e.rawText);
+            if (cDiag.nearMissItems.length > 0) {
+                nearMissConsumablesInRecentHistory.push({
+                    id: e.id,
+                    date: e.date,
+                    machine: e.machine,
+                    content: e.content,
+                    nearMissItems: cDiag.nearMissItems
+                });
+            }
+            return {
+                id: e.id,
+                date: e.date,
+                yearMonth: e.yearMonth,
+                machine: e.machine,
+                line: e.line,
+                sn: e.sn || '',
+                content: e.content,
+                worker: e.worker,
+                savedAt: e.savedAt,
+                updatedAt: e.updatedAt,
+                consumableMatches: cDiag.matchedItems,
+                consumableNearMiss: cDiag.nearMissItems
+            };
+        });
+
+        // 무결성 진단: S/N 미등록 설비, 미등록 호기, 고아 유지보수 키
+        const masterNames = new Set();
+        const masterSns = new Set();
+        const equipmentWithoutSn = [];
+        (equipList || []).forEach(eq => {
+            const nm = String(eq.name || '').trim().toUpperCase();
+            const sn = String(eq.sn || '').trim();
+            if (nm) masterNames.add(nm);
+            if (sn) masterSns.add(sn);
+            if (!sn) {
+                equipmentWithoutSn.push({
+                    name: eq.name || '',
+                    line: eq.line || '',
+                    model: eq.model || ''
+                });
+            }
+        });
+
+        const unregCountMap = {};
+        activeEntries.forEach(e => {
+            const mUp = String(e.machine || '').trim().toUpperCase();
+            if (mUp && mUp !== '미상' && !masterNames.has(mUp)) {
+                unregCountMap[mUp] = (unregCountMap[mUp] || 0) + 1;
+            }
+        });
+        const unregisteredMachinesInHistory = Object.keys(unregCountMap).map(m => ({
+            machine: m,
+            historyCount: unregCountMap[m]
+        }));
+
+        const orphanMaintenanceKeys = [];
+        Object.keys(allMaint || {}).forEach(k => {
+            const kTrim = String(k || '').trim();
+            if (kTrim && !masterSns.has(kTrim) && !masterNames.has(kTrim.toUpperCase())) {
+                orphanMaintenanceKeys.push(kTrim);
+            }
+        });
+
+        // 현재 히스토리 필터 상태 확인 (저장은 됐는데 필터 때문에 안 보이는지 확인)
+        const histFilters = {
+            searchInput: getElVal('historySearch'),
+            equipInput: getElVal('histEquipInput'),
+            lineSelect: getElVal('histLineSelect'),
+            selectedHistoryEc: typeof selectedHistoryEc !== 'undefined' ? selectedHistoryEc : null,
+            isHistoryThreadMode: typeof isHistoryThreadMode !== 'undefined' ? isHistoryThreadMode : null,
+            historyBadgeText: getElText('historyBadge')
+        };
+
+        return {
+            workHistoryInspection: {
+                idbStatus: idbStatus,
+                idbError: idbError,
+                totalCount: rawHistory.length,
+                activeCount: activeEntries.length,
+                deletedCount: deletedEntries.length,
+                yearMonthDistribution: yearMonthDistribution,
+                activeFilters: histFilters,
+                recentHistoryEntries: recentHistoryEntries
+            },
+            consumableIntegrityInspection: {
+                equipmentWithoutSnCount: equipmentWithoutSn.length,
+                equipmentWithoutSn: equipmentWithoutSn,
+                unregisteredMachinesInHistoryCount: unregisteredMachinesInHistory.length,
+                unregisteredMachinesInHistory: unregisteredMachinesInHistory,
+                orphanMaintenanceKeysCount: orphanMaintenanceKeys.length,
+                orphanMaintenanceKeys: orphanMaintenanceKeys,
+                nearMissConsumablesInRecentHistory: nearMissConsumablesInRecentHistory
+            }
+        };
+    }
+
+    // 6. 시스템 진단 데이터 종합 수집 (비동기 IndexedDB 점검 포함)
+    window.captureManagerDiagnostics = async function() {
         const now = new Date();
 
         // 현재 열려있는 모달 목록 파악
@@ -10515,12 +11049,25 @@ window.addEventListener('load', () => {
         // 활성 부서
         const dept = typeof getCurrentDept === 'function' ? getCurrentDept() : (typeof currentDept !== 'undefined' ? currentDept : 'dept4');
 
-        // 자산 트래커 통계
-        const assetMasterCount = (typeof assetMasterData !== 'undefined' && Array.isArray(assetMasterData)) ? assetMasterData.length : 0;
-        const assetEventsCount = (typeof assetEventLogs !== 'undefined' && Array.isArray(assetEventLogs)) ? assetEventLogs.length : 0;
+        // LocalStorage 기반 현재 부서 데이터 안전 조회
+        let eqList = [];
+        let recipObj = {};
+        let maintObj = {};
+        let notesObj = {};
+        let assetMaster = [];
+        let assetEvents = [];
+        try { eqList = JSON.parse(localStorage.getItem('equipmentData') || '[]'); } catch (_) {}
+        try { recipObj = JSON.parse(localStorage.getItem('recipientData') || '{}'); } catch (_) {}
+        try { maintObj = JSON.parse(localStorage.getItem('equipMaintenance') || '{}'); } catch (_) {}
+        try { notesObj = JSON.parse(localStorage.getItem('machineNotes') || '{}'); } catch (_) {}
+        try { assetMaster = JSON.parse(localStorage.getItem('assetMasterData') || '[]'); } catch (_) {}
+        try { assetEvents = JSON.parse(localStorage.getItem('assetEventLogs') || '[]'); } catch (_) {}
+
+        // IndexedDB 및 무결성 정밀 점검 실행
+        const inspection = await inspectWorkHistoryAndConsumables(eqList, maintObj);
 
         return {
-            reportTitle: 'HITACHI SFDC OEMS Manager System Diagnostics Snapshot',
+            reportTitle: 'HITACHI SFDC OEMS Manager System Diagnostics Snapshot (Deep Audit v2)',
             timestampIso: now.toISOString(),
             timestampLocal: now.toLocaleString(),
             client: {
@@ -10540,7 +11087,8 @@ window.addEventListener('load', () => {
                 pendingPush: typeof pendingPush !== 'undefined' ? pendingPush : false,
                 selectedChip: typeof selectedChip !== 'undefined' ? selectedChip : null,
                 activeViews: activeViews,
-                openModals: openModals
+                openModals: openModals,
+                boxPerm: typeof boxPerm !== 'undefined' ? boxPerm : null
             },
             storageState: {
                 teamDbRevision: localStorage.getItem('teamDbRevision') || '0',
@@ -10550,28 +11098,34 @@ window.addEventListener('load', () => {
                 selectedDeptStored: localStorage.getItem('selectedDept') || 'dept4'
             },
             dataSummary: {
-                equipmentCount: (typeof equipmentData !== 'undefined' && Array.isArray(equipmentData)) ? equipmentData.length : 0,
-                recipientCount: (typeof recipientData !== 'undefined' && Array.isArray(recipientData)) ? recipientData.length : 0,
-                maintenanceCount: (typeof equipMaintenance !== 'undefined' && equipMaintenance) ? Object.keys(equipMaintenance).length : 0,
-                machineNotesCount: (typeof machineNotes !== 'undefined' && machineNotes) ? Object.keys(machineNotes).length : 0,
-                assetMasterCount: assetMasterCount,
-                assetEventLogsCount: assetEventsCount
+                equipmentCount: Array.isArray(eqList) ? eqList.length : 0,
+                recipientCount: recipObj ? Object.keys(recipObj).length : 0,
+                maintenanceCount: maintObj ? Object.keys(maintObj).length : 0,
+                machineNotesCount: notesObj ? Object.keys(notesObj).length : 0,
+                assetMasterCount: Array.isArray(assetMaster) ? assetMaster.length : 0,
+                assetEventLogsCount: Array.isArray(assetEvents) ? assetEvents.length : 0,
+                workHistoryActiveCount: inspection.workHistoryInspection.activeCount,
+                auditTrailCount: (window.__managerAuditTrail || []).length
             },
+            currentExtractFormState: readCurrentExtractFormSnapshot(),
+            workHistoryInspection: inspection.workHistoryInspection,
+            consumableIntegrityInspection: inspection.consumableIntegrityInspection,
+            auditTrail: (window.__managerAuditTrail || []).slice(-100),
             flightLogs: (window.__managerFlightLogs || []).slice(-200),
             dataSnapshot: {
-                equipmentData: typeof equipmentData !== 'undefined' ? equipmentData : [],
-                recipientData: typeof recipientData !== 'undefined' ? recipientData : [],
-                equipMaintenance: typeof equipMaintenance !== 'undefined' ? equipMaintenance : {},
-                machineNotes: typeof machineNotes !== 'undefined' ? machineNotes : {},
-                assetMasterData: typeof assetMasterData !== 'undefined' ? assetMasterData : [],
-                assetEventLogsRecent: (typeof assetEventLogs !== 'undefined' && Array.isArray(assetEventLogs)) ? assetEventLogs.slice(-100) : []
+                equipmentData: eqList,
+                recipientData: recipObj,
+                equipMaintenance: maintObj,
+                machineNotes: notesObj,
+                assetMasterData: assetMaster,
+                assetEventLogsRecent: Array.isArray(assetEvents) ? assetEvents.slice(-100) : []
             }
         };
     };
 
-    // 4. 진단 데이터 JSON 파일 다운로드 및 클립보드 복사 실행
+    // 7. 진단 데이터 JSON 파일 다운로드 및 클립보드 복사 실행
     window.exportManagerDiagnostics = async function() {
-        const diagnostics = window.captureManagerDiagnostics();
+        const diagnostics = await window.captureManagerDiagnostics();
         const jsonString = JSON.stringify(diagnostics, null, 2);
 
         const now = new Date();
@@ -10609,7 +11163,7 @@ window.addEventListener('load', () => {
         showManagerDebugExportModal(fileName, diagnostics, clipboardCopied);
     };
 
-    // 5. 디버그 추출 결과 안내 모달 표시
+    // 8. 디버그 추출 결과 안내 모달 표시
     function showManagerDebugExportModal(fileName, diag, copied) {
         let modal = document.getElementById('manager-debug-export-modal');
         if (!modal) {
@@ -10620,13 +11174,18 @@ window.addEventListener('load', () => {
         }
 
         const deptName = diag.appRuntime.currentDept === 'dept5' ? '평가 5부 (동탄 Site)' : '평가 4부 (평택 Site)';
+        const histInsp = diag.workHistoryInspection || {};
+        const integInsp = diag.consumableIntegrityInspection || {};
+        const warnCount = (integInsp.equipmentWithoutSnCount || 0)
+            + (integInsp.unregisteredMachinesInHistoryCount || 0)
+            + ((integInsp.nearMissConsumablesInRecentHistory || []).length);
 
         modal.innerHTML = `
             <div class="bg-surface border border-border rounded-2xl shadow-2xl max-w-lg w-full p-6 text-text-main flex flex-col gap-4">
                 <div class="flex items-center justify-between border-b border-border pb-3">
                     <div class="flex items-center gap-2">
                         <span class="material-symbols-outlined text-amber-500 text-[26px]">bug_report</span>
-                        <h3 class="text-base font-black">SFDC OEMS Manager 진단 로그 추출 완료</h3>
+                        <h3 class="text-base font-black">SFDC OEMS 심층 진단 로그 추출 완료</h3>
                     </div>
                     <button type="button" onclick="closeManagerDebugExportModal()" class="text-text-muted hover:text-red-500">
                         <span class="material-symbols-outlined text-[20px]">close</span>
@@ -10641,14 +11200,15 @@ window.addEventListener('load', () => {
                         <div>파일명: <b class="text-primary">${fileName}</b></div>
                         <div>활성 사이트: <b class="text-blue-600 dark:text-blue-400">${deptName}</b></div>
                         <div>설비 목록: <b>${diag.dataSummary.equipmentCount}대</b> / 수신자: <b>${diag.dataSummary.recipientCount}명</b></div>
-                        <div>자산 마스터: <b>${diag.dataSummary.assetMasterCount}건</b> / 자산 로그: <b>${diag.dataSummary.assetEventLogsCount}건</b></div>
+                        <div>IDB 작업이력: <b>활성 ${histInsp.activeCount || 0}건</b> (삭제 ${histInsp.deletedCount || 0}건, 상태: ${histInsp.idbStatus || 'ok'})</div>
+                        <div>비즈니스 감사 로그: <b>${diag.dataSummary.auditTrailCount || 0}건</b> / 콘솔 로그: <b>${diag.flightLogs.length}건</b></div>
+                        <div>소모품·마스터 무결성 경고: <b class="${warnCount > 0 ? 'text-amber-600' : 'text-emerald-600'}">${warnCount}건</b> (S/N미등록 ${integInsp.equipmentWithoutSnCount || 0}건, 미등록호기 ${integInsp.unregisteredMachinesInHistoryCount || 0}건)</div>
                         <div>DB 리비전: <b>Rev.${diag.storageState.teamDbRevision}</b> (최근 Sync: ${diag.storageState.lastSyncSuccessAt})</div>
-                        <div>최근 콘솔 로그: <b>${diag.flightLogs.length}건</b></div>
                         <div>클립보드 복사: <b class="${copied ? 'text-green-600' : 'text-amber-600'}">${copied ? '복사 성공 (Ctrl+V 가능)' : '미지원 또는 권한필요'}</b></div>
                     </div>
                     <div class="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl p-3 text-amber-900 dark:text-amber-200">
                         <p class="font-bold mb-1">💡 AI 어시스턴트 전달 방법:</p>
-                        <p class="opacity-90">다운로드된 JSON 파일 또는 클립보드에 복사된 내용을 대화창에 그대로 붙여넣어 주시면, 동기화 오류, 자산 추적 이상, 파싱 오류 등을 즉시 정밀 분석할 수 있습니다.</p>
+                        <p class="opacity-90">다운로드된 JSON 파일에는 메일 추출 원문, 히스토리 중복 탈락 사유, 소모품 누락 원인 및 IndexedDB 이력이 모두 포함되어 있어 즉시 정밀 진단이 가능합니다.</p>
                     </div>
                 </div>
                 <div class="flex justify-end pt-2">
@@ -10666,7 +11226,7 @@ window.addEventListener('load', () => {
         if (modal) modal.classList.add('hidden');
     };
 
-    // 6. 단축키 리스너 등록: Ctrl + Shift + D 또는 F2
+    // 9. 단축키 리스너 등록: Ctrl + Shift + D 또는 F2
     document.addEventListener('keydown', function(e) {
         const isCtrlShiftD = (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'D' || e.key === 'd');
         const isF2 = e.key === 'F2';
@@ -10678,7 +11238,7 @@ window.addEventListener('load', () => {
         }
     });
 
-    console.log('🛠️ [Manager Debug Logger] SFDC OEMS 디버그 모듈 및 Flight Recorder 활성화 완료 (단축키: Ctrl+Shift+D)');
+    console.log('🛠️ [Manager Debug Logger] 심층 감사 추적(Deep Audit) 및 Flight Recorder 활성화 완료 (단축키: Ctrl+Shift+D)');
 })();
 </script>
 </body>
